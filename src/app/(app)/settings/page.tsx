@@ -1,0 +1,80 @@
+import { sql } from "drizzle-orm";
+import { CheckCircle2, XCircle } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { db } from "@/lib/db";
+import { env } from "@/lib/env";
+import { anthropic } from "@/lib/llm/client";
+
+export const dynamic = "force-dynamic";
+
+type Check = { name: string; ok: boolean; detail: string };
+
+async function checks(): Promise<Check[]> {
+  const out: Check[] = [];
+
+  try {
+    await db().execute(sql`select 1`);
+    out.push({ name: "Postgres", ok: true, detail: "Connected" });
+  } catch (err) {
+    out.push({ name: "Postgres", ok: false, detail: (err as Error).message });
+  }
+
+  try {
+    const model = await anthropic().models.retrieve(env().EXTRACTION_MODEL);
+    out.push({
+      name: "Anthropic API",
+      ok: true,
+      detail: `Credentials work (${model.display_name})`,
+    });
+  } catch (err) {
+    out.push({
+      name: "Anthropic API",
+      ok: false,
+      detail: `${(err as Error).message}. Set ANTHROPIC_API_KEY in .env.`,
+    });
+  }
+
+  return out;
+}
+
+export default async function SettingsPage() {
+  const results = await checks();
+  const e = env();
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h1 className="text-2xl font-semibold">Settings</h1>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Health</h2>
+        {results.map((c) => (
+          <Card key={c.name} size="sm">
+            <CardContent className="flex items-start gap-3">
+              {c.ok ? (
+                <CheckCircle2 className="mt-0.5 size-5 text-green-600" />
+              ) : (
+                <XCircle className="mt-0.5 size-5 text-destructive" />
+              )}
+              <div>
+                <div className="font-medium">{c.name}</div>
+                <div className="text-sm text-muted-foreground">{c.detail}</div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </section>
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Models</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-sm">
+          <div>Writing (resume, cover letter, cold email): {e.WRITER_MODEL}</div>
+          <div>Extraction, scoring, classification: {e.EXTRACTION_MODEL}</div>
+          <div>Bulk triage: {e.FAST_MODEL}</div>
+          <div>Embeddings (Stage 5, local via Ollama): {e.EMBEDDING_MODEL}</div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
