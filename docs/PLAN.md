@@ -191,6 +191,8 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 - Fallback: "paste JD text" for sites that block fetching (LinkedIn, Indeed)
 - Dedup: canonical URL + hash of normalized `company + title + location`
 - Store raw HTML/text as an immutable `job_snapshot`
+- **Save** also creates the `applications` row (status `saved`) and its first `status_events` entry, so Stage 3 starts with data. Tables are created in the stage that uses them; `jobs.embedding` (Stage 5) and `jobs.source_id` (Stage 8) are added then.
+- Embedded-Greenhouse career pages (`?gh_jid=` on a company domain) are resolved by guessing the board from the domain
 
 **Done when:** about 90% of URLs from common ATSs and career pages extract correctly. A fixture set of 20–30 saved pages runs as regression tests to catch prompt or model changes.
 

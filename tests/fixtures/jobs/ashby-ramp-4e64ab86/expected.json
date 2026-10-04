@@ -1,0 +1,37 @@
+{
+  "company": "Ramp",
+  "title": "Software Engineer, Frontend",
+  "location": "New York, NY (HQ)",
+  "remoteType": "hybrid",
+  "salaryMin": 143200,
+  "salaryMax": 284000,
+  "salaryCurrency": "USD",
+  "postedAt": "2023-03-09",
+  "technologies": [
+    "JavaScript",
+    "TypeScript",
+    "React",
+    "Vite",
+    "Ryu"
+  ],
+  "keywords": [
+    "Frontend Engineering",
+    "JavaScript",
+    "React",
+    "TypeScript",
+    "Vite",
+    "Web Performance",
+    "UX",
+    "Design Systems",
+    "UI Development",
+    "Product Engineering",
+    "Scalable Codebases",
+    "Mentorship",
+    "Cross-functional Collaboration",
+    "Fintech",
+    "Spend Management",
+    "Fast-paced Environment",
+    "Recruiting and Interviewing",
+    "Complex Projects"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "company": "Orbital Labs",
+  "title": "Platform Engineer",
+  "location": "Denver, CO",
+  "remoteType": "hybrid",
+  "salaryMin": 150000,
+  "salaryMax": 180000,
+  "salaryCurrency": "USD",
+  "postedAt": "",
+  "technologies": [
+    "Kubernetes",
+    "GitHub Actions",
+    "Prometheus",
+    "Grafana",
+    "AWS",
+    "Terraform",
+    "Go",
+    "Python",
+    "Kafka"
+  ],
+  "keywords": [
+    "Platform Engineering",
+    "Kubernetes",
+    "CI/CD",
+    "GitHub Actions",
+    "Observability",
+    "Prometheus",
+    "Grafana",
+    "AWS",
+    "Terraform",
+    "Go",
+    "Python",
+    "Kafka",
+    "Infrastructure as Code",
+    "On-call",
+    "Capacity Planning",
+    "DevOps",
+    "Cloud Infrastructure",
+    "Monitoring",
+    "Mentoring",
+    "Reliability"
+  ]
+}

@@ -67,7 +67,15 @@ npm run db:setup
 
 This starts Postgres (with pgvector) in Docker, creates the `jobtracker` and `jobtracker_test` databases, and applies all migrations. It is safe to re-run.
 
-### 5. Run the app
+### 5. Install the browser (for JS-rendered job pages)
+
+```bash
+npm run browsers:install
+```
+
+Downloads headless Chromium (~115 MB) for Playwright. It is only used when a career page renders its content with JavaScript; ATS pages (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable) use their public APIs and never need it.
+
+### 6. Run the app
 
 ```bash
 npm run dev
@@ -75,30 +83,23 @@ npm run dev
 
 Open <http://localhost:3000/settings>. Both health cards should be green (Postgres connected, Together AI credentials working and all three model IDs found). Then open **Profile** and upload your resume to try the Stage 1 flow end to end.
 
-### 6. Check everything works
+### 7. Check everything works
 
 ```bash
-npm test            # 14 tests (needs the database from step 4)
+npm test            # unit + database integration tests (needs the database from step 4)
 npm run typecheck
 npm run lint
 ```
 
 To try resume parsing from the terminal: `npm run eval:resume path/to/resume.pdf`.
 
-## Starting Stage 2
+## Adding a job (Stage 2)
 
-1. Read **Stage 2** in [docs/PLAN.md](docs/PLAN.md) (fetch pipeline: ATS APIs, then JSON-LD, then HTML, then LLM structuring) and the conventions in [docs/STAGE-1-PLAN.md](docs/STAGE-1-PLAN.md).
-2. Stage 2 will need a headless browser for JavaScript-rendered pages. When you get there: `npm i playwright && npx playwright install --with-deps chromium`.
-3. If you use Claude Code, open it in the repo root. [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) tell it to read the bundled Next.js docs in `node_modules/next/dist/docs/` first, because this Next.js version has breaking changes.
+Open **New Application** and paste a job URL. The fetch order is: public ATS API (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable; Greenhouse boards embedded on a company domain via `?gh_jid=` are detected too) → schema.org JSON-LD → page text → headless Chromium for JS-rendered pages. LinkedIn and Indeed block automated fetching, so use the **Paste JD text** tab for them. Saving writes the job, an immutable snapshot of the source, its keywords, and an application row with its first status event.
 
-Existing building blocks Stage 2 should reuse:
+Code lives in [src/lib/jobs/](src/lib/jobs/) (`fetch/` is the pipeline, `extract.ts` the LLM step, `service.ts` the save). Regression fixtures are recorded with `npm run snapshot:job` and scored with `npm run eval:jobs`; see [docs/STAGE-2-PLAN.md](docs/STAGE-2-PLAN.md).
 
-| Need | Use |
-| --- | --- |
-| Structured extraction with the LLM | `chatStructured(zodSchema, { system, user })` in [src/lib/llm/structured.ts](src/lib/llm/structured.ts) |
-| Store raw HTML or any file | `putFile()` in [src/lib/storage/local.ts](src/lib/storage/local.ts) (content-addressed, write-once) |
-| Database client and tables | [src/lib/db/](src/lib/db/) (Drizzle; add tables in `schema.ts`, then `npm run db:generate`) |
-| Config and model names | [src/lib/env.ts](src/lib/env.ts) (`EXTRACTION_MODEL`, `WRITER_MODEL`, `FAST_MODEL`) |
+If you use Claude Code, open it in the repo root. [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) tell it to read the bundled Next.js docs in `node_modules/next/dist/docs/` first, because this Next.js version has breaking changes.
 
 ## Scripts
 
@@ -112,6 +113,9 @@ Existing building blocks Stage 2 should reuse:
 | `npm run db:migrate [url]` | Apply migrations (dev database by default) |
 | `npm test` | Vitest (unit and database integration tests) |
 | `npm run typecheck` / `npm run lint` | TypeScript and ESLint |
+| `npm run browsers:install` | Download Chromium for Playwright (JS-rendered career pages) |
+| `npm run snapshot:job -- <url...> [--draft]` | Record job pages as regression fixtures in `tests/fixtures/jobs/` (`--draft` also writes `expected.json` with the model, to review by hand) |
+| `npm run eval:jobs [-- <slug>]` | Replay fixtures through the real extraction model and print a scorecard (target 90%) |
 | `npm run eval:resume <file>` | Parse a resume PDF or DOCX with the extraction model and print the result |
 
 ## Project layout

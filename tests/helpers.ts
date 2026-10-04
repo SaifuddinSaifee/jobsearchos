@@ -10,9 +10,9 @@ export function testDb() {
   return createDb(TEST_URL);
 }
 
-/** profile_versions is immutable (trigger blocks DELETE), so TRUNCATE is the only reset. */
+/** profile_versions and job_snapshots are immutable (triggers block DELETE), so TRUNCATE is the only reset. */
 export async function resetDb(db: ReturnType<typeof testDb>) {
   await db.execute(
-    sql`TRUNCATE profile_versions, past_resumes, files RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE profile_versions, past_resumes, status_events, applications, job_keywords, job_snapshots, jobs, files RESTART IDENTITY CASCADE`,
   );
 }

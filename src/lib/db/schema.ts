@@ -1,8 +1,11 @@
 import {
+  date,
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uuid,
@@ -57,6 +60,122 @@ export const pastResumes = pgTable(
   (t) => [index("past_resumes_created_idx").on(t.createdAt)],
 );
 
+export const jobStatus = pgEnum("job_status", ["discovered", "saved", "ignored"]);
+export const jobOrigin = pgEnum("job_origin", ["manual", "discovery"]);
+export const remoteType = pgEnum("remote_type", ["remote", "hybrid", "onsite", "unknown"]);
+export const fetchMethod = pgEnum("fetch_method", [
+  "greenhouse",
+  "lever",
+  "ashby",
+  "workday",
+  "smartrecruiters",
+  "workable",
+  "jsonld",
+  "html",
+  "playwright",
+  "paste",
+]);
+export const keywordKind = pgEnum("keyword_kind", ["extracted", "expanded"]);
+export const applicationStatus = pgEnum("application_status", [
+  "saved",
+  "preparing",
+  "applied",
+  "recruiter_screen",
+  "interview",
+  "technical_interview",
+  "final_interview",
+  "offer",
+  "rejected",
+  "withdrawn",
+  "ghosted",
+]);
+
+export type JobRequirements = { required: string[]; preferred: string[] };
+
+/** `search_vector` (generated tsvector + GIN index) is added in the 0002 SQL migration. */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    canonicalUrl: text("canonical_url").unique(),
+    applicationUrl: text("application_url"),
+    ats: text("ats"),
+    atsJobId: text("ats_job_id"),
+    company: text("company").notNull(),
+    title: text("title").notNull(),
+    location: text("location").notNull().default(""),
+    remoteType: remoteType("remote_type").notNull().default("unknown"),
+    employmentType: text("employment_type"),
+    salaryMin: integer("salary_min"),
+    salaryMax: integer("salary_max"),
+    salaryCurrency: text("salary_currency"),
+    salaryPeriod: text("salary_period"),
+    postedAt: date("posted_at"),
+    responsibilities: jsonb("responsibilities").$type<string[]>().notNull(),
+    requirements: jsonb("requirements").$type<JobRequirements>().notNull(),
+    technologies: text("technologies").array().notNull(),
+    origin: jobOrigin("origin").notNull().default("manual"),
+    status: jobStatus("status").notNull().default("saved"),
+    dedupKey: text("dedup_key").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("jobs_created_idx").on(t.createdAt)],
+);
+
+/** Immutable: a DB trigger rejects UPDATE and DELETE (see drizzle/0002_jobs.sql). */
+export const jobSnapshots = pgTable("job_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => jobs.id),
+  sourceUrl: text("source_url"),
+  fetchMethod: fetchMethod("fetch_method").notNull(),
+  rawFileId: uuid("raw_file_id").references(() => files.id),
+  rawText: text("raw_text").notNull(),
+  normalized: jsonb("normalized").notNull(),
+  model: text("model").notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const jobKeywords = pgTable(
+  "job_keywords",
+  {
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    keyword: text("keyword").notNull(),
+    kind: keywordKind("kind").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.jobId, t.keyword, t.kind] })],
+);
+
+export const applications = pgTable("applications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .unique()
+    .references(() => jobs.id),
+  status: applicationStatus("status").notNull().default("saved"),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  applicationUrl: text("application_url"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const statusEvents = pgTable("status_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  applicationId: uuid("application_id")
+    .notNull()
+    .references(() => applications.id),
+  fromStatus: applicationStatus("from_status"),
+  toStatus: applicationStatus("to_status").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  note: text("note"),
+});
+
+export type JobRow = typeof jobs.$inferSelect;
 export type ProfileVersionRow = typeof profileVersions.$inferSelect;
 export type PastResumeRow = typeof pastResumes.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
