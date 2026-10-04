@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 
 export const PAGE_SIZES = [25, 50, 100] as const;
 
@@ -29,17 +30,18 @@ export function Pagination({
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-2">
           Rows per page
-          <select
+          <NativeSelect
+            size="sm"
+            className="w-auto"
             value={pageSize}
             onChange={(e) => onPageSize(Number(e.target.value))}
-            className="h-7 rounded-md border border-input bg-transparent px-1.5 text-foreground"
           >
             {PAGE_SIZES.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <span>
           Page {Math.min(pageIndex + 1, Math.max(pageCount, 1))} of {Math.max(pageCount, 1)}

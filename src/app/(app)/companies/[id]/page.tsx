@@ -11,13 +11,13 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   const [company, all] = await Promise.all([getCompanyDetail(id), listCompanies()]);
   if (!company) notFound();
   return (
-    <div className="mx-auto max-w-3xl">
+    <>
       {/* Keyed by the last change so server-side updates (research, merge) reset the form. */}
       <CompanyEditor
         key={`${company.id}:${company.researchedAt}:${company.name}:${company.about.length}:${company.principles.length}:${company.culture.length}`}
         company={company}
         others={all.filter((c) => c.id !== id).map((c) => ({ id: c.id, name: c.name }))}
       />
-    </div>
+    </>
   );
 }

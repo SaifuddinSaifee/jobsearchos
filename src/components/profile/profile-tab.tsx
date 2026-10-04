@@ -49,7 +49,7 @@ export function ProfileTab({
 
   if (draft) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">
         <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-4 py-3 text-sm">
           <span>
             Draft imported from <strong>{draft.fileName}</strong>. Review it against the original
@@ -70,7 +70,7 @@ export function ProfileTab({
               router.refresh();
             }}
           />
-          <aside className="lg:sticky lg:top-4 lg:self-start">
+          <aside className="lg:sticky lg:top-16 lg:self-start">
             <h3 className="mb-2 text-sm font-medium">Original resume text</h3>
             <ScrollArea className="h-[70vh] rounded-lg border">
               <pre className="whitespace-pre-wrap p-3 text-xs">{draft.text}</pre>
@@ -83,7 +83,7 @@ export function ProfileTab({
 
   if (!hasProfile && !blank) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 pt-6">
+      <div className="max-w-xl space-y-4">
         <p className="text-sm text-muted-foreground">
           Upload your base resume. The AI will structure it into a profile that you can review and
           edit before saving.

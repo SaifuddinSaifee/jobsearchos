@@ -85,7 +85,16 @@ export function Toolbar({
 
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-          <Filter /> Filters{filterCount ? ` (${filterCount})` : ""}
+          <Filter /> Filters
+          {filterCount > 0 && (
+            <span
+              key={filterCount}
+              className="ml-0.5 inline-flex size-4 items-center justify-center rounded-full bg-primary text-[0.65rem] text-primary-foreground tabular-nums animate-in zoom-in-50 fade-in duration-200 motion-reduce:animate-none"
+              aria-label={`${filterCount} active`}
+            >
+              {filterCount}
+            </span>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuGroup>
@@ -121,7 +130,7 @@ export function Toolbar({
       </DropdownMenu>
 
       {filtersActive && (
-        <Button variant="ghost" size="sm" onClick={onClearFilters}>
+        <Button variant="ghost" size="sm" onClick={onClearFilters} className="animate-in fade-in slide-in-from-left-1 duration-200 motion-reduce:animate-none">
           <X /> Clear
         </Button>
       )}
@@ -147,7 +156,7 @@ export function Toolbar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button variant="outline" size="sm" onClick={onExport} disabled={exporting}>
+        <Button variant="outline" size="sm" onClick={onExport} loading={exporting}>
           <Download /> {exportLabel}
         </Button>
 

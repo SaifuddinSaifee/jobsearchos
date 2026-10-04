@@ -1,19 +1,10 @@
 "use client";
 
-import {
-  Briefcase,
-  Compass,
-  Building2,
-  LayoutDashboard,
-  Moon,
-  PlusCircle,
-  Settings,
-  Sun,
-  UserRound,
-} from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
+import { NAV, isActive } from "@/components/nav";
 import { QueueTracker } from "@/components/queue/queue-tracker";
 import {
   Sidebar,
@@ -26,16 +17,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-
-const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/new", label: "New Application", icon: PlusCircle },
-  { href: "/companies", label: "Companies", icon: Building2 },
-  { href: "/discover", label: "Discover", icon: Compass },
-  { href: "/profile", label: "Profile", icon: UserRound },
-  { href: "/settings", label: "Settings", icon: Settings },
-] as const;
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -50,14 +31,11 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map(({ href, label, icon: Icon }) => (
-                <SidebarMenuItem key={href}>
-                  <SidebarMenuButton
-                    isActive={href === "/" ? pathname === "/" : pathname.startsWith(href)}
-                    render={<Link href={href} />}
-                  >
-                    <Icon />
-                    <span>{label}</span>
+              {NAV.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton isActive={isActive(item, pathname)} render={<Link href={item.href} />}>
+                    <item.icon />
+                    <span>{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -72,8 +50,9 @@ export function AppSidebar() {
             <SidebarMenuButton
               onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             >
-              <Sun className="dark:hidden" />
-              <Moon className="hidden dark:block" />
+              {/* The icon that appears turns into place, so the switch reads as a deliberate change. */}
+              <Sun className="animate-in fade-in spin-in-90 duration-300 dark:hidden motion-reduce:animate-none" />
+              <Moon className="hidden animate-in fade-in spin-in-90 duration-300 dark:block motion-reduce:animate-none" />
               <span>Toggle theme</span>
             </SidebarMenuButton>
           </SidebarMenuItem>

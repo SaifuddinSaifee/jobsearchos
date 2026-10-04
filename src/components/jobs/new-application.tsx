@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Info, ListPlus, Loader2, X } from "lucide-react";
+import { ChevronLeft, Info, ListPlus, X } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -72,7 +72,7 @@ function AddForm() {
               For sites that block fetching (LinkedIn, Indeed): copy the job description and paste it here.
             </p>
             <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Job URL (optional, used to spot duplicates)" aria-label="Job URL" />
-            <Textarea rows={12} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the full job description…" aria-label="Job description" />
+            <Textarea rows={12} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the full job description..." aria-label="Job description" />
           </div>
         ) : (
           <div key="url" className="animate-in fade-in slide-in-from-bottom-1 space-y-1.5 duration-200 motion-reduce:animate-none">
@@ -90,8 +90,8 @@ function AddForm() {
             </p>
           </div>
         )}
-        <Button type="submit" disabled={!canSubmit || busy}>
-          {busy ? <Loader2 className="animate-spin" /> : <ListPlus />}
+        <Button type="submit" disabled={!canSubmit} loading={busy}>
+          <ListPlus />
           Add to queue
         </Button>
       </form>

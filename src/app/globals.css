@@ -4,6 +4,20 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Motion tokens. One set of curves and durations for the whole app, so everything moves the same way:
+ * - ease-out (fast start, soft landing) for anything entering, exiting or reacting to input
+ * - ease-in-out for things that move from one place to another while visible (sliding tab pill)
+ * Overriding Tailwind's --ease-* means every `ease-out` / `ease-in-out` class picks these up, and the default
+ * transition timing applies to every bare `transition` / `transition-colors` / `transition-all` class.
+ */
+@theme {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --default-transition-duration: 160ms;
+  --default-transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -138,5 +152,67 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /* Tailwind v4 no longer gives buttons a pointer cursor; anything clickable should say so on hover. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  select:not(:disabled),
+  label[for],
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="file"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* Enter / exit animations (tw-animate-css) default to the browser's plain `ease`; use the app curve instead.
+     An explicit `ease-*` class still wins because utilities come after this layer. */
+  .animate-in,
+  .animate-out {
+    --tw-ease: var(--ease-out);
+  }
+
+  /* Native disclosure widgets: rotate a chevron marker and let the content ease open where the browser
+     supports animating to `auto` height (Chromium); elsewhere they open instantly as before. */
+  :root {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    opacity: 0;
+    transition:
+      block-size 240ms var(--ease-out),
+      opacity 200ms var(--ease-out),
+      content-visibility 240ms allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+  }
+  summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    transition: color 160ms var(--ease-out);
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary::before {
+    content: "";
+    flex-shrink: 0;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    opacity: 0.6;
+    transition: transform 200ms var(--ease-out);
+  }
+  details[open] > summary::before {
+    transform: rotate(45deg);
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { Copy, Download } from "lucide-react";
+import { Check, Copy, Download } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { detailToMarkdownJob, jobToMarkdown, markdownFilename } from "@/lib/jobs/markdown";
@@ -56,6 +57,14 @@ export function MarkdownButtons({
   build: () => MarkdownFile;
   disabled?: boolean;
 }) {
+  // Briefly confirm the copy on the button itself, where the user is looking.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(id);
+  }, [copied]);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -63,9 +72,17 @@ export function MarkdownButtons({
         variant="outline"
         size="sm"
         disabled={disabled}
-        onClick={() => copyMarkdown(build().markdown).catch((e: Error) => toast.error(e.message))}
+        onClick={() =>
+          copyMarkdown(build().markdown).then(
+            () => setCopied(true),
+            (e: Error) => toast.error(e.message),
+          )
+        }
       >
-        <Copy /> Copy as Markdown
+        <span key={copied ? "done" : "idle"} className="inline-flex items-center gap-1 animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none">
+          {copied ? <Check className="text-emerald-600 dark:text-emerald-400" aria-hidden /> : <Copy aria-hidden />}
+          {copied ? "Copied" : "Copy as Markdown"}
+        </span>
       </Button>
       <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => downloadMarkdown(build())}>
         <Download /> Download .md

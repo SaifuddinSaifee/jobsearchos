@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { deletePastResumeAction } from "@/app/(app)/profile/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Collapse } from "@/components/ui/collapse";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -18,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { ResumeDropzone } from "./resume-dropzone";
 
 export type PastResumeSummary = {
@@ -72,13 +74,14 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
           Resumes you have sent before. They become reference material when generating new ones.
           Adding the job description each one was written for makes retrieval much better.
         </p>
-        <Button onClick={() => setOpen((v) => !v)} variant={open ? "outline" : "default"}>
-          <Plus /> Add past resume
+        <Button onClick={() => setOpen((v) => !v)} variant={open ? "outline" : "default"} aria-expanded={open}>
+          <Plus className={cn("transition-transform duration-200", open && "rotate-45")} aria-hidden />
+          {open ? "Cancel" : "Add past resume"}
         </Button>
       </div>
 
-      {open && (
-        <Card>
+      <Collapse open={open}>
+        <Card className="mb-1">
           <CardContent>
             <form onSubmit={submit} className="space-y-4">
               <ResumeDropzone
@@ -102,13 +105,13 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
                 <Label htmlFor="jdText">Job description (optional)</Label>
                 <Textarea id="jdText" name="jdText" rows={5} />
               </div>
-              <Button type="submit" disabled={busy}>
-                {busy ? "Saving…" : "Save past resume"}
+              <Button type="submit" loading={busy}>
+                {busy ? "Saving..." : "Save past resume"}
               </Button>
             </form>
           </CardContent>
         </Card>
-      )}
+      </Collapse>
 
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No past resumes yet.</p>
@@ -138,6 +141,7 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Remove ${r.title}`}
                     disabled={deleting}
                     onClick={() =>
                       startDelete(async () => {

@@ -28,7 +28,10 @@ export function BulkBar({
       className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm"
     >
       <span className="font-medium">
-        {count} job{count === 1 ? "" : "s"} selected
+        <span key={count} className="inline-block tabular-nums animate-in fade-in slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
+          {count}
+        </span>{" "}
+        job{count === 1 ? "" : "s"} selected
       </span>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>Change status</DropdownMenuTrigger>

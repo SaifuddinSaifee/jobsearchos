@@ -75,7 +75,7 @@ export function InstructionsForm({ initial }: { initial: GenerationInstructions 
           Keeps generated text short enough for your compact resume template.
         </p>
         {limits.fields.map((f, i) => (
-          <div key={f.id} className="grid grid-cols-[1fr_7rem_7rem_auto] items-center gap-2">
+          <div key={f.id} className="grid grid-cols-[1fr_7rem_7rem_auto] items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none">
             <Input placeholder="Section (e.g. Experience)" {...register(`sectionLimits.${i}.section`)} />
             <Input
               type="number"
@@ -89,7 +89,7 @@ export function InstructionsForm({ initial }: { initial: GenerationInstructions 
               placeholder="Max chars"
               {...register(`sectionLimits.${i}.maxChars`, { setValueAs: optionalInt })}
             />
-            <Button type="button" variant="ghost" size="icon" onClick={() => limits.remove(i)}>
+            <Button type="button" variant="ghost" size="icon" aria-label="Remove section limit" onClick={() => limits.remove(i)}>
               <Trash2 />
             </Button>
           </div>
@@ -104,8 +104,8 @@ export function InstructionsForm({ initial }: { initial: GenerationInstructions 
         </Button>
       </div>
 
-      <Button type="submit" disabled={pending}>
-        {pending ? "Saving…" : "Save instructions"}
+      <Button type="submit" loading={pending}>
+        {pending ? "Saving..." : "Save instructions"}
       </Button>
     </form>
   );

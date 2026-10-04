@@ -58,7 +58,7 @@ export function History({ versions, latest }: { versions: VersionRow[]; latest: 
             )}
           </div>
           <details>
-            <summary className="cursor-pointer text-xs text-muted-foreground">View (read-only)</summary>
+            <summary className="text-xs text-muted-foreground hover:text-foreground">View (read-only)</summary>
             <pre className="mt-2 max-h-80 overflow-auto rounded bg-muted p-3 text-xs">{v.data}</pre>
           </details>
         </li>

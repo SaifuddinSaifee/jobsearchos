@@ -19,15 +19,12 @@ export default async function ProfilePage() {
   const latest = versions[0];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold">Profile</h1>
-        <span className="text-sm text-muted-foreground">
-          {latest
-            ? `Version ${latest.version} · saved ${latest.createdAt.toLocaleString()}`
-            : "Not saved yet"}
-        </span>
-      </div>
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        {latest
+          ? `Version ${latest.version} · saved ${latest.createdAt.toLocaleString()}`
+          : "Not saved yet"}
+      </p>
       <ProfileTabs
         profile={latest?.profile ?? emptyProfile()}
         preferences={latest?.preferences ?? emptyPreferences()}

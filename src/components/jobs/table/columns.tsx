@@ -28,11 +28,11 @@ function SortHeader<V>({ column, title }: { column: Column<JobsTableFeatures, Jo
       type="button"
       // Two states (asc/desc), starting in the column's natural direction; no "unsorted" step.
       onClick={() => column.toggleSorting(sorted ? sorted === "asc" : Boolean(column.columnDef.sortDescFirst))}
-      className="-ml-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+      className="group/sort -ml-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={`Sort by ${title}`}
     >
       {title}
-      <Icon className={sorted ? "size-3.5" : "size-3.5 opacity-40"} />
+      <Icon className={sorted ? "size-3.5" : "size-3.5 opacity-40 transition-opacity group-hover/sort:opacity-80"} />
     </button>
   );
 }

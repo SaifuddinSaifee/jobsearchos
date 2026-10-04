@@ -1,7 +1,6 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -12,6 +11,7 @@ import { LinesField, TagsField } from "@/components/profile/fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { draftToMarkdownJob } from "@/lib/jobs/markdown";
@@ -64,7 +64,11 @@ export function JobReviewForm({
   );
 
   const err = (name: keyof JobDraft) =>
-    formState.errors[name] && <p className="text-xs text-destructive">Required or invalid</p>;
+    formState.errors[name] && (
+      <p className="text-xs text-destructive animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none">
+        Required or invalid
+      </p>
+    );
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
@@ -82,15 +86,13 @@ export function JobReviewForm({
             <Input id="f-location" {...register("location")} />
           </Text>
           <Text label="Remote type" htmlFor="f-remoteType">
-            <select id="f-remoteType" {...register("remoteType")}
-              className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-            >
+            <NativeSelect id="f-remoteType" {...register("remoteType")}>
               {REMOTE_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </Text>
           <Text label="Employment type" htmlFor="f-employmentType">
             <Input id="f-employmentType" {...register("employmentType")} />
@@ -160,7 +162,7 @@ export function JobReviewForm({
             {initial.companyNote && <p className="text-muted-foreground">{initial.companyNote}</p>}
             {initial.companyResearch && (
               <details>
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                <summary className="text-muted-foreground hover:text-foreground">
                   Preview what the research found
                 </summary>
                 <div className="mt-2 space-y-2">
@@ -196,7 +198,7 @@ export function JobReviewForm({
         )}
 
         {duplicate && (
-          <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+          <div role="alert" className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">
             Already saved: <strong>{duplicate.title}</strong> at <strong>{duplicate.company}</strong>.{" "}
             <Link href="/jobs" className="underline">
               View in Jobs
@@ -205,8 +207,7 @@ export function JobReviewForm({
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button type="submit" disabled={pending}>
-            {pending && <Loader2 className="animate-spin" />}
+          <Button type="submit" loading={pending}>
             Save job
           </Button>
           {/* Uses the form's current values, so edits you make above are included. */}
@@ -214,7 +215,7 @@ export function JobReviewForm({
         </div>
       </form>
 
-      <aside className="lg:sticky lg:top-4 lg:self-start">
+      <aside className="lg:sticky lg:top-16 lg:self-start">
         <h3 className="mb-2 text-sm font-medium">Source text</h3>
         <ScrollArea className="h-[70vh] rounded-lg border">
           <pre className="whitespace-pre-wrap p-3 text-xs">{initial.rawText}</pre>

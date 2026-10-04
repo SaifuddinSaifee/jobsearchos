@@ -31,12 +31,12 @@ export function StatusMenu({
         disabled={disabled}
         aria-label={`Status: ${info.label}. Change status`}
         className={cn(
-          "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+          "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap outline-none transition-[opacity,box-shadow] hover:opacity-80 active:scale-95 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
           info.tone,
         )}
       >
         {info.label}
-        <ChevronDown className="size-3 opacity-60" />
+        <ChevronDown className="size-3 opacity-60 transition-transform duration-200 in-aria-expanded:rotate-180" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-52">
         <DropdownMenuRadioGroup value={status} onValueChange={(v) => onChange(v as ApplicationStatus)}>

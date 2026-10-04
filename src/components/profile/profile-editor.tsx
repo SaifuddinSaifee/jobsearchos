@@ -84,10 +84,10 @@ function ItemCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card size="sm">
+    <Card size="sm" className="animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none">
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="text-sm">{title}</CardTitle>
-        <Button type="button" variant="ghost" size="icon" onClick={onRemove}>
+        <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${title}`} onClick={onRemove}>
           <Trash2 />
         </Button>
       </CardHeader>
@@ -319,8 +319,8 @@ export function ProfileEditor({ initial, baseResumeFileId, changeNote, onSaved }
       </Section>
 
       <div className="sticky bottom-0 -mx-6 border-t bg-background/90 px-6 py-3 backdrop-blur">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : "Save profile"}
+        <Button type="submit" loading={pending}>
+          {pending ? "Saving..." : "Save profile"}
         </Button>
       </div>
     </form>

@@ -27,6 +27,7 @@ import {
   setAppliedAtAction,
 } from "@/app/(app)/jobs/actions";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { dateToStored, localToday } from "@/lib/jobs/format";
@@ -407,6 +408,9 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
     setPageIndex(0);
   }
 
+  const [lastSelected, setLastSelected] = useState(selectedIds.length);
+  if (selectedIds.length > 0 && selectedIds.length !== lastSelected) setLastSelected(selectedIds.length);
+
   if (optimisticRows.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
@@ -472,14 +476,17 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
           onClearFilters={clearFilters}
         />
 
-        {selectedIds.length > 0 && (
-          <BulkBar
-            count={selectedIds.length}
-            onChangeStatus={(to) => changeStatus(selectedIds, to)}
-            onExport={() => void exportCsv(true)}
-            onClear={() => setRowSelection({})}
-          />
-        )}
+        {/* Slides open when rows are selected and folds away when cleared (keeping its last count meanwhile). */}
+        <Collapse open={selectedIds.length > 0} className="-my-1.5">
+          <div className="py-1.5">
+            <BulkBar
+              count={lastSelected}
+              onChangeStatus={(to) => changeStatus(selectedIds, to)}
+              onExport={() => void exportCsv(true)}
+              onClear={() => setRowSelection({})}
+            />
+          </div>
+        </Collapse>
 
         <div className="overflow-hidden rounded-lg border">
           <Table>

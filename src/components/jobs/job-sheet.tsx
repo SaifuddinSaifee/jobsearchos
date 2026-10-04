@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import { sourceLabel } from "@/lib/jobs/links";
 import { MAX_NOTES, type JobDetail, type JobRow } from "@/lib/jobs/types";
 import { statusInfo, type ApplicationStatus } from "@/lib/jobs/status";
 import { detailToMarkdownJob } from "@/lib/jobs/markdown";
+import { cn } from "@/lib/utils";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
 import { JobLinks } from "./table/job-links";
 import { StatusMenu } from "./table/status-menu";
@@ -292,7 +293,7 @@ function Panel({
           {detail.snapshot && (
             <Section title="Source text">
               <details className="text-sm">
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                <summary className="text-muted-foreground hover:text-foreground">
                   Show the text the AI read ({detail.snapshot.rawText.length.toLocaleString("en-US")} characters, fetched{" "}
                   {formatDate(detail.snapshot.fetchedAt)})
                 </summary>
@@ -325,7 +326,7 @@ function CompanySection({ detail }: { detail: JobDetail }) {
     <Section title="Company">
       {c && (
         <p className="text-sm">
-          <Link href={`/companies/${c.id}`} className="font-medium underline underline-offset-2">
+          <Link href={`/companies/${c.id}`} className="font-medium underline decoration-foreground/30 underline-offset-2 transition-colors hover:decoration-foreground">
             {c.name}
           </Link>
           <span className="text-muted-foreground"> · company profile (included when you copy as Markdown)</span>
@@ -345,13 +346,13 @@ function CompanySection({ detail }: { detail: JobDetail }) {
       )}
       {shown.map(([h, t]) => (
         <details key={h} className="text-sm">
-          <summary className="cursor-pointer font-medium">{h}</summary>
+          <summary className="font-medium hover:text-muted-foreground">{h}</summary>
           <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{t}</p>
         </details>
       ))}
       {posting && posting !== c?.about.trim() && (
         <details className="text-sm">
-          <summary className="cursor-pointer font-medium">As described in this posting</summary>
+          <summary className="font-medium hover:text-muted-foreground">As described in this posting</summary>
           <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{posting}</p>
         </details>
       )}
@@ -406,9 +407,16 @@ function NotesEditor({
         onChange={(e) => setText(e.target.value)}
       />
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{dirty ? "Unsaved changes" : ready && initial ? "Saved" : ""}</span>
-        <Button size="sm" onClick={() => void save()} disabled={!dirty || saving}>
-          {saving && <Loader2 className="animate-spin" />}
+        <span
+          key={dirty ? "dirty" : "clean"}
+          className={cn(
+            "text-xs animate-in fade-in duration-200 motion-reduce:animate-none",
+            dirty ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+          )}
+        >
+          {dirty ? "Unsaved changes" : ready && initial ? "Saved" : ""}
+        </span>
+        <Button size="sm" onClick={() => void save()} disabled={!dirty} loading={saving}>
           Save notes
         </Button>
       </div>

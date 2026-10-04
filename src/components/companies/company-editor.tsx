@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, Globe, Loader2, Merge, Save } from "lucide-react";
+import { Globe, Merge, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { companyFilename, companyToMarkdown } from "@/lib/companies/markdown";
 import type { CompanyResearchLog } from "@/lib/companies/types";
@@ -52,7 +53,7 @@ function KindBadge({ kind }: { kind: "owned" | "third-party" }) {
 export function ResearchLog({ log }: { log: CompanyResearchLog }) {
   return (
     <details className="rounded-lg border p-3 text-sm">
-      <summary className="cursor-pointer font-medium">How this was researched</summary>
+      <summary className="font-medium hover:text-foreground">How this was researched</summary>
       <div className="mt-2 space-y-2">
         <p className="text-muted-foreground">
           {log.via === "web-search"
@@ -111,11 +112,10 @@ function MergeDialog({ company, others }: { company: CompanyDetail; others: Othe
             profile. This cannot be undone.
           </DialogDescription>
         </DialogHeader>
-        <select
+        <NativeSelect
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           aria-label="Company to merge into"
-          className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
         >
           <option value="">Choose a company…</option>
           {others.map((o) => (
@@ -123,9 +123,8 @@ function MergeDialog({ company, others }: { company: CompanyDetail; others: Othe
               {o.name}
             </option>
           ))}
-        </select>
-        <Button onClick={() => void merge()} disabled={!target || busy} variant="destructive">
-          {busy && <Loader2 className="animate-spin" />}
+        </NativeSelect>
+        <Button onClick={() => void merge()} disabled={!target} loading={busy} variant="destructive">
           Merge{targetName ? ` into ${targetName}` : ""}
         </Button>
       </DialogContent>
@@ -187,11 +186,7 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 space-y-1">
-          <Link href="/companies" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-            <ChevronLeft className="size-4" aria-hidden />
-            Companies
-          </Link>
+        <div className="min-w-0 flex-1">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -200,17 +195,18 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => void save()} disabled={!dirty || saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />}
+          <Button onClick={() => void save()} disabled={!dirty} loading={saving}>
+            <Save />
             Save changes
           </Button>
           <Button
             variant="outline"
             onClick={() => void research()}
-            disabled={researching || dirty}
+            disabled={dirty}
+            loading={researching}
             title={dirty ? "Save your changes first" : "Reads the company's own site first; searches the web only if that is not enough. Skips sections you edited."}
           >
-            {researching ? <Loader2 className="animate-spin" /> : <Globe />}
+            <Globe />
             {company.researchedAt ? "Refresh from web" : "Research on the web"}
           </Button>
           <MergeDialog company={company} others={others} />
@@ -249,11 +245,10 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="parent">Part of</Label>
-          <select
+          <NativeSelect
             id="parent"
             value={parentId}
             onChange={(e) => setParentId(e.target.value)}
-            className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
           >
             <option value="">Independent company</option>
             {others.map((o) => (
@@ -261,7 +256,7 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
                 {o.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <p className="text-xs text-muted-foreground">
             For brands and subsidiaries (YouTube is part of Google). The parent&apos;s profile is added to your exports.
           </p>

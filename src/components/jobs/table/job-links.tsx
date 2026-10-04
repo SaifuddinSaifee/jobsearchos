@@ -13,7 +13,7 @@ function IconLink({ href, label, children }: { href: string; label: string; chil
             target="_blank"
             rel="noopener noreferrer"
             aria-label={label}
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors active:scale-95 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           />
         }
       >

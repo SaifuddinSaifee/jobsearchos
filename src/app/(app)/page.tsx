@@ -23,9 +23,8 @@ export default async function DashboardPage() {
 
   if (data.total === 0) {
     return (
-      <div className="mx-auto max-w-2xl space-y-4 pt-10">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-muted-foreground">
+      <div className="space-y-3 rounded-xl border border-dashed p-10 text-center">
+        <p className="text-sm text-muted-foreground">
           Nothing here yet. Add a job and this page will show what needs your attention.
         </p>
         <Button nativeButton={false} render={<Link href="/new" />}>Add your first application</Button>
@@ -34,21 +33,24 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Where your search stands, and what needs you next.</p>
-      </div>
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">Where your search stands, and what needs you next.</p>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {FUNNEL.map((f) => (
           <Link
             key={f.group}
             href={f.tab === "active" ? "/jobs" : `/jobs?tab=${f.tab}`}
-            className="rounded-xl border p-4 transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
+            className="group/funnel rounded-xl border p-4 outline-none transition-[background-color,border-color,box-shadow,translate] duration-200 hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-muted/40 hover:shadow-sm active:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring"
           >
             <div className={cn("text-3xl font-semibold tabular-nums", f.tone)}>{data.funnel[f.group]}</div>
-            <div className="text-sm text-muted-foreground">{f.label}</div>
+            <div className="flex items-center justify-between gap-1 text-sm text-muted-foreground">
+              {f.label}
+              <ArrowRight
+                aria-hidden
+                className="size-3.5 -translate-x-1 opacity-0 transition-[opacity,translate] duration-200 group-hover/funnel:translate-x-0 group-hover/funnel:opacity-100"
+              />
+            </div>
           </Link>
         ))}
       </div>

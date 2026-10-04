@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -57,8 +57,7 @@ function NewCompany() {
           }}
         >
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Google" aria-label="Company name" />
-          <Button type="submit" disabled={!name.trim() || busy}>
-            {busy && <Loader2 className="animate-spin" />}
+          <Button type="submit" disabled={!name.trim()} loading={busy}>
             Create
           </Button>
         </form>

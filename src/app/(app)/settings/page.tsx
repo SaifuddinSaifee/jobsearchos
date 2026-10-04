@@ -59,11 +59,11 @@ export default async function SettingsPage() {
   const e = env();
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">Whether the services the app depends on are reachable, and which models it uses.</p>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Health</h2>
+        <h2 className="text-sm font-medium">Health</h2>
         {results.map((c) => (
           <Card key={c.name} size="sm">
             <CardContent className="flex items-start gap-3">
