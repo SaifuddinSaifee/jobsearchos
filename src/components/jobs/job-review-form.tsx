@@ -18,16 +18,26 @@ import { draftToMarkdownJob } from "@/lib/jobs/markdown";
 import { JobDraftSchema, REMOTE_TYPES, type JobDraft } from "@/lib/jobs/schema";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
 
-function Text({ label, children }: { label: string; children: React.ReactNode }) {
+function Text({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
     </div>
   );
 }
 
-export function JobReviewForm({ initial }: { initial: JobDraft }) {
+export function JobReviewForm({
+  initial,
+  queueId,
+  onSaved,
+}: {
+  initial: JobDraft;
+  /** Set when the draft came from the queue, so saving also resolves that queue item. */
+  queueId?: string;
+  /** Called after a successful save instead of going to the Jobs page. */
+  onSaved?: (jobId: string) => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [duplicate, setDuplicate] = useState<{ id: string; company: string; title: string } | null>(null);
@@ -37,10 +47,13 @@ export function JobReviewForm({ initial }: { initial: JobDraft }) {
   const submit = handleSubmit(
     (values) =>
       startTransition(async () => {
-        const res = await saveJobAction(values);
+        const res = await saveJobAction(values, queueId);
         if (res.ok) {
-          toast.success("Job saved");
-          router.push("/jobs");
+          if (onSaved) onSaved(res.jobId);
+          else {
+            toast.success("Job saved");
+            router.push("/jobs");
+          }
         } else if (res.duplicate) {
           setDuplicate(res.duplicate);
         } else {
@@ -57,20 +70,19 @@ export function JobReviewForm({ initial }: { initial: JobDraft }) {
     <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Text label="Company">
-            <Input {...register("company")} />
+          <Text label="Company" htmlFor="f-company">
+            <Input id="f-company" {...register("company")} />
             {err("company")}
           </Text>
-          <Text label="Title">
-            <Input {...register("title")} />
+          <Text label="Title" htmlFor="f-title">
+            <Input id="f-title" {...register("title")} />
             {err("title")}
           </Text>
-          <Text label="Location">
-            <Input {...register("location")} />
+          <Text label="Location" htmlFor="f-location">
+            <Input id="f-location" {...register("location")} />
           </Text>
-          <Text label="Remote type">
-            <select
-              {...register("remoteType")}
+          <Text label="Remote type" htmlFor="f-remoteType">
+            <select id="f-remoteType" {...register("remoteType")}
               className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
             >
               {REMOTE_TYPES.map((t) => (
@@ -80,27 +92,27 @@ export function JobReviewForm({ initial }: { initial: JobDraft }) {
               ))}
             </select>
           </Text>
-          <Text label="Employment type">
-            <Input {...register("employmentType")} />
+          <Text label="Employment type" htmlFor="f-employmentType">
+            <Input id="f-employmentType" {...register("employmentType")} />
           </Text>
-          <Text label="Posted (YYYY-MM-DD)">
-            <Input {...register("postedAt")} />
+          <Text label="Posted (YYYY-MM-DD)" htmlFor="f-postedAt">
+            <Input id="f-postedAt" {...register("postedAt")} />
           </Text>
-          <Text label="Salary min">
-            <Input type="number" {...register("salaryMin", { setValueAs: (v) => (v === "" || v == null ? null : Number(v)) })} />
+          <Text label="Salary min" htmlFor="f-salaryMin">
+            <Input id="f-salaryMin" {...register("salaryMin", { setValueAs: (v) => (v === "" || v == null ? null : Number(v)) })} />
           </Text>
-          <Text label="Salary max">
-            <Input type="number" {...register("salaryMax", { setValueAs: (v) => (v === "" || v == null ? null : Number(v)) })} />
+          <Text label="Salary max" htmlFor="f-salaryMax">
+            <Input id="f-salaryMax" {...register("salaryMax", { setValueAs: (v) => (v === "" || v == null ? null : Number(v)) })} />
           </Text>
-          <Text label="Currency">
-            <Input {...register("salaryCurrency")} placeholder="USD" />
+          <Text label="Currency" htmlFor="f-salaryCurrency">
+            <Input id="f-salaryCurrency" {...register("salaryCurrency")} placeholder="USD" />
           </Text>
-          <Text label="Period">
-            <Input {...register("salaryPeriod")} placeholder="year / month / hour" />
+          <Text label="Period" htmlFor="f-salaryPeriod">
+            <Input id="f-salaryPeriod" {...register("salaryPeriod")} placeholder="year / month / hour" />
           </Text>
         </div>
-        <Text label="Application URL">
-          <Input {...register("applicationUrl")} />
+        <Text label="Application URL" htmlFor="f-applicationUrl">
+            <Input id="f-applicationUrl" {...register("applicationUrl")} />
         </Text>
 
         <Controller

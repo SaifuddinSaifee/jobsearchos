@@ -95,6 +95,8 @@ To try resume parsing from the terminal: `npm run eval:resume path/to/resume.pdf
 
 ## Adding a job (Stage 2)
 
+Paste one or many job URLs on **New Application**. They go into a background queue (two at a time) and are saved automatically when the result looks complete; anything doubtful waits for your review. You can leave the page or close the tab: the work continues as long as the app server is running, and a tracker at the bottom of the sidebar shows progress. See [docs/STAGE-2B-QUEUE.md](docs/STAGE-2B-QUEUE.md).
+
 Open **New Application** and paste a job URL. The fetch order is: public ATS API (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable; Greenhouse boards embedded on a company domain via `?gh_jid=` are detected too) → schema.org JSON-LD → page text → headless Chromium for JS-rendered pages. LinkedIn and Indeed block automated fetching, so use the **Paste JD text** tab for them. Saving writes the job, an immutable snapshot of the source, its keywords, and an application row with its first status event.
 
 Code lives in [src/lib/jobs/](src/lib/jobs/) (`fetch/` is the pipeline, `extract.ts` the LLM step, `service.ts` the save). Regression fixtures are recorded with `npm run snapshot:job` and scored with `npm run eval:jobs`; see [docs/STAGE-2-PLAN.md](docs/STAGE-2-PLAN.md).

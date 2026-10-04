@@ -1,171 +1,182 @@
 "use client";
 
-import { Check, Circle, Loader2, MinusCircle } from "lucide-react";
-import Link from "next/link";
-import { useQueryState } from "nuqs";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, Info, ListPlus, Loader2, X } from "lucide-react";
+import { parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
+import { enqueueTextAction, enqueueUrlsAction } from "@/app/(app)/new/actions";
+import { QueueList } from "@/components/queue/queue-list";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { FetchStep } from "@/lib/jobs/fetch/types";
 import type { JobDraft } from "@/lib/jobs/schema";
-import { readEvents } from "@/lib/sse";
+import type { QueueItem } from "@/lib/queue/types";
 import { JobReviewForm } from "./job-review-form";
 
-type Duplicate = { id: string; company: string; title: string };
-type Steps = Partial<Record<FetchStep["step"], FetchStep>>;
+type Skipped = { input: string; reason: string }[];
 
-const STEP_LABELS: Record<FetchStep["step"], string> = {
-  detect: "Detect source",
-  fetch: "Fetch posting",
-  render: "Render page",
-  structure: "Structure with AI",
-  company: "Research the company",
-};
-
-function StepList({ steps }: { steps: Steps }) {
-  return (
-    <ul className="space-y-1.5 rounded-lg border p-4 text-sm">
-      {(Object.keys(STEP_LABELS) as FetchStep["step"][]).map((key) => {
-        const s = steps[key];
-        const Icon =
-          s?.status === "running" ? Loader2 : s?.status === "done" ? Check : s?.status === "skipped" ? MinusCircle : Circle;
-        return (
-          <li key={key} className="flex items-center gap-2">
-            <Icon className={`size-4 ${s?.status === "running" ? "animate-spin" : "text-muted-foreground"}`} />
-            <span className={s ? "" : "text-muted-foreground"}>{STEP_LABELS[key]}</span>
-            {s?.detail && <span className="text-xs text-muted-foreground">· {s.detail}</span>}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-export function NewApplication() {
+function AddForm() {
+  const queryClient = useQueryClient();
   const [mode, setMode] = useQueryState("mode", { defaultValue: "url" });
-  const [url, setUrl] = useState("");
+  const [urls, setUrls] = useState("");
   const [text, setText] = useState("");
+  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [steps, setSteps] = useState<Steps>({});
-  const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
-  const [draft, setDraft] = useState<{ key: number; value: JobDraft } | null>(null);
+  const [skipped, setSkipped] = useState<Skipped>([]);
 
-  async function extract() {
+  const canSubmit = mode === "paste" ? text.trim().length > 0 : urls.trim().length > 0;
+
+  async function submit() {
     setBusy(true);
-    setSteps({});
-    setDuplicate(null);
-    try {
-      const res = await fetch("/api/jobs/extract", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(mode === "paste" ? { text, url: url || undefined } : { url }),
+    const res = mode === "paste" ? await enqueueTextAction(text, url || undefined) : await enqueueUrlsAction(urls);
+    setBusy(false);
+    if (!res.ok) return void toast.error(res.error);
+    setSkipped(res.skipped);
+    if (res.queued.length) {
+      toast.success(`Added ${res.queued.length} to the queue`, {
+        description: res.skipped.length ? `${res.skipped.length} skipped, see below` : "You can leave this page; they keep running.",
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Could not extract the job");
-      }
-      for await (const { event, data } of readEvents(res)) {
-        if (event === "step") {
-          const s = data as FetchStep;
-          setSteps((prev) => ({ ...prev, [s.step]: s }));
-        } else if (event === "duplicate") {
-          setDuplicate(data as Duplicate);
-        } else if (event === "result") {
-          setDraft({ key: Date.now(), value: data as JobDraft });
-        } else if (event === "error") {
-          const err = data as { code: string; message: string };
-          toast.error(err.message);
-          // Sites that block fetching: hand over to the paste-text path with the URL kept.
-          if (["blocked", "empty"].includes(err.code) && mode === "url") void setMode("paste");
-        }
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not extract the job");
-    } finally {
-      setBusy(false);
+      if (mode === "paste") {
+        setText("");
+        setUrl("");
+      } else setUrls("");
+    } else if (res.skipped.length) {
+      toast.message("Nothing new to add", { description: "See the reasons below." });
     }
+    void queryClient.invalidateQueries({ queryKey: ["queue"] });
   }
-
-  if (draft) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-4 py-3 text-sm">
-          <span>
-            Extracted via <strong>{draft.value.fetchMethod}</strong>. Check the fields against the
-            original text, fix anything wrong, then save.
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
-            Discard
-          </Button>
-        </div>
-        <JobReviewForm key={draft.key} initial={draft.value} />
-      </div>
-    );
-  }
-
-  const canSubmit = mode === "paste" ? text.trim().length > 0 : url.trim().length > 0;
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="space-y-3">
       <Tabs value={mode} onValueChange={(v) => void setMode(v as string)}>
         <TabsList>
-          <TabsTrigger value="url">Job URL</TabsTrigger>
+          <TabsTrigger value="url">Job URLs</TabsTrigger>
           <TabsTrigger value="paste">Paste JD text</TabsTrigger>
         </TabsList>
       </Tabs>
 
       <form
-        className="space-y-3"
+        className="max-w-2xl space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (canSubmit && !busy) void extract();
+          if (canSubmit && !busy) void submit();
         }}
       >
         {mode === "paste" ? (
-          <>
+          <div key="paste" className="animate-in fade-in slide-in-from-bottom-1 space-y-3 duration-200 motion-reduce:animate-none">
             <p className="text-sm text-muted-foreground">
               For sites that block fetching (LinkedIn, Indeed): copy the job description and paste it here.
             </p>
-            <Input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="Job URL (optional, used for de-duplication)"
-            />
-            <Textarea
-              rows={14}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Paste the full job description…"
-            />
-          </>
+            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Job URL (optional, used to spot duplicates)" aria-label="Job URL" />
+            <Textarea rows={12} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the full job description…" aria-label="Job description" />
+          </div>
         ) : (
-          <Input
-            type="url"
-            autoFocus
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://boards.greenhouse.io/company/jobs/123456"
-          />
+          <div key="url" className="animate-in fade-in slide-in-from-bottom-1 space-y-1.5 duration-200 motion-reduce:animate-none">
+            <Textarea
+              rows={Math.min(Math.max(urls.split("\n").length, 3), 10)}
+              value={urls}
+              onChange={(e) => setUrls(e.target.value)}
+              placeholder={"https://boards.greenhouse.io/company/jobs/123456\nhttps://jobs.lever.co/company/abc-123\n…one job URL per line"}
+              aria-label="Job URLs"
+              className="resize-none transition-[height] duration-200 motion-reduce:transition-none"
+            />
+            <p className="text-xs text-muted-foreground">
+              Add as many as you like. They are processed in the background, two at a time, and saved automatically when
+              the result looks complete. Anything doubtful waits for your review.
+            </p>
+          </div>
         )}
         <Button type="submit" disabled={!canSubmit || busy}>
-          {busy && <Loader2 className="animate-spin" />}
-          {busy ? "Extracting…" : "Extract job"}
+          {busy ? <Loader2 className="animate-spin" /> : <ListPlus />}
+          Add to queue
         </Button>
       </form>
 
-      {(busy || Object.keys(steps).length > 0) && <StepList steps={steps} />}
-
-      {duplicate && (
-        <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
-          Already saved: <strong>{duplicate.title}</strong> at <strong>{duplicate.company}</strong>.{" "}
-          <Link href="/jobs" className="underline">
-            View in Jobs
-          </Link>
+      <Collapse open={skipped.length > 0}>
+        <div role="status" className="max-w-2xl rounded-lg border bg-muted/40 p-3 text-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 font-medium">
+              <Info className="size-4 text-muted-foreground" aria-hidden /> Not added
+            </div>
+            <Button variant="ghost" size="icon-xs" aria-label="Dismiss" onClick={() => setSkipped([])}>
+              <X />
+            </Button>
+          </div>
+          <ul className="mt-1.5 space-y-1">
+            {skipped.map((s) => (
+              <li key={s.input} className="flex flex-wrap gap-x-2">
+                <span className="max-w-full truncate font-mono text-xs">{s.input}</span>
+                <span className="text-muted-foreground">{s.reason}</span>
+              </li>
+            ))}
+          </ul>
         </div>
+      </Collapse>
+    </div>
+  );
+}
+
+function ReviewPanel({ id, onBack }: { id: string; onBack: () => void }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["queue-draft", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/queue/${id}`);
+      if (!res.ok) throw new Error(res.status === 404 ? "This item is gone." : "Could not load it.");
+      return (await res.json()) as { item: QueueItem; draft: JobDraft | null };
+    },
+    retry: false,
+    staleTime: Infinity,
+  });
+  const queryClient = useQueryClient();
+
+  return (
+    <div className="animate-in fade-in slide-in-from-right-3 space-y-4 duration-300 motion-reduce:animate-none">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        <ChevronLeft /> Back to the queue
+      </Button>
+      {isLoading ? (
+        <div className="space-y-3">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : error ? (
+        <p className="text-sm text-destructive">{error.message}</p>
+      ) : !data?.draft || data.item.status !== "needs_review" ? (
+        <p className="text-sm text-muted-foreground">This item no longer needs review.</p>
+      ) : (
+        <>
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+            <strong className="font-medium">{data.item.label}</strong>
+            <span className="text-muted-foreground"> was not saved automatically. {data.item.error}</span>
+          </div>
+          <JobReviewForm
+            key={id}
+            initial={data.draft}
+            queueId={id}
+            onSaved={() => {
+              void queryClient.invalidateQueries({ queryKey: ["queue"] });
+              toast.success("Job saved");
+              onBack();
+            }}
+          />
+        </>
       )}
+    </div>
+  );
+}
+
+export function NewApplication() {
+  const [review, setReview] = useQueryState("review", parseAsString);
+
+  if (review) return <ReviewPanel key={review} id={review} onBack={() => void setReview(null)} />;
+  return (
+    <div className="animate-in fade-in slide-in-from-left-3 space-y-8 duration-300 motion-reduce:animate-none">
+      <AddForm />
+      <QueueList />
     </div>
   );
 }

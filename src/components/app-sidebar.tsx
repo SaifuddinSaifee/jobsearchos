@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
+import { QueueTracker } from "@/components/queue/queue-tracker";
 import {
   Sidebar,
   SidebarContent,
@@ -65,6 +66,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        <QueueTracker />
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton

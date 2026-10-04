@@ -11,6 +11,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { JobDraft } from "@/lib/jobs/schema";
 import type {
   GenerationInstructions,
   Preferences,
@@ -225,6 +226,45 @@ export const statusEvents = pgTable("status_events", {
   note: text("note"),
 });
 
+export const queueStatus = pgEnum("queue_status", ["queued", "running", "saved", "needs_review", "duplicate", "failed"]);
+
+export type QueueStepName = "detect" | "fetch" | "render" | "structure" | "company";
+export type QueueSteps = Partial<Record<QueueStepName, { status: "running" | "done" | "skipped"; detail?: string }>>;
+
+/**
+ * Job URLs / pasted postings waiting to be turned into saved jobs. A worker inside the app server processes
+ * them in the background, so work survives page changes and closed tabs. `draft` is kept only while the
+ * result needs a human (status needs_review); a saved item points at its job instead.
+ */
+export const applicationQueue = pgTable(
+  "application_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").$type<"url" | "text">().notNull(),
+    /** The job URL, or the pasted posting text. */
+    input: text("input").notNull(),
+    /** For pasted text: an optional URL used for de-duplication. */
+    sourceUrl: text("source_url"),
+    /** What to show in lists: the URL, then "Company - Title" once known. */
+    label: text("label").notNull(),
+    status: queueStatus("status").notNull().default("queued"),
+    steps: jsonb("steps").$type<QueueSteps>().notNull().default({}),
+    draft: jsonb("draft").$type<JobDraft>(),
+    error: text("error"),
+    errorCode: text("error_code"),
+    jobId: uuid("job_id").references(() => jobs.id),
+    duplicateJobId: uuid("duplicate_job_id").references(() => jobs.id),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while an item is running. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("application_queue_status_idx").on(t.status, t.createdAt)],
+);
+
+export type QueueRow = typeof applicationQueue.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type CompanyRow = typeof companies.$inferSelect;
 export type ProfileVersionRow = typeof profileVersions.$inferSelect;

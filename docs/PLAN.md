@@ -190,6 +190,7 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 - Review screen with editable fields → **Save**
 - Fallback: "paste JD text" for sites that block fetching (LinkedIn, Indeed)
 - Dedup: canonical URL + hash of normalized `company + title + location`
+- **Queue (added later, see [STAGE-2B-QUEUE.md](STAGE-2B-QUEUE.md)):** many URLs at once, processed in the background (2 at a time) so work survives page changes and closed tabs; clean results are saved automatically, doubtful ones wait for review; a sidebar tracker shows progress
 - Store raw HTML/text as an immutable `job_snapshot`
 - **Save** also creates the `applications` row (status `saved`) and its first `status_events` entry, so Stage 3 starts with data. Tables are created in the stage that uses them; `jobs.embedding` (Stage 5) and `jobs.source_id` (Stage 8) are added then.
 - Embedded-Greenhouse career pages (`?gh_jid=` on a company domain) are resolved by guessing the board from the domain

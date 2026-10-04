@@ -7,7 +7,7 @@ export default function Page() {
       <div>
         <h1 className="text-2xl font-semibold">New Application</h1>
         <p className="text-sm text-muted-foreground">
-          Paste a job posting URL. The app fetches it, structures it, and lets you review before saving.
+          Add one or many job URLs. They are fetched, structured and saved in the background, so you can leave this page.
         </p>
       </div>
       <Suspense>

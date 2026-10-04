@@ -16,6 +16,8 @@ const EnvSchema = z.object({
   // Embeddings only (Stage 5): local Ollama model, since Together has no serverless embeddings.
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
   EMBEDDING_MODEL: z.string().default("qwen3-embedding:4b"),
+  /** How many queued job extractions run at the same time. */
+  QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(5).default(2),
   STORAGE_DIR: z.string().default("./storage"),
 });
 
