@@ -1,7 +1,9 @@
 import { ExternalLink, Link2 } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { safeHref } from "@/lib/jobs/links";
 import type { JobRow } from "@/lib/jobs/types";
+import { cn } from "@/lib/utils";
 
 function IconLink({ href, label, children }: { href: string; label: string; children: React.ReactNode }) {
   return (
@@ -42,6 +44,32 @@ export function JobLinks({ job }: { job: Pick<JobRow, "postingUrl" | "applyUrl">
           <ExternalLink className="size-4" />
         </IconLink>
       )}
+    </div>
+  );
+}
+
+/** Full-size buttons for the job panel: the posting is the primary action, the application page secondary. */
+export function JobLinkButtons({ job }: { job: Pick<JobRow, "postingUrl" | "applyUrl"> }) {
+  const posting = safeHref(job.postingUrl);
+  const apply = safeHref(job.applyUrl);
+  if (!posting && !apply) return null;
+  const links: { href: string; label: string; Icon: typeof Link2 }[] = [];
+  if (posting) links.push({ href: posting, label: "Open job posting", Icon: Link2 });
+  if (apply && apply !== posting) links.push({ href: apply, label: "Open application page", Icon: ExternalLink });
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {links.map(({ href, label, Icon }, i) => (
+        <a
+          key={href}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(buttonVariants({ variant: i === 0 ? "default" : "outline", size: "lg" }), "px-3.5")}
+        >
+          <Icon aria-hidden />
+          {label}
+        </a>
+      ))}
     </div>
   );
 }

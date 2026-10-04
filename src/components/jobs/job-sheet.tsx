@@ -18,8 +18,9 @@ import { MAX_NOTES, type JobDetail, type JobRow } from "@/lib/jobs/types";
 import { statusInfo, type ApplicationStatus } from "@/lib/jobs/status";
 import { detailToMarkdownJob } from "@/lib/jobs/markdown";
 import { cn } from "@/lib/utils";
+import { AskClaudeButton } from "./ask-claude";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
-import { JobLinks } from "./table/job-links";
+import { JobLinkButtons } from "./table/job-links";
 import { StatusMenu } from "./table/status-menu";
 import { useNow } from "./use-now";
 
@@ -158,11 +159,14 @@ function Panel({
           {REMOTE_LABEL[head.remoteType] && <Badge variant="outline">{REMOTE_LABEL[head.remoteType]}</Badge>}
           {salary && <span>· {salary}</span>}
         </SheetDescription>
-        <JobLinks job={head} />
-        <MarkdownButtons
-          disabled={!detail}
-          build={() => toMarkdownFile(detailToMarkdownJob(detail!))}
-        />
+        <JobLinkButtons job={head} />
+        <div className="flex flex-wrap items-center gap-2">
+          <MarkdownButtons
+            disabled={!detail}
+            build={() => toMarkdownFile(detailToMarkdownJob(detail!))}
+          />
+          <AskClaudeButton disabled={!detail} build={() => detailToMarkdownJob(detail!)} />
+        </div>
       </SheetHeader>
 
       <Section title="Tracking">
