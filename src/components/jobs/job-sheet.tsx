@@ -60,7 +60,7 @@ export function JobSheet(props: Props) {
 
   return (
     <Sheet open={Boolean(jobId)} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full gap-0 overflow-y-auto p-0 data-[side=right]:sm:max-w-xl">
+      <SheetContent className="gap-0 overflow-y-auto p-0 data-[side=right]:w-1/2 data-[side=right]:sm:max-w-6xl">
         {head ? (
           <Panel {...props} head={head} detail={data ?? null} loading={isLoading} />
         ) : error instanceof NotFoundError ? (
