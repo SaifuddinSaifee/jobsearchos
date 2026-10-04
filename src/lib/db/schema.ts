@@ -264,7 +264,25 @@ export const applicationQueue = pgTable(
   (t) => [index("application_queue_status_idx").on(t.status, t.createdAt)],
 );
 
+/** Bookmarks for the job boards and career pages visited every day; `last_opened_at` drives the daily round. */
+export const quickLinks = pgTable(
+  "quick_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    note: text("note").notNull().default(""),
+    /** Optional heading the link is shown under, e.g. "Job boards". */
+    group: text("group").notNull().default(""),
+    position: integer("position").notNull().default(0),
+    lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("quick_links_position_idx").on(t.position)],
+);
+
 export type QueueRow = typeof applicationQueue.$inferSelect;
+export type QuickLinkRow = typeof quickLinks.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type CompanyRow = typeof companies.$inferSelect;
 export type ProfileVersionRow = typeof profileVersions.$inferSelect;

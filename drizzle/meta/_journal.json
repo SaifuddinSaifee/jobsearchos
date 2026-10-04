@@ -43,6 +43,13 @@
       "when": 1791111402679,
       "tag": "0005_application_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791127093804,
+      "tag": "0006_quick_links",
+      "breakpoints": true
     }
   ]
 }

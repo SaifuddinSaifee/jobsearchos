@@ -2,10 +2,12 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { QuickLinksStrip } from "@/components/quick-links/quick-links";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/jobs/format";
 import { STALE_APPLIED_DAYS, STALE_PREPARING_DAYS, statusInfo, type StatusGroup, type TabValue } from "@/lib/jobs/status";
 import { dashboardData } from "@/lib/jobs/tracker";
+import { listQuickLinks } from "@/lib/quick-links/service";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -19,15 +21,18 @@ const FUNNEL: { group: StatusGroup; label: string; tab: TabValue; tone: string }
 ];
 
 export default async function DashboardPage() {
-  const data = await dashboardData();
+  const [data, links] = await Promise.all([dashboardData(), listQuickLinks()]);
 
   if (data.total === 0) {
     return (
-      <div className="space-y-3 rounded-xl border border-dashed p-10 text-center">
-        <p className="text-sm text-muted-foreground">
-          Nothing here yet. Add a job and this page will show what needs your attention.
-        </p>
-        <Button nativeButton={false} render={<Link href="/new" />}>Add your first application</Button>
+      <div className="space-y-6">
+        <QuickLinksStrip links={links} />
+        <div className="space-y-3 rounded-xl border border-dashed p-10 text-center">
+          <p className="text-sm text-muted-foreground">
+            Nothing here yet. Add a job and this page will show what needs your attention.
+          </p>
+          <Button nativeButton={false} render={<Link href="/new" />}>Add your first application</Button>
+        </div>
       </div>
     );
   }
@@ -35,6 +40,8 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">Where your search stands, and what needs you next.</p>
+
+      <QuickLinksStrip links={links} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {FUNNEL.map((f) => (
