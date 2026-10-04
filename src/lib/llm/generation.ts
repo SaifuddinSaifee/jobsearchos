@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { anthropic } from "./client";
+import { together } from "./client";
 
 /** Writes resumes, cover letters and cold emails. Full use arrives in Stage 4. */
 export interface GenerationProvider {
@@ -7,19 +7,22 @@ export interface GenerationProvider {
   generate(input: { system: string; prompt: string }): Promise<string>;
 }
 
-export class AnthropicProvider implements GenerationProvider {
-  id = "anthropic";
+export class TogetherProvider implements GenerationProvider {
+  id = "together";
 
   async generate({ system, prompt }: { system: string; prompt: string }) {
-    const res = await anthropic().messages.create({
+    const res = await together().chat.completions.create({
       model: env().WRITER_MODEL,
       max_tokens: 16000,
-      system,
-      output_config: { effort: "medium" },
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
     });
-    return res.content
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .join("");
+    const choice = res.choices[0];
+    if (choice?.finish_reason === "length") {
+      throw new Error("Output was cut off (max_tokens); the input may be too long");
+    }
+    return choice?.message?.content ?? "";
   }
 }

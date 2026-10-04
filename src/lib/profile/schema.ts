@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // No `.default()` anywhere: ProfileSchema doubles as the structured-output schema
-// for Claude, which needs every field present. Empty values come from the factories below.
+// for the LLM, which needs every field present. Empty values come from the factories below.
 
 export const ExperienceSchema = z.object({
   company: z.string(),

@@ -4,7 +4,7 @@ import path from "node:path";
 import { extractResumeText } from "@/lib/resume/extract";
 import { parseResume } from "@/lib/resume/parse";
 
-/** Usage: npm run eval:resume <path-to-resume.pdf|docx> — runs extraction + Claude parsing and prints the result. */
+/** Usage: npm run eval:resume <path-to-resume.pdf|docx> — runs extraction + LLM parsing and prints the result. */
 async function main() {
   const file = process.argv[2];
   if (!file) throw new Error("Usage: npm run eval:resume <path-to-resume.pdf|docx>");

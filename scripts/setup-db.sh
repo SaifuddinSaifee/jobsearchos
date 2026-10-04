@@ -4,6 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Load .env so DATABASE_URL / TEST_DATABASE_URL match the port docker compose uses.
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+
 DEV_URL="${DATABASE_URL:-postgres://jobtracker:jobtracker@localhost:5432/jobtracker}"
 TEST_URL="${TEST_DATABASE_URL:-postgres://jobtracker:jobtracker@localhost:5432/jobtracker_test}"
 

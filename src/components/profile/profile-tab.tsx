@@ -85,7 +85,7 @@ export function ProfileTab({
     return (
       <div className="mx-auto max-w-xl space-y-4 pt-6">
         <p className="text-sm text-muted-foreground">
-          Upload your base resume. Claude will structure it into a profile that you can review and
+          Upload your base resume. The AI will structure it into a profile that you can review and
           edit before saving.
         </p>
         <ResumeDropzone onFile={importResume} busy={busy} />

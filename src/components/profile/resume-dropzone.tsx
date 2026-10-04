@@ -43,7 +43,7 @@ export function ResumeDropzone({
       )}
     >
       {busy ? <Loader2 className="size-6 animate-spin" /> : <Upload className="size-6" />}
-      <span>{busy ? "Reading and structuring your resume with Claude…" : label}</span>
+      <span>{busy ? "Reading and structuring your resume…" : label}</span>
       <span className="text-xs">PDF or DOCX, up to 10 MB</span>
       <input
         ref={input}

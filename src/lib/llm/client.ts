@@ -1,13 +1,14 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Together from "together-ai";
 import { env } from "@/lib/env";
 
-let client: Anthropic | undefined;
+let client: Together | undefined;
 
-/** Shared Anthropic client. Without an explicit key the SDK resolves credentials itself. */
-export function anthropic(): Anthropic {
+/** Shared Together AI client (OpenAI-compatible chat API hosting open-weight models). */
+export function together(): Together {
   if (!client) {
-    const apiKey = env().ANTHROPIC_API_KEY;
-    client = apiKey ? new Anthropic({ apiKey }) : new Anthropic();
+    const apiKey = env().TOGETHER_AI_API_KEY;
+    if (!apiKey) throw new Error("TOGETHER_AI_API_KEY is not set in .env");
+    client = new Together({ apiKey });
   }
   return client;
 }

@@ -3,7 +3,7 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
-import { anthropic } from "@/lib/llm/client";
+import { together } from "@/lib/llm/client";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +20,24 @@ async function checks(): Promise<Check[]> {
   }
 
   try {
-    const model = await anthropic().models.retrieve(env().EXTRACTION_MODEL);
+    const e = env();
+    const available = new Set((await together().models.list()).map((m) => m.id));
+    const missing = [e.WRITER_MODEL, e.EXTRACTION_MODEL, e.FAST_MODEL].filter(
+      (id) => !available.has(id),
+    );
     out.push({
-      name: "Anthropic API",
-      ok: true,
-      detail: `Credentials work (${model.display_name})`,
+      name: "Together AI",
+      ok: missing.length === 0,
+      detail:
+        missing.length === 0
+          ? "Credentials work and all configured models are available"
+          : `Credentials work, but these model IDs were not found: ${missing.join(", ")}`,
     });
   } catch (err) {
     out.push({
-      name: "Anthropic API",
+      name: "Together AI",
       ok: false,
-      detail: `${(err as Error).message}. Set ANTHROPIC_API_KEY in .env.`,
+      detail: `${(err as Error).message}. Set TOGETHER_AI_API_KEY in .env.`,
     });
   }
 
