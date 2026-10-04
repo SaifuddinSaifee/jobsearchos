@@ -488,7 +488,7 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
           </div>
         </Collapse>
 
-        <div className="overflow-hidden rounded-lg border">
+        <div className="overflow-hidden rounded-lg border my-3">
           <Table>
             <TableHeader>
               {table.getHeaderGroups().map((hg) => (
