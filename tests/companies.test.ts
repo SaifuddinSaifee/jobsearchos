@@ -2,11 +2,12 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { companies, companyAliases, jobs } from "@/lib/db/schema";
 import { companySection, companyToMarkdown, companyFilename } from "@/lib/companies/markdown";
-import { companySiteBase, rankResults, researchCompany, ResearchError } from "@/lib/companies/research";
+import { companySiteBase, pageScore, rankResults, researchCompany, ResearchError } from "@/lib/companies/research";
 import { SearchError, TavilyProvider, type WebSearchProvider } from "@/lib/companies/search";
 import {
   applyResearch,
   backfillCompanies,
+  companyJobUrls,
   createCompany,
   findCompanyByName,
   getCompanyDetail,
@@ -169,6 +170,19 @@ describe("applyResearch", () => {
     expect((await db.select().from(companies).where(eq(companies.id, c.id)))[0].about).toBe("A");
   });
 
+  it("stores the research log and the owned/third-party label of each source", async () => {
+    const c = await createCompany("Acme", db);
+    const log = {
+      via: "web-search" as const,
+      queries: ["Acme company about mission values culture"],
+      pages: [{ url: "https://acme.com/about", title: "About Acme", kind: "owned" as const, origin: "search" as const }],
+    };
+    await applyResearch(c.id, research({ sources: [{ url: "https://acme.com/about", title: "About Acme", kind: "owned" }], log }), db);
+    const detail = (await getCompanyDetail(c.id, db))!;
+    expect(detail.researchLog).toEqual(log);
+    expect(detail.sources).toEqual([{ url: "https://acme.com/about", title: "About Acme", kind: "owned" }]);
+  });
+
   it("knows when research is still worth running", () => {
     const base = { about: "", principles: "", culture: "", researchedAt: null };
     expect(needsResearch(base)).toBe(true);
@@ -266,14 +280,19 @@ describe("company research (free sources first; every search here is a fake)", (
   ];
   const LONG = "Google builds products used by billions of people around the world every single day. ".repeat(12);
   const page = (body = LONG) => `<html><body><main><p>${body}</p></main></body></html>`;
-  const answer = { website: "", about: "Search and cloud.", principles: "1. Users", culture: "", usedSources: [] as number[] };
+  // Complete answer: no follow-up search is needed.
+  const full = { website: "", about: "Search and cloud.", principles: "1. Users", culture: "Small teams.", usedSources: [] as number[] };
 
-  /** Fails the test if the paid search is touched. */
-  const noSearch: WebSearchProvider = { search: async () => { throw new Error("the paid search must not be called"); } };
-  const fakeSearch = (rows = results) => {
-    const queries: string[] = [];
-    return { queries, provider: { search: async (q: string) => (queries.push(q), rows) } as WebSearchProvider };
+  type Call = { query: string; includeDomains?: string[] };
+  /** A fake search; the test fails loudly if it is called when it should not be. */
+  const fakeSearch = (rows = results, byCall: (n: number) => typeof results = () => rows) => {
+    const calls: Call[] = [];
+    const provider: WebSearchProvider = {
+      search: async (query, opts) => (calls.push({ query, includeDomains: opts?.includeDomains }), byCall(calls.length)),
+    };
+    return { calls, provider };
   };
+  const noSearch: WebSearchProvider = { search: async () => { throw new Error("the paid search must not be called"); } };
   const siteFetcher = (pages: Record<string, string>) => async (url: string) => {
     const hit = pages[new URL(url).pathname];
     return hit === undefined ? new Response("", { status: 404 }) : new Response(hit);
@@ -281,8 +300,38 @@ describe("company research (free sources first; every search here is a fake)", (
   const failFetch = async () => new Response("", { status: 500 });
 
   describe("rankResults", () => {
-    it("drops job boards and duplicates and puts official-looking hosts first", () => {
-      expect(rankResults("Google LLC", results).map((r) => r.url)).toEqual(["https://about.google/", "https://en.wikipedia.org/wiki/Google"]);
+    it("drops job boards and duplicates, marks owned pages and puts them first", () => {
+      expect(rankResults("Google LLC", results).map((r) => [r.url, r.kind])).toEqual([
+        ["https://about.google/", "owned"],
+        ["https://en.wikipedia.org/wiki/Google", "third-party"],
+      ]);
+    });
+
+    it("does not treat a video on the company's host as the company (the YouTube case)", () => {
+      const youtube = [
+        { title: "Your Mission, Vision, and Values (with Examples)", url: "https://www.youtube.com/watch?v=Z4_YNeVsZhw", content: "generic video" },
+        { title: "YouTube Mission, Vision & Values | Comparably", url: "https://www.comparably.com/companies/youtube/mission", content: "survey stats" },
+        { title: "@YouTube", url: "https://www.youtube.com/@YouTube", content: "channel" },
+        { title: "Inside YouTube", url: "https://blog.youtube/inside-youtube", content: "blog" },
+        { title: "About YouTube", url: "https://www.youtube.com/about/", content: "about" },
+        { title: "YouTube - Wikipedia", url: "https://en.wikipedia.org/wiki/YouTube", content: "wiki" },
+      ];
+      expect(rankResults("YouTube", youtube).map((r) => [r.url, r.kind])).toEqual([
+        ["https://www.youtube.com/about/", "owned"], // About-style path first
+        ["https://blog.youtube/inside-youtube", "owned"],
+        ["https://en.wikipedia.org/wiki/YouTube", "third-party"],
+      ]);
+    });
+
+    it("scores About-style paths and about. subdomains above plain pages", () => {
+      expect(pageScore("https://x.com/about")).toBeGreaterThan(pageScore("https://x.com/pricing"));
+      expect(pageScore("https://about.x.com/")).toBeGreaterThan(pageScore("https://blog.x.com/post"));
+      expect(pageScore("not a url")).toBe(0);
+    });
+
+    it("treats a known company host as owned even when its name is not in the host", () => {
+      const r = rankResults("Alphabet", [{ title: "G", url: "https://abc.xyz/investor", content: "" }], ["abc.xyz"]);
+      expect(r[0].kind).toBe("owned");
     });
   });
 
@@ -300,7 +349,7 @@ describe("company research (free sources first; every search here is a fake)", (
   });
 
   it("uses only the company's own site when it has enough, and never calls the search", async () => {
-    chatStructured.mockResolvedValue({ ...answer, usedSources: [2] });
+    chatStructured.mockResolvedValue({ ...full, usedSources: [2] });
     const out = await researchCompany("Google", {
       search: noSearch,
       siteBase: "https://google.com",
@@ -309,15 +358,22 @@ describe("company research (free sources first; every search here is a fake)", (
     });
     expect(out.via).toBe("company-site");
     expect(out).toMatchObject({ about: "Search and cloud.", website: "https://google.com" });
-    expect(out.sources).toEqual([{ url: "https://google.com/about", title: "google.com/about" }]);
+    expect(out.sources).toEqual([{ url: "https://google.com/about", title: "google.com/about", kind: "owned" }]);
+    expect(out.log).toEqual({
+      via: "company-site",
+      queries: [],
+      pages: [{ url: "https://google.com/about", title: "google.com/about", kind: "owned", origin: "site" }],
+    });
     const prompt = chatStructured.mock.calls[0][1];
-    expect(prompt.user).toContain("[1] Job posting: what it says about the company\nGoogle organizes the world's information");
-    expect(prompt.user).toContain("[2] google.com/about (https://google.com/about)");
+    expect(prompt.user).toContain("[1] (company-owned) Job posting: what it says about the company\nGoogle organizes the world's information");
+    expect(prompt.user).toContain("[2] (company-owned) google.com/about (https://google.com/about)");
     expect(prompt.system).toMatch(/untrusted/);
+    expect(prompt.system).toMatch(/Use ONLY company-owned sources/);
+    expect(prompt.system).toMatch(/acquisition prices/);
   });
 
   it("renders a thin page that loaded (JS shell) in the browser, and skips pages that 404", async () => {
-    chatStructured.mockResolvedValue(answer);
+    chatStructured.mockResolvedValue(full);
     const rendered: string[] = [];
     const out = await researchCompany("Google", {
       search: noSearch,
@@ -325,12 +381,12 @@ describe("company research (free sources first; every search here is a fake)", (
       fetcher: siteFetcher({ "/about": "<html><body><div id=root></div></body></html>" }),
       render: async (url) => (rendered.push(url), page()),
     });
-    expect(rendered).toEqual(["https://google.com/about"]); // /about-us, /company, /values were 404: not rendered
+    expect(rendered).toEqual(["https://google.com/about"]); // the other paths were 404: not rendered
     expect(out.via).toBe("company-site");
   });
 
   it("limits headless-browser renders", async () => {
-    chatStructured.mockResolvedValue(answer);
+    chatStructured.mockResolvedValue(full);
     const rendered: string[] = [];
     const shell = "<html><body><div id=root></div></body></html>";
     await researchCompany("Google", {
@@ -343,33 +399,114 @@ describe("company research (free sources first; every search here is a fake)", (
   });
 
   it("falls back to ONE combined search when the site is thin, and merges both kinds of source", async () => {
-    const { queries, provider } = fakeSearch();
-    chatStructured.mockResolvedValue({ ...answer, website: "https://about.google", usedSources: [1, 2] });
+    const { calls, provider } = fakeSearch();
+    chatStructured.mockResolvedValue({ ...full, website: "https://about.google", usedSources: [1, 2] });
     const out = await researchCompany("Google", {
       search: provider,
       siteBase: "https://google.com",
       fetcher: async (url) => (new URL(url).pathname === "/about" ? new Response(page("Short but real page. ".repeat(30))) : new Response("", { status: 404 })),
     });
-    expect(queries).toEqual(["Google company about mission values culture"]);
+    expect(calls).toEqual([{ query: "Google company about mission values culture", includeDomains: undefined }]);
     expect(out.via).toBe("web-search");
     expect(out.website).toBe("https://about.google");
-    expect(out.sources.map((s) => s.url)).toEqual(["https://google.com/about", "https://about.google/"]);
+    expect(out.sources.map((s) => [s.url, s.kind])).toEqual([["https://google.com/about", "owned"], ["https://about.google/", "owned"]]);
+    expect(out.log.queries).toEqual(["Google company about mission values culture"]);
   });
 
-  it("searches once when there is no company site at all", async () => {
-    const { queries, provider } = fakeSearch();
-    chatStructured.mockResolvedValue(answer);
+  it("searches once when there is no company site at all, using snippets when pages cannot be fetched", async () => {
+    const { calls, provider } = fakeSearch();
+    chatStructured.mockResolvedValue(full);
     const out = await researchCompany("Google", { search: provider, fetcher: failFetch });
-    expect(queries).toHaveLength(1);
+    expect(calls).toHaveLength(1);
     expect(out.via).toBe("web-search");
-    // snippets are used when pages cannot be fetched
-    expect(chatStructured.mock.calls[0][1].user).toContain("[1] About Google (https://about.google/)\nOur mission is to organize information.");
+    expect(chatStructured.mock.calls[0][1].user).toContain("[1] (company-owned) About Google (https://about.google/)\nOur mission is to organize information.");
+    expect(chatStructured.mock.calls[0][1].user).toContain("(third-party) Wikipedia");
   });
 
   it("prefers fetched page text over the snippet", async () => {
-    chatStructured.mockResolvedValue(answer);
+    chatStructured.mockResolvedValue(full);
     await researchCompany("Google", { search: fakeSearch().provider, fetcher: async () => new Response(page()) });
     expect(chatStructured.mock.calls[0][1].user).toContain("Google builds products used by billions");
+  });
+
+  describe("owned-source rule", () => {
+    const wiki = [{ title: "Wikipedia", url: "https://en.wikipedia.org/wiki/Initech", content: "Initech makes TPS reports." }];
+
+    it("throws away mission and culture when only third-party sources were used", async () => {
+      chatStructured.mockResolvedValue({ website: "", about: "Initech makes software.", principles: "- Synergy", culture: "- 90% say it is great", usedSources: [1] });
+      const out = await researchCompany("Initech", { search: fakeSearch(wiki).provider, fetcher: failFetch });
+      expect(out).toMatchObject({ about: "Initech makes software.", principles: "", culture: "" });
+      expect(out.sources).toEqual([{ url: "https://en.wikipedia.org/wiki/Initech", title: "Wikipedia", kind: "third-party" }]);
+    });
+
+    it("fails when only third-party text exists and the model returns nothing for 'about'", async () => {
+      chatStructured.mockResolvedValue({ website: "", about: "", principles: "- x", culture: "- y", usedSources: [1] });
+      await expect(researchCompany("Initech", { search: fakeSearch(wiki).provider, fetcher: failFetch })).rejects.toBeInstanceOf(ResearchError);
+    });
+  });
+
+  describe("conditional second query", () => {
+    const official = [{ title: "About Google", url: "https://about.google/", content: "Our mission is to organize information." }];
+
+    it("runs one follow-up restricted to the company's own domains when mission/values are missing", async () => {
+      const { calls, provider } = fakeSearch(official);
+      chatStructured
+        .mockResolvedValueOnce({ ...full, principles: "", culture: "" })
+        .mockResolvedValueOnce({ ...full, principles: "1. Focus on the user" });
+      const out = await researchCompany("Google", { search: provider, fetcher: failFetch });
+      expect(calls).toHaveLength(2);
+      expect(calls[0].includeDomains).toBeUndefined();
+      expect(calls[1]).toEqual({ query: "Google mission values principles culture", includeDomains: ["about.google"] });
+      expect(chatStructured).toHaveBeenCalledTimes(2);
+      expect(out.principles).toBe("1. Focus on the user");
+      expect(out.log.queries).toEqual(["Google company about mission values culture", "Google mission values principles culture (only about.google)"]);
+    });
+
+    it("never makes more than two searches", async () => {
+      const { calls, provider } = fakeSearch(official);
+      chatStructured.mockResolvedValue({ ...full, principles: "", culture: "" });
+      await researchCompany("Google", { search: provider, fetcher: failFetch });
+      expect(calls).toHaveLength(2);
+    });
+
+    it("skips the follow-up when everything was found", async () => {
+      const { calls, provider } = fakeSearch(official);
+      chatStructured.mockResolvedValue(full);
+      await researchCompany("Google", { search: provider, fetcher: failFetch });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("skips the follow-up when no company-owned domain is known to restrict it to", async () => {
+      const { calls, provider } = fakeSearch([{ title: "Wikipedia", url: "https://en.wikipedia.org/wiki/Initech", content: "Initech makes TPS reports." }]);
+      chatStructured.mockResolvedValue({ website: "", about: "About.", principles: "", culture: "", usedSources: [] });
+      await researchCompany("Initech", { search: provider, fetcher: failFetch });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("after a free-tier read with no values, makes a single domain-restricted search", async () => {
+      const { calls, provider } = fakeSearch([{ title: "Our values", url: "https://google.com/about/values", content: "x" }]);
+      chatStructured
+        .mockResolvedValueOnce({ ...full, principles: "" })
+        .mockResolvedValueOnce({ ...full, principles: "1. Users" });
+      const out = await researchCompany("Google", { search: provider, siteBase: "https://google.com", fetcher: siteFetcher({ "/about": page() }) });
+      expect(calls).toEqual([{ query: "Google mission values principles culture", includeDomains: ["google.com"] }]);
+      expect(out.principles).toBe("1. Users");
+      expect(out.via).toBe("web-search");
+    });
+
+    it("keeps the first result when the follow-up search fails", async () => {
+      let n = 0;
+      const provider: WebSearchProvider = {
+        search: async () => {
+          if (++n === 2) throw new SearchError("rate limit");
+          return official;
+        },
+      };
+      chatStructured.mockResolvedValue({ ...full, principles: "" });
+      const out = await researchCompany("Google", { search: provider, fetcher: failFetch });
+      expect(out.about).toBe("Search and cloud.");
+      expect(chatStructured).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("without a search key, explains what is missing instead of searching", async () => {
@@ -380,7 +517,7 @@ describe("company research (free sources first; every search here is a fake)", (
 
   it("fails clearly when nothing usable is found", async () => {
     await expect(researchCompany("Zed", { search: fakeSearch([]).provider, fetcher: failFetch })).rejects.toThrow(/No web results/);
-    await expect(researchCompany("Zed", { search: fakeSearch([results[0]]).provider, fetcher: failFetch })).rejects.toThrow(/job boards/);
+    await expect(researchCompany("Zed", { search: fakeSearch([results[0]]).provider, fetcher: failFetch })).rejects.toThrow(/job boards, videos and review sites/);
     chatStructured.mockResolvedValue({ website: "", about: "", principles: "", culture: "", usedSources: [] });
     await expect(researchCompany("Google", { search: fakeSearch().provider, fetcher: failFetch })).rejects.toBeInstanceOf(ResearchError);
   });
@@ -388,6 +525,60 @@ describe("company research (free sources first; every search here is a fake)", (
   it("reports a search failure from the provider", async () => {
     const broken: WebSearchProvider = { search: async () => { throw new SearchError("rate limit"); } };
     await expect(researchCompany("Google", { search: broken, fetcher: failFetch })).rejects.toThrow(/rate limit/);
+  });
+});
+
+describe("parent companies", () => {
+  it("links a brand to its parent, shows both ways, and refuses loops", async () => {
+    const google = await createCompany("Google", db);
+    const yt = await createCompany("YouTube", db);
+    await updateCompany(yt.id, { parentId: google.id }, db);
+    expect((await getCompanyDetail(yt.id, db))).toMatchObject({ parentId: google.id, parent: { name: "Google" } });
+    expect((await getCompanyDetail(google.id, db))!.children).toEqual([{ id: yt.id, name: "YouTube" }]);
+    expect((await listCompanies(db)).find((c) => c.name === "YouTube")?.parentName).toBe("Google");
+    await expect(updateCompany(google.id, { parentId: yt.id }, db)).rejects.toThrow(/part of each other/);
+    await expect(updateCompany(yt.id, { parentId: yt.id }, db)).rejects.toThrow(/itself/);
+    await expect(updateCompany(yt.id, { parentId: "00000000-0000-4000-8000-000000000000" }, db)).rejects.toThrow(/not found/);
+    await updateCompany(yt.id, { parentId: null }, db);
+    expect((await getCompanyDetail(yt.id, db))!.parent).toBeNull();
+  });
+
+  it("goes with the job: detail carries the parent, and Markdown adds the parent's profile", async () => {
+    const r = await saveJob(draft(1, { company: "YouTube", aboutCompany: "Video platform" }), db);
+    if (!r.ok) throw new Error("save failed");
+    const yt = (await findCompanyByName("YouTube", db))!;
+    const google = await createCompany("Google", db);
+    await updateCompany(google.id, { about: "Search and cloud", principles: "1. Focus on the user", culture: "Small teams" }, db);
+    await updateCompany(yt.id, { parentId: google.id, principles: "Four freedoms" }, db);
+    const detail = (await getJobDetail(r.jobId, db))!;
+    expect(detail.companyProfile?.parent?.name).toBe("Google");
+    const md = jobToMarkdown(detailToMarkdownJob(detail));
+    expect(md).toContain("### Mission, values and principles\n\nFour freedoms");
+    expect(md).toContain("### Parent company: Google");
+    expect(md).toContain("#### Mission, values and principles\n\n1. Focus on the user");
+    expect(md.indexOf("### Parent company: Google")).toBeGreaterThan(md.indexOf("Four freedoms"));
+  });
+
+  it("merging moves brands to the target and inherits a missing parent", async () => {
+    const group = await createCompany("Alphabet", db);
+    const google = await createCompany("Google", db);
+    const youtube = await createCompany("YouTube", db);
+    const dup = await createCompany("Google Inc Search", db);
+    await updateCompany(youtube.id, { parentId: dup.id }, db);
+    await updateCompany(dup.id, { parentId: group.id }, db);
+    await mergeCompanies(dup.id, google.id, db);
+    expect((await getCompanyDetail(youtube.id, db))!.parentId).toBe(google.id);
+    expect((await getCompanyDetail(google.id, db))!.parentId).toBe(group.id);
+  });
+
+  it("collects the posting URLs of a group's brands to find the group's own site", async () => {
+    const google = await createCompany("Google", db);
+    const r = await saveJob(draft(1, { company: "YouTube", sourceUrl: "https://www.google.com/about/careers/jobs/1" }), db);
+    if (!r.ok) throw new Error("save failed");
+    const yt = (await findCompanyByName("YouTube", db))!;
+    expect(await companyJobUrls(google.id, db)).toEqual([]);
+    await updateCompany(yt.id, { parentId: google.id }, db);
+    expect(await companyJobUrls(google.id, db)).toEqual(["https://www.google.com/about/careers/jobs/1"]);
   });
 });
 

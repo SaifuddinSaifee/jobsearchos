@@ -165,10 +165,18 @@ export function JobReviewForm({ initial }: { initial: JobDraft }) {
                       </div>
                     ))}
                   <ul className="text-xs text-muted-foreground">
-                    {initial.companyResearch.sources.map((src) => (
-                      <li key={src.url}>{src.title}</li>
+                    {(initial.companyResearch.log?.pages ?? initial.companyResearch.sources).map((src) => (
+                      <li key={src.url}>
+                        {src.title}
+                        {src.kind ? ` (${src.kind === "owned" ? "company-owned" : "third-party"})` : ""}
+                      </li>
                     ))}
                   </ul>
+                  {initial.companyResearch.log && initial.companyResearch.log.queries.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Searched: {initial.companyResearch.log.queries.join("; ")}
+                    </p>
+                  )}
                 </div>
               </details>
             )}

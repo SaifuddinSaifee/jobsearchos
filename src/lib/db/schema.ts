@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   date,
   index,
   integer,
@@ -94,7 +95,14 @@ export type JobRequirements = { required: string[]; preferred: string[] };
 
 export type CompanyField = "about" | "principles" | "culture";
 export type CompanyProvenance = Partial<Record<CompanyField, "posting" | "web" | "user">>;
-export type CompanySource = { url: string; title: string };
+export type CompanySource = { url: string; title: string; kind?: "owned" | "third-party" };
+
+/** What a research run looked at, kept so it can be inspected later. */
+export type CompanyResearchLog = {
+  via: "company-site" | "web-search";
+  queries: string[];
+  pages: { url: string; title: string; kind: "owned" | "third-party"; origin: "site" | "search" }[];
+};
 
 /**
  * One row per employer, shared by every job there. The text fields are Markdown. `provenance` records
@@ -111,6 +119,9 @@ export const companies = pgTable("companies", {
   notes: text("notes").notNull().default(""),
   provenance: jsonb("provenance").$type<CompanyProvenance>().notNull().default({}),
   sources: jsonb("sources").$type<CompanySource[]>().notNull().default([]),
+  researchLog: jsonb("research_log").$type<CompanyResearchLog | null>(),
+  /** The group this company belongs to (YouTube is part of Google). One level is enough for exports. */
+  parentId: uuid("parent_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
   researchedAt: timestamp("researched_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

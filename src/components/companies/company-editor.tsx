@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { companyFilename, companyToMarkdown } from "@/lib/companies/markdown";
+import type { CompanyResearchLog } from "@/lib/companies/types";
 import { COMPANY_FIELDS, MAX_FIELD_CHARS, type CompanyDetail, type CompanyField } from "@/lib/companies/types";
 import { formatDate } from "@/lib/jobs/format";
 import { safeHref } from "@/lib/jobs/links";
@@ -38,6 +39,47 @@ const PROVENANCE: Record<string, { label: string; tone: string }> = {
 };
 
 type Others = { id: string; name: string }[];
+
+function KindBadge({ kind }: { kind: "owned" | "third-party" }) {
+  return kind === "owned" ? (
+    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Company-owned</Badge>
+  ) : (
+    <Badge variant="outline">Third-party</Badge>
+  );
+}
+
+/** What the last research run looked at, so a weak result can be traced to its sources. */
+export function ResearchLog({ log }: { log: CompanyResearchLog }) {
+  return (
+    <details className="rounded-lg border p-3 text-sm">
+      <summary className="cursor-pointer font-medium">How this was researched</summary>
+      <div className="mt-2 space-y-2">
+        <p className="text-muted-foreground">
+          {log.via === "web-search"
+            ? `Used ${log.queries.length} web search${log.queries.length === 1 ? "" : "es"}.`
+            : "Read the company's own site; no web search was used."}{" "}
+          Mission, values and culture are only taken from company-owned pages.
+        </p>
+        {log.queries.length > 0 && (
+          <ul className="list-disc space-y-0.5 pl-5">
+            {log.queries.map((q) => (
+              <li key={q}>{q}</li>
+            ))}
+          </ul>
+        )}
+        <ul className="space-y-1">
+          {log.pages.map((p) => (
+            <li key={p.url} className="flex items-center gap-2">
+              <span className="min-w-0 truncate">{p.title}</span>
+              <KindBadge kind={p.kind} />
+              <span className="shrink-0 text-xs text-muted-foreground">{p.origin === "site" ? "company site" : "search"}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
 
 function MergeDialog({ company, others }: { company: CompanyDetail; others: Others }) {
   const router = useRouter();
@@ -102,6 +144,7 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
   });
   const [notes, setNotes] = useState(company.notes);
   const [aliases, setAliases] = useState(company.aliases);
+  const [parentId, setParentId] = useState(company.parentId ?? "");
   const [saving, setSaving] = useState(false);
   const [researching, setResearching] = useState(false);
 
@@ -110,11 +153,12 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
     website !== company.website ||
     notes !== company.notes ||
     COMPANY_FIELDS.some((f) => fields[f.key] !== company[f.key]) ||
-    aliases.join("\n") !== company.aliases.join("\n");
+    aliases.join("\n") !== company.aliases.join("\n") ||
+    parentId !== (company.parentId ?? "");
 
   async function save() {
     setSaving(true);
-    const res = await updateCompanyAction(company.id, { name, website, notes, aliases, ...fields });
+    const res = await updateCompanyAction(company.id, { name, website, notes, aliases, parentId: parentId || null, ...fields });
     setSaving(false);
     if (!res.ok) return void toast.error(res.error);
     toast.success("Company saved");
@@ -136,7 +180,7 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
 
   const site = safeHref(website);
   const markdown = () => ({
-    markdown: companyToMarkdown({ name, website, ...fields, notes, sources: company.sources }),
+    markdown: companyToMarkdown({ name, website, ...fields, notes, sources: company.sources, parent: company.parent }),
     filename: companyFilename(name),
   });
 
@@ -202,6 +246,42 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
         />
       </div>
 
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="parent">Part of</Label>
+          <select
+            id="parent"
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
+            className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+          >
+            <option value="">Independent company</option>
+            {others.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            For brands and subsidiaries (YouTube is part of Google). The parent&apos;s profile is added to your exports.
+          </p>
+        </div>
+        {company.children.length > 0 && (
+          <div className="space-y-1.5">
+            <Label>Brands and subsidiaries</Label>
+            <ul className="flex flex-wrap gap-2 text-sm">
+              {company.children.map((c) => (
+                <li key={c.id}>
+                  <Link href={`/companies/${c.id}`} className="underline underline-offset-2">
+                    {c.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
       {COMPANY_FIELDS.map((f) => {
         const prov = PROVENANCE[company.provenance[f.key] ?? ""];
         return (
@@ -242,15 +322,18 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
           <h2 className="text-sm font-medium">Sources used for research</h2>
           <ul className="space-y-1 text-sm">
             {company.sources.map((s) => (
-              <li key={s.url}>
+              <li key={s.url} className="flex items-center gap-2">
                 <a href={safeHref(s.url) ?? "#"} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
                   {s.title}
                 </a>
+                {s.kind && <KindBadge kind={s.kind} />}
               </li>
             ))}
           </ul>
         </section>
       )}
+
+      {company.researchLog && <ResearchLog log={company.researchLog} />}
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium">Jobs at {company.name}</h2>

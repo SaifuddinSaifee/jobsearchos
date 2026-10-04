@@ -329,6 +329,15 @@ function CompanySection({ detail }: { detail: JobDetail }) {
             {c.name}
           </Link>
           <span className="text-muted-foreground"> · company profile (included when you copy as Markdown)</span>
+          {c.parent && (
+            <span className="text-muted-foreground">
+              {" "}
+              · part of{" "}
+              <Link href={`/companies/${c.parent.id}`} className="underline underline-offset-2">
+                {c.parent.name}
+              </Link>
+            </span>
+          )}
         </p>
       )}
       {shown.length === 0 && c && (

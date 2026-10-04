@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   companies,
@@ -14,6 +14,7 @@ import {
   type CompanyDetail,
   type CompanyField,
   type CompanyProfile,
+  type CompanyProfileBase,
   type CompanyResearch,
   type CompanySummary,
 } from "./types";
@@ -28,7 +29,7 @@ export function normalizeCompanyName(name: string): string {
   return normalizeForDedup(name) || name.toLowerCase().trim();
 }
 
-export function toProfile(c: CompanyRow): CompanyProfile {
+export function toProfileBase(c: CompanyRow): CompanyProfileBase {
   return {
     id: c.id,
     name: c.name,
@@ -39,8 +40,21 @@ export function toProfile(c: CompanyRow): CompanyProfile {
     notes: c.notes,
     provenance: c.provenance,
     sources: c.sources,
+    researchLog: c.researchLog,
     researchedAt: iso(c.researchedAt),
   };
+}
+
+/** The profile plus the group it belongs to (one level), for display and export. */
+export function toProfile(c: CompanyRow, parent: CompanyRow | null = null): CompanyProfile {
+  return { ...toProfileBase(c), parent: parent ? toProfileBase(parent) : null };
+}
+
+/** Loads the company's direct parent, if any. */
+export async function loadParent(c: CompanyRow, db: DbOrTx = defaultDb()): Promise<CompanyRow | null> {
+  if (!c.parentId) return null;
+  const [p] = await db.select().from(companies).where(eq(companies.id, c.parentId));
+  return p ?? null;
 }
 
 /** The directory entry for this name or any of its aliases. */
@@ -91,10 +105,12 @@ export async function resolveCompany(
 
 /** Posting URLs of this company's saved jobs; used to find the company's own website. */
 export async function companyJobUrls(id: string, db: Db = defaultDb()): Promise<string[]> {
+  // A group's own site often hosts its brands' job postings (YouTube roles live on Google's careers site).
+  const children = await db.select({ id: companies.id }).from(companies).where(eq(companies.parentId, id));
   const rows = await db
     .select({ url: jobs.canonicalUrl })
     .from(jobs)
-    .where(eq(jobs.companyId, id))
+    .where(or(eq(jobs.companyId, id), children.length ? inArray(jobs.companyId, children.map((c) => c.id)) : undefined))
     .orderBy(sql`${jobs.createdAt} desc`)
     .limit(5);
   return rows.map((r) => r.url).filter((u): u is string => Boolean(u));
@@ -130,12 +146,14 @@ export async function listCompanies(db: Db = defaultDb()): Promise<CompanySummar
   const aliases = await db.select().from(companyAliases);
   const byCompany = new Map<string, string[]>();
   for (const a of aliases) byCompany.set(a.companyId, [...(byCompany.get(a.companyId) ?? []), a.alias]);
+  const names = new Map(rows.map(({ company: c }) => [c.id, c.name]));
   return rows.map(({ company: c, jobCount }) => ({
     id: c.id,
     name: c.name,
     website: c.website,
     jobCount,
     aliases: byCompany.get(c.id) ?? [],
+    parentName: c.parentId ? (names.get(c.parentId) ?? null) : null,
     hasAbout: c.about.trim() !== "",
     hasPrinciples: c.principles.trim() !== "",
     hasCulture: c.culture.trim() !== "",
@@ -147,7 +165,9 @@ export async function listCompanies(db: Db = defaultDb()): Promise<CompanySummar
 export async function getCompanyDetail(id: string, db: Db = defaultDb()): Promise<CompanyDetail | null> {
   const [c] = await db.select().from(companies).where(eq(companies.id, id));
   if (!c) return null;
-  const [aliases, jobRows] = await Promise.all([
+  const [parent, children, aliases, jobRows] = await Promise.all([
+    loadParent(c, db),
+    db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.parentId, id)).orderBy(asc(companies.name)),
     db.select().from(companyAliases).where(eq(companyAliases.companyId, id)).orderBy(asc(companyAliases.alias)),
     db
       .select({
@@ -162,7 +182,9 @@ export async function getCompanyDetail(id: string, db: Db = defaultDb()): Promis
       .orderBy(sql`${jobs.createdAt} desc`),
   ]);
   return {
-    ...toProfile(c),
+    ...toProfile(c, parent),
+    parentId: c.parentId,
+    children,
     aliases: aliases.map((a) => a.alias),
     jobs: jobRows.map((j) => ({ ...j, createdAt: j.createdAt.toISOString() })),
   };
@@ -176,6 +198,8 @@ export type CompanyEdit = Partial<{
   culture: string;
   notes: string;
   aliases: string[];
+  /** The group this company belongs to; null clears it. */
+  parentId: string | null;
 }>;
 
 /**
@@ -202,6 +226,20 @@ export async function updateCompany(id: string, edit: CompanyEdit, db: Db = defa
       if (clash && clash.id !== id) throw new Error(`"${clash.name}" already exists. Merge the two instead.`);
       patch.name = name;
       patch.normalizedName = normalizeCompanyName(name);
+    }
+    if (edit.parentId !== undefined) {
+      if (edit.parentId === id) throw new Error("A company cannot be part of itself");
+      if (edit.parentId) {
+        // Walk up from the proposed parent: reaching this company would make a loop.
+        let cursor: string | null = edit.parentId;
+        for (let depth = 0; cursor && depth < 10; depth++) {
+          if (cursor === id) throw new Error("That would make the two companies part of each other");
+          const [row] = await tx.select({ parentId: companies.parentId }).from(companies).where(eq(companies.id, cursor));
+          if (!row && depth === 0) throw new Error("Parent company not found");
+          cursor = row?.parentId ?? null;
+        }
+      }
+      patch.parentId = edit.parentId;
     }
     if (edit.website !== undefined) patch.website = edit.website.trim();
     if (edit.notes !== undefined) patch.notes = edit.notes;
@@ -247,6 +285,9 @@ export async function mergeCompanies(sourceId: string, targetId: string, db: Db 
 
     await tx.update(jobs).set({ companyId: targetId }).where(eq(jobs.companyId, sourceId));
     await tx.update(companyAliases).set({ companyId: targetId }).where(eq(companyAliases.companyId, sourceId));
+    // Brands that were part of the source are now part of the target (unless that would make it its own parent).
+    await tx.update(companies).set({ parentId: targetId }).where(and(eq(companies.parentId, sourceId), sql`${companies.id} <> ${targetId}`));
+    if (dst.parentId === sourceId) await tx.update(companies).set({ parentId: null }).where(eq(companies.id, targetId));
 
     const patch: Partial<typeof companies.$inferInsert> = { updatedAt: new Date() };
     const provenance: CompanyProvenance = { ...dst.provenance };
@@ -257,6 +298,7 @@ export async function mergeCompanies(sourceId: string, targetId: string, db: Db 
       }
     }
     patch.provenance = provenance;
+    if (!dst.parentId && src.parentId && src.parentId !== targetId) patch.parentId = src.parentId;
     if (!dst.website && src.website) patch.website = src.website;
     if (src.notes.trim()) patch.notes = dst.notes.trim() ? `${dst.notes}\n\n${src.notes}` : src.notes;
     patch.sources = [...dst.sources, ...src.sources.filter((s) => !dst.sources.some((d) => d.url === s.url))];
@@ -290,6 +332,7 @@ export async function applyResearch(id: string, research: CompanyResearch, db: D
     patch.provenance = provenance;
     if (!c.website && research.website) patch.website = research.website;
     if (research.sources.length) patch.sources = research.sources;
+    if (research.log) patch.researchLog = research.log;
     await tx.update(companies).set(patch).where(eq(companies.id, id));
     return applied;
   });

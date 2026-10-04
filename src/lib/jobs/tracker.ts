@@ -8,7 +8,7 @@ import {
   jobSnapshots,
   statusEvents,
 } from "@/lib/db/schema";
-import { toProfile } from "@/lib/companies/service";
+import { loadParent, toProfile } from "@/lib/companies/service";
 import { dateToStored } from "./format";
 import { safeHref } from "./links";
 import {
@@ -140,7 +140,7 @@ export async function getJobDetail(jobId: string, db: Db = defaultDb()): Promise
     ...toRow(r),
     notes: extra.notes ?? "",
     aboutCompany: extra.aboutCompany,
-    companyProfile: company ? toProfile(company) : null,
+    companyProfile: company ? toProfile(company, await loadParent(company, db)) : null,
     responsibilities: extra.responsibilities,
     requirements: extra.requirements,
     keywords: keywords.map((k) => k.keyword),

@@ -1,29 +1,43 @@
-import type { CompanyProfile } from "./types";
+import type { CompanyProfileBase } from "./types";
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
-export type CompanyMarkdownInput = Pick<CompanyProfile, "name" | "website" | "about" | "principles" | "culture" | "notes" | "sources">;
+type Profile = Pick<CompanyProfileBase, "name" | "website" | "about" | "principles" | "culture" | "notes" | "sources">;
+export type CompanyMarkdownInput = Profile & { parent?: Profile | null };
+
+/** The profile's own subsections, with headings `depth` hashes deep. */
+function blocks(c: Profile, depth: number, withSources: boolean, withNotes: boolean): string[] {
+  const h = "#".repeat(depth);
+  const parts: string[] = [];
+  if (c.website) parts.push(`- **Website:** ${oneLine(c.website)}`);
+  const sub = (heading: string, text: string) => text.trim() && parts.push(`${h} ${heading}\n\n${text.trim()}`);
+  sub("What they do", c.about);
+  sub("Mission, values and principles", c.principles);
+  sub("Culture and ways of working", c.culture);
+  if (withNotes) sub("My notes about the company", c.notes);
+  if (withSources && c.sources.length) {
+    parts.push(`${h} Sources\n\n${c.sources.map((s) => `- [${oneLine(s.title)}](${s.url})`).join("\n")}`);
+  }
+  return parts;
+}
 
 /**
  * Markdown for a company profile. `level` is the heading depth of the section title (2 inside a job export,
  * 1 for a standalone company export); subsections are one level deeper. `fromPosting` is the job's own
- * description of the employer, shown when it adds something beyond the saved profile.
+ * description of the employer, shown when it adds something beyond the saved profile. When the company is
+ * part of a group, the parent's profile follows under its own heading.
  */
 export function companySection(c: CompanyMarkdownInput | null, fromPosting: string, level: 1 | 2, title?: string): string {
-  const h = (n: number) => "#".repeat(level + n);
-  const parts: string[] = [];
-  if (c?.website) parts.push(`- **Website:** ${oneLine(c.website)}`);
-  const sub = (heading: string, text: string) => text.trim() && parts.push(`${h(1)} ${heading}\n\n${text.trim()}`);
-  if (c) {
-    sub("What they do", c.about);
-    sub("Mission, values and principles", c.principles);
-    sub("Culture and ways of working", c.culture);
-  }
+  const parts: string[] = c ? blocks({ ...c, notes: "" }, level + 1, false, false) : [];
   const posting = fromPosting.trim();
-  if (posting && posting !== c?.about.trim()) sub("As described in this job posting", posting);
-  if (c) sub("My notes about the company", c.notes);
+  if (posting && posting !== c?.about.trim()) parts.push(`${"#".repeat(level + 1)} As described in this job posting\n\n${posting}`);
+  if (c) parts.push(...blocks({ name: "", website: "", about: "", principles: "", culture: "", notes: c.notes, sources: [] }, level + 1, false, true));
   if (c?.sources.length) {
-    parts.push(`${h(1)} Sources\n\n${c.sources.map((s) => `- [${oneLine(s.title)}](${s.url})`).join("\n")}`);
+    parts.push(`${"#".repeat(level + 1)} Sources\n\n${c.sources.map((s) => `- [${oneLine(s.title)}](${s.url})`).join("\n")}`);
+  }
+  if (c?.parent) {
+    const parent = blocks(c.parent, level + 2, true, true);
+    if (parent.length) parts.push(`${"#".repeat(level + 1)} Parent company: ${oneLine(c.parent.name)}\n\n${parent.join("\n\n")}`);
   }
   if (parts.length === 0) return "";
   return `${"#".repeat(level)} ${title ?? "About the company"}\n\n${parts.join("\n\n")}`;

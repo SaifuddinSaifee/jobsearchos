@@ -29,6 +29,13 @@
       "when": 1791108770487,
       "tag": "0003_companies",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791110227573,
+      "tag": "0004_company_parent_and_research_log",
+      "breakpoints": true
     }
   ]
 }

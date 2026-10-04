@@ -4,7 +4,8 @@ export type SearchResult = { title: string; url: string; content: string };
 
 /** Pluggable web search so the provider can be swapped (or faked in tests). */
 export interface WebSearchProvider {
-  search(query: string, opts?: { maxResults?: number }): Promise<SearchResult[]>;
+  /** `includeDomains` restricts results to those sites (used for the targeted second query). */
+  search(query: string, opts?: { maxResults?: number; includeDomains?: string[] }): Promise<SearchResult[]>;
 }
 
 export class SearchError extends Error {}
@@ -18,11 +19,17 @@ export class TavilyProvider implements WebSearchProvider {
     private fetcher: FetchLike = (url, init) => fetch(url, init),
   ) {}
 
-  async search(query: string, opts: { maxResults?: number } = {}): Promise<SearchResult[]> {
+  async search(query: string, opts: { maxResults?: number; includeDomains?: string[] } = {}): Promise<SearchResult[]> {
     const res = await this.fetcher("https://api.tavily.com/search", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
-      body: JSON.stringify({ query, search_depth: "basic", max_results: opts.maxResults ?? 5, include_answer: false }),
+      body: JSON.stringify({
+        query,
+        search_depth: "basic",
+        max_results: opts.maxResults ?? 5,
+        include_answer: false,
+        ...(opts.includeDomains?.length ? { include_domains: opts.includeDomains } : {}),
+      }),
       signal: AbortSignal.timeout(20_000),
     });
     if (res.status === 401 || res.status === 403) throw new SearchError("The search service rejected the API key (check TAVILY_API_KEY)");

@@ -115,7 +115,11 @@ export function CompaniesTable({ rows }: { rows: CompanySummary[] }) {
                       {r.name}
                     </Link>
                     <div className="text-xs text-muted-foreground">
-                      {[r.website.replace(/^https?:\/\//, ""), r.aliases.length ? `also ${r.aliases.join(", ")}` : ""]
+                      {[
+                        r.parentName ? `part of ${r.parentName}` : "",
+                        r.website.replace(/^https?:\/\//, ""),
+                        r.aliases.length ? `also ${r.aliases.join(", ")}` : "",
+                      ]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>

@@ -44,6 +44,7 @@ const EditSchema = z.object({
   culture: Text.optional(),
   notes: Text.optional(),
   aliases: z.array(z.string().max(200)).max(50).optional(),
+  parentId: z.uuid().nullable().optional(),
 });
 
 export async function updateCompanyAction(id: string, edit: unknown) {

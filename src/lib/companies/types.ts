@@ -1,8 +1,8 @@
-import type { CompanyField, CompanyProvenance, CompanySource } from "@/lib/db/schema";
+import type { CompanyField, CompanyProvenance, CompanyResearchLog, CompanySource } from "@/lib/db/schema";
 
 // Client-safe types and constants: no database imports.
 
-export type { CompanyField, CompanyProvenance, CompanySource };
+export type { CompanyField, CompanyProvenance, CompanyResearchLog, CompanySource };
 
 export const COMPANY_FIELDS: { key: CompanyField; label: string; hint: string }[] = [
   { key: "about", label: "What they do", hint: "Products, customers, size, history." },
@@ -12,8 +12,10 @@ export const COMPANY_FIELDS: { key: CompanyField; label: string; hint: string }[
 
 export const MAX_FIELD_CHARS = 20_000;
 
-/** The company profile as shown and exported. */
-export type CompanyProfile = {
+/** The company profile as shown and exported. `parent` is the group it belongs to (one level). */
+export type CompanyProfile = CompanyProfileBase & { parent: CompanyProfileBase | null };
+
+export type CompanyProfileBase = {
   id: string;
   name: string;
   website: string;
@@ -23,6 +25,7 @@ export type CompanyProfile = {
   notes: string;
   provenance: CompanyProvenance;
   sources: CompanySource[];
+  researchLog: CompanyResearchLog | null;
   researchedAt: string | null;
 };
 
@@ -32,6 +35,7 @@ export type CompanySummary = {
   website: string;
   jobCount: number;
   aliases: string[];
+  parentName: string | null;
   hasAbout: boolean;
   hasPrinciples: boolean;
   hasCulture: boolean;
@@ -40,6 +44,8 @@ export type CompanySummary = {
 };
 
 export type CompanyDetail = CompanyProfile & {
+  parentId: string | null;
+  children: { id: string; name: string }[];
   aliases: string[];
   jobs: { jobId: string; title: string; status: string; createdAt: string }[];
 };
@@ -52,4 +58,5 @@ export type CompanyResearch = {
   culture: string;
   sources: CompanySource[];
   via?: "company-site" | "web-search";
+  log?: CompanyResearchLog;
 };

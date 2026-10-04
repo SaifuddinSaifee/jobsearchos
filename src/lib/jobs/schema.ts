@@ -47,9 +47,23 @@ export const CompanyResearchSchema = z.object({
   about: z.string(),
   principles: z.string(),
   culture: z.string(),
-  sources: z.array(z.object({ url: z.string(), title: z.string() })),
+  sources: z.array(z.object({ url: z.string(), title: z.string(), kind: z.enum(["owned", "third-party"]).optional() })),
   /** Which tier produced it: the company's own site (free) or a web search. */
   via: z.enum(["company-site", "web-search"]).optional(),
+  log: z
+    .object({
+      via: z.enum(["company-site", "web-search"]),
+      queries: z.array(z.string()),
+      pages: z.array(
+        z.object({
+          url: z.string(),
+          title: z.string(),
+          kind: z.enum(["owned", "third-party"]),
+          origin: z.enum(["site", "search"]),
+        }),
+      ),
+    })
+    .optional(),
 });
 
 export const JobDraftSchema = JobExtractionSchema.extend({
