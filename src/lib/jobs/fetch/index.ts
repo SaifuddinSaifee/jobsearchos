@@ -16,7 +16,7 @@ export type FetchJobOptions = {
   onStep?: (step: FetchStep) => void;
 };
 
-/** ATS API → JSON-LD → HTML/Readability → Playwright. Cheapest, most reliable method first. */
+/** ATS API, then JSON-LD, then HTML/Readability, then Playwright. Cheapest, most reliable method first. */
 export async function fetchJob(input: string, opts: FetchJobOptions = {}): Promise<FetchedPosting> {
   const fetcher = opts.fetcher ?? defaultFetcher;
   const render = opts.render ?? renderPage;

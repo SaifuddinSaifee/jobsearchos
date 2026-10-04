@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,10 +25,12 @@ export function LinesField({
   placeholder?: string;
 }) {
   const [text, setText] = useState(value.join("\n"));
+  const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       <Textarea
+        id={id}
         rows={rows}
         value={text}
         placeholder={placeholder}
@@ -61,10 +63,12 @@ export function TagsField({
   hint?: string;
 }) {
   const [text, setText] = useState(value.join(", "));
+  const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       <Input
+        id={id}
         value={text}
         placeholder={placeholder}
         onChange={(e) => {

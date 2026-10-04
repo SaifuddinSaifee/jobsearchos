@@ -41,6 +41,16 @@ async function checks(): Promise<Check[]> {
     });
   }
 
+  out.push(
+    env().TAVILY_API_KEY
+      ? { name: "Web search (Tavily)", ok: true, detail: "API key is set. Searches are used only when the posting and the company's own site are not enough" }
+      : {
+          name: "Web search (Tavily)",
+          ok: false,
+          detail: "Not set up. Company research uses only the posting and the company's own site. Add TAVILY_API_KEY to .env (free tier at tavily.com) to allow searches.",
+        },
+  );
+
   return out;
 }
 

@@ -101,6 +101,18 @@ Code lives in [src/lib/jobs/](src/lib/jobs/) (`fetch/` is the pipeline, `extract
 
 If you use Claude Code, open it in the repo root. [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) tell it to read the bundled Next.js docs in `node_modules/next/dist/docs/` first, because this Next.js version has breaking changes.
 
+## Tracking jobs (Stage 3)
+
+**Jobs** is the working table: tabs (Active, Saved, Preparing, Applied, Interviews, Offers, Closed), search, filters, inline status changes with Undo, bulk actions, CSV export, and a slide-over panel with notes and the status timeline. The **Dashboard** shows the funnel, what needs attention, and recent activity.
+
+Keyboard shortcuts on the Jobs page (when you are not typing in a field): `/` search, `j`/`k` or arrows move, `Enter` opens details, `x` selects, `Shift+A` marks Applied, `Esc` closes. Code: [src/lib/jobs/tracker.ts](src/lib/jobs/tracker.ts) (data and mutations), [src/components/jobs/](src/components/jobs/) (UI).
+
+## Companies
+
+**Companies** is a directory with one profile per employer, shared by every job there: what they do, mission/values/principles, culture, and your own notes. Jobs link to it automatically (aliases and Merge handle "YouTube" vs "Google"). Paste things like a company's principles yourself; research never overwrites what you edited. The profile is included when you copy a job as Markdown.
+
+Research uses the cheapest source first: the job posting, then the company's own About pages (free), and only then **one** web search through [Tavily](https://tavily.com) (`TAVILY_API_KEY` in `.env`, free tier available). Without a key everything else works and you can fill profiles by hand. See [docs/STAGE-3B-COMPANIES.md](docs/STAGE-3B-COMPANIES.md).
+
 ## Scripts
 
 | Command | What it does |

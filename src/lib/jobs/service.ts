@@ -1,4 +1,4 @@
-import { desc, eq, or } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   applications,
@@ -9,8 +9,10 @@ import {
   type JobRow,
 } from "@/lib/db/schema";
 import { env } from "@/lib/env";
+import { applyResearch, resolveCompany } from "@/lib/companies/service";
 import { dedupKey } from "./dedup";
 import { canonicalizeUrl } from "./fetch/url";
+import { safeHref } from "./links";
 import { JobDraftSchema } from "./schema";
 
 export type SaveResult =
@@ -69,14 +71,21 @@ export async function saveJob(input: unknown, db: Db = defaultDb()): Promise<Sav
 
   try {
     return await db.transaction(async (tx) => {
+      // Every job belongs to a directory entry; the posting's own "about us" text seeds an empty entry.
+      const company = await resolveCompany({ name: draft.company, aboutFromPosting: draft.aboutCompany }, tx);
+      if (draft.companyResearch) await applyResearch(company.id, draft.companyResearch, tx);
+
       const [job] = await tx
         .insert(jobs)
         .values({
           canonicalUrl,
-          applicationUrl: draft.applicationUrl || canonicalUrl,
+          // applicationUrl is model output: keep it only if it is a real http(s) link.
+          applicationUrl: safeHref(draft.applicationUrl) ?? canonicalUrl,
           ats: draft.ats,
           atsJobId: draft.atsJobId,
           company: draft.company.trim(),
+          companyId: company.id,
+          aboutCompany: draft.aboutCompany.trim(),
           title: draft.title.trim(),
           location: draft.location.trim(),
           remoteType: draft.remoteType,
@@ -115,7 +124,7 @@ export async function saveJob(input: unknown, db: Db = defaultDb()): Promise<Sav
 
       const [app] = await tx
         .insert(applications)
-        .values({ jobId: job.id, status: "saved", applicationUrl: draft.applicationUrl || canonicalUrl })
+        .values({ jobId: job.id, status: "saved", applicationUrl: safeHref(draft.applicationUrl) ?? canonicalUrl })
         .returning({ id: applications.id });
       await tx.insert(statusEvents).values({ applicationId: app.id, fromStatus: null, toStatus: "saved" });
 
@@ -129,20 +138,4 @@ export async function saveJob(input: unknown, db: Db = defaultDb()): Promise<Sav
     }
     throw err;
   }
-}
-
-export async function listJobs(db: Db = defaultDb()) {
-  return db
-    .select({
-      id: jobs.id,
-      company: jobs.company,
-      title: jobs.title,
-      location: jobs.location,
-      status: applications.status,
-      createdAt: jobs.createdAt,
-    })
-    .from(jobs)
-    .innerJoin(applications, eq(applications.jobId, jobs.id))
-    .orderBy(desc(jobs.createdAt))
-    .limit(200);
 }

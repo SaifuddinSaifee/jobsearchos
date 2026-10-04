@@ -1,3 +1,8 @@
+import { webSearch } from "@/lib/companies/search";
+import { companySiteBase, researchCompany, ResearchError } from "@/lib/companies/research";
+import { renderPage } from "@/lib/jobs/fetch/browser";
+import { findCompanyByName, needsResearch } from "@/lib/companies/service";
+import type { CompanyResearch } from "@/lib/companies/types";
 import { dedupKey } from "@/lib/jobs/dedup";
 import { extractJob } from "@/lib/jobs/extract";
 import { fetchJob } from "@/lib/jobs/fetch";
@@ -80,8 +85,39 @@ export async function POST(request: Request) {
           return;
         }
 
+        // Company profile, cheapest source first: directory, then the posting's own text, then the company's site, then one search.
+        send("step", { step: "company", status: "running" });
+        let companyResearch: CompanyResearch | null = null;
+        let companyNote = "";
+        try {
+          const existing = await findCompanyByName(extraction.company);
+          if (existing && !needsResearch(existing)) {
+            companyNote = `${existing.name} is already in your company directory.`;
+            send("step", { step: "company", status: "skipped", detail: "already in directory" });
+          } else {
+            const siteBase = companySiteBase(extraction.company, [existing?.website, posting.sourceUrl, posting.applicationUrl]);
+            companyResearch = await researchCompany(extraction.company, {
+              search: webSearch(),
+              siteBase,
+              postingAbout: extraction.aboutCompany,
+              render: renderPage,
+            });
+            const how = companyResearch.via === "web-search" ? "a web search" : "the company's own site (no search used)";
+            companyNote = `Researched from ${how}. It is saved to the company directory when you save the job.`;
+            send("step", { step: "company", status: "done", detail: companyResearch.via === "web-search" ? "web search" : "company site" });
+          }
+        } catch (err) {
+          companyNote =
+            err instanceof ResearchError
+              ? `Company research: ${err.message}`
+              : `Company research failed: ${err instanceof Error ? err.message : "unknown error"}. You can retry from Companies.`;
+          send("step", { step: "company", status: "skipped", detail: err instanceof ResearchError ? "not enough free info" : "failed" });
+        }
+
         const draft: JobDraft = {
           ...extraction,
+          companyResearch,
+          companyNote,
           applicationUrl: extraction.applicationUrl || posting.applicationUrl || "",
           sourceUrl: posting.sourceUrl,
           fetchMethod: posting.method,

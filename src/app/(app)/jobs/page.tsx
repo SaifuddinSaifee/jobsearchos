@@ -1,46 +1,27 @@
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { listJobs } from "@/lib/jobs/service";
+import { Suspense } from "react";
+import { JobsTable } from "@/components/jobs/table/jobs-table";
+import { Button } from "@/components/ui/button";
+import { listJobRows } from "@/lib/jobs/tracker";
 
 export const dynamic = "force-dynamic";
 
-// Minimal list so saved jobs are visible; Stage 3 replaces it with the full tracker table.
 export default async function JobsPage() {
-  const rows = await listJobs();
+  const rows = await listJobRows();
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <h1 className="text-2xl font-semibold">Jobs</h1>
-      {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No jobs yet. <Link href="/new" className="underline">Add your first application</Link>.
-        </p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Company</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Saved</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="font-medium">{r.company}</TableCell>
-                <TableCell>{r.title}</TableCell>
-                <TableCell>{r.location}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{r.status.replace(/_/g, " ")}</Badge>
-                </TableCell>
-                <TableCell>{r.createdAt.toLocaleDateString()}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Jobs</h1>
+          <p className="text-sm text-muted-foreground">
+            {rows.length} saved job{rows.length === 1 ? "" : "s"}. Track each one from saved to offer.
+          </p>
+        </div>
+        <Button nativeButton={false} render={<Link href="/new" />}>New application</Button>
+      </div>
+      <Suspense>
+        <JobsTable rows={rows} />
+      </Suspense>
     </div>
   );
 }

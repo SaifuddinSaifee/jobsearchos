@@ -12,8 +12,11 @@ import { LinesField, TagsField } from "@/components/profile/fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { draftToMarkdownJob } from "@/lib/jobs/markdown";
 import { JobDraftSchema, REMOTE_TYPES, type JobDraft } from "@/lib/jobs/schema";
+import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
 
 function Text({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -134,6 +137,44 @@ export function JobReviewForm({ initial }: { initial: JobDraft }) {
           )}
         />
 
+        <div className="space-y-1.5">
+          <Label htmlFor="aboutCompany">About the company (as written in the posting)</Label>
+          <Textarea id="aboutCompany" rows={5} {...register("aboutCompany")} placeholder="Nothing about the employer was found in the posting." />
+        </div>
+
+        {(initial.companyNote || initial.companyResearch) && (
+          <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+            <div className="font-medium">Company profile</div>
+            {initial.companyNote && <p className="text-muted-foreground">{initial.companyNote}</p>}
+            {initial.companyResearch && (
+              <details>
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                  Preview what the research found
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {[
+                    ["What they do", initial.companyResearch.about],
+                    ["Mission, values and principles", initial.companyResearch.principles],
+                    ["Culture", initial.companyResearch.culture],
+                  ]
+                    .filter(([, t]) => t)
+                    .map(([h, t]) => (
+                      <div key={h}>
+                        <div className="text-xs font-medium">{h}</div>
+                        <p className="whitespace-pre-wrap">{t}</p>
+                      </div>
+                    ))}
+                  <ul className="text-xs text-muted-foreground">
+                    {initial.companyResearch.sources.map((src) => (
+                      <li key={src.url}>{src.title}</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+
         {duplicate && (
           <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
             Already saved: <strong>{duplicate.title}</strong> at <strong>{duplicate.company}</strong>.{" "}
@@ -143,10 +184,14 @@ export function JobReviewForm({ initial }: { initial: JobDraft }) {
           </div>
         )}
 
-        <Button type="submit" disabled={pending}>
-          {pending && <Loader2 className="animate-spin" />}
-          Save job
-        </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button type="submit" disabled={pending}>
+            {pending && <Loader2 className="animate-spin" />}
+            Save job
+          </Button>
+          {/* Uses the form's current values, so edits you make above are included. */}
+          <MarkdownButtons build={() => toMarkdownFile(draftToMarkdownJob({ ...initial, ...form.getValues() }))} />
+        </div>
       </form>
 
       <aside className="lg:sticky lg:top-4 lg:self-start">

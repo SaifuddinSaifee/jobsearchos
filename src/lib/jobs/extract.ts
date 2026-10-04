@@ -16,6 +16,7 @@ Rules:
 - Salary: numbers only, no symbols (120000, not "$120k"). salaryCurrency as an ISO code (USD, EUR); salaryPeriod one of year, month, hour, or "". Use null when no pay is stated.
 - postedAt: ISO date (YYYY-MM-DD) if stated, else "".
 - applicationUrl: only if the posting gives an explicit apply link, else "".
+- aboutCompany: the paragraph(s) in the posting that describe the employer itself (what the company does, its mission, values, culture). Copy them as written with light trimming. Leave out the role's duties, perks lists and equal-opportunity statements. "" if the posting says nothing about the company.
 - responsibilities: what the person will do, one item per bullet, concise and in the posting's words.
 - requirements.required: must-have qualifications; requirements.preferred: nice-to-haves, bonus points, "preferred".
 - technologies: a flat list of every tool, language, framework, platform and cloud service named.

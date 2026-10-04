@@ -22,6 +22,7 @@ const STEP_LABELS: Record<FetchStep["step"], string> = {
   fetch: "Fetch posting",
   render: "Render page",
   structure: "Structure with AI",
+  company: "Research the company",
 };
 
 function StepList({ steps }: { steps: Steps }) {

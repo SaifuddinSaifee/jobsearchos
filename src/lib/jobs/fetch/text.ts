@@ -3,7 +3,7 @@ import { Readability } from "@mozilla/readability";
 
 const BLOCK = /<\/(p|div|li|ul|ol|h[1-6]|tr|section|article)>|<br\s*\/?>/gi;
 
-/** HTML fragment (e.g. an ATS description field) → plain text with paragraph breaks and bullets. */
+/** HTML fragment (e.g. an ATS description field) to plain text with paragraph breaks and bullets. */
 export function htmlToText(html: string): string {
   const withBreaks = html
     .replace(/<li[^>]*>/gi, "- ")
@@ -22,7 +22,7 @@ export function normalizeText(text: string): string {
     .trim();
 }
 
-/** Full HTML page → main article text, falling back to the whole body. */
+/** Full HTML page to main article text, falling back to the whole body. */
 export function readableText(html: string, url?: string): { title: string; text: string } {
   const virtualConsole = new VirtualConsole(); // jsdom logs CSS parse errors otherwise
   const dom = new JSDOM(html, { url, virtualConsole });

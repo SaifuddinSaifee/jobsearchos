@@ -17,6 +17,7 @@ export const JobExtractionSchema = z.object({
   salaryPeriod: z.string(),
   postedAt: z.string(),
   applicationUrl: z.string(),
+  aboutCompany: z.string(),
   responsibilities: z.array(z.string()),
   requirements: z.object({
     required: z.array(z.string()),
@@ -41,7 +42,21 @@ export const FETCH_METHODS = [
 ] as const;
 
 /** What the review form edits plus the provenance needed to save an immutable snapshot. */
+export const CompanyResearchSchema = z.object({
+  website: z.string(),
+  about: z.string(),
+  principles: z.string(),
+  culture: z.string(),
+  sources: z.array(z.object({ url: z.string(), title: z.string() })),
+  /** Which tier produced it: the company's own site (free) or a web search. */
+  via: z.enum(["company-site", "web-search"]).optional(),
+});
+
 export const JobDraftSchema = JobExtractionSchema.extend({
+  /** Web research on the employer, found while extracting; applied to the directory on save. */
+  companyResearch: CompanyResearchSchema.nullable().optional(),
+  /** One line for the review screen about what happened with company research. */
+  companyNote: z.string().optional(),
   sourceUrl: z.string(),
   fetchMethod: z.enum(FETCH_METHODS),
   ats: z.string().nullable(),
@@ -66,6 +81,7 @@ export function emptyExtraction(): JobExtraction {
     salaryPeriod: "",
     postedAt: "",
     applicationUrl: "",
+    aboutCompany: "",
     responsibilities: [],
     requirements: { required: [], preferred: [] },
     technologies: [],

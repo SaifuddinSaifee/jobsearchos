@@ -21,6 +21,7 @@ export function parseSmartRecruiters(body: string, json: unknown, m: Match, sour
     atsJobId: m.id,
     raw: { body, mime: "application/json" },
     text: joinSections([
+      section("companyDescription"),
       section("jobDescription"),
       section("qualifications"),
       section("additionalInformation"),

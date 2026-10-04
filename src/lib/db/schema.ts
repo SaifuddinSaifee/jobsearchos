@@ -92,6 +92,41 @@ export const applicationStatus = pgEnum("application_status", [
 
 export type JobRequirements = { required: string[]; preferred: string[] };
 
+export type CompanyField = "about" | "principles" | "culture";
+export type CompanyProvenance = Partial<Record<CompanyField, "posting" | "web" | "user">>;
+export type CompanySource = { url: string; title: string };
+
+/**
+ * One row per employer, shared by every job there. The text fields are Markdown. `provenance` records
+ * who last wrote each field; a field marked "user" is never overwritten by automated research.
+ */
+export const companies = pgTable("companies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  normalizedName: text("normalized_name").notNull().unique(),
+  website: text("website").notNull().default(""),
+  about: text("about").notNull().default(""),
+  principles: text("principles").notNull().default(""),
+  culture: text("culture").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  provenance: jsonb("provenance").$type<CompanyProvenance>().notNull().default({}),
+  sources: jsonb("sources").$type<CompanySource[]>().notNull().default([]),
+  researchedAt: timestamp("researched_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Other names that mean the same company (e.g. "YouTube" -> Google). */
+export const companyAliases = pgTable("company_aliases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  alias: text("alias").notNull(),
+  normalizedAlias: text("normalized_alias").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** `search_vector` (generated tsvector + GIN index) is added in the 0002 SQL migration. */
 export const jobs = pgTable(
   "jobs",
@@ -102,6 +137,10 @@ export const jobs = pgTable(
     ats: text("ats"),
     atsJobId: text("ats_job_id"),
     company: text("company").notNull(),
+    /** Link to the shared directory entry; null only for jobs saved before the directory existed. */
+    companyId: uuid("company_id").references(() => companies.id),
+    /** What this posting itself says about the employer (copied as written). */
+    aboutCompany: text("about_company").notNull().default(""),
     title: text("title").notNull(),
     location: text("location").notNull().default(""),
     remoteType: remoteType("remote_type").notNull().default("unknown"),
@@ -120,7 +159,7 @@ export const jobs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("jobs_created_idx").on(t.createdAt)],
+  (t) => [index("jobs_created_idx").on(t.createdAt), index("jobs_company_idx").on(t.companyId)],
 );
 
 /** Immutable: a DB trigger rejects UPDATE and DELETE (see drizzle/0002_jobs.sql). */
@@ -176,6 +215,7 @@ export const statusEvents = pgTable("status_events", {
 });
 
 export type JobRow = typeof jobs.$inferSelect;
+export type CompanyRow = typeof companies.$inferSelect;
 export type ProfileVersionRow = typeof profileVersions.$inferSelect;
 export type PastResumeRow = typeof pastResumes.$inferSelect;
 export type FileRow = typeof files.$inferSelect;

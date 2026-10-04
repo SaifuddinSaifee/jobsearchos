@@ -200,15 +200,30 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 ## Stage 3: Jobs dashboard and application tracker (about 1 week)
 
-**Goal:** the central table where everything happens.
+**Goal:** the central table where everything happens. Detailed plan and as-built notes: [STAGE-3-PLAN.md](STAGE-3-PLAN.md).
 
-- **Jobs table** (TanStack Table): company, title, location, status, match score (once Stage 6 lands), date saved, documents present
-- **Actions column** per row: Generate/View resume, Generate/View cover letter, Generate/View cold email, Find contact, Send email, Change status
-- Job detail page: JD snapshot, extracted fields, documents (with version history), status timeline, notes, contacts, outreach history
-- Statuses: Saved, Preparing, Applied, Recruiter Screen, Interview, Technical Interview, Final Interview, Offer, Rejected, Withdrawn, Ghosted, with `status_events` recording the timeline
-- Tabs: All, Saved, Preparing, Applied, Interviews, Offers, Rejected
+- **Jobs table** (TanStack Table v9): company (with source), title, location, salary, status, applied date, links (posting and application page), saved date; optional columns for source, posted date, employment type, technologies and notes. Sorting, search, remote and source filters, column visibility, pagination, row selection, **CSV export**
+- **Tabs:** Active (default; hides closed), Saved, Preparing, Applied, Interviews, Offers, **Closed** (Rejected, Withdrawn, Ghosted). State lives in the URL
+- **Status changes** inline, per row or in bulk, optimistic, each with an **Undo** toast; marking Applied records today's date (editable). Every change is a `status_events` row
+- **Slide-over panel** per job: links, status, applied date, notes, details, requirements, responsibilities, keywords, timeline, source text; previous/next through the current list; deep link with `?job=<id>`
+- **Keyboard shortcuts:** `/` search, `j`/`k` move, `Enter` open, `x` select, `Shift+A` mark Applied, `Esc` close
+- **Dashboard:** funnel counts, "needs attention" (Applied with no change for 7+ days, Preparing for 3+ days), recent activity
+- Tracking is basics only (status, notes, applied date). Documents, outreach and match-score columns arrive with Stages 4, 7 and 6. There is no hard delete (snapshots are immutable): a wrong save is set to Withdrawn
+- Statuses: Saved, Preparing, Applied, Recruiter Screen, Interview, Technical Interview, Final Interview, Offer, Rejected, Withdrawn, Ghosted
 
-**Done when:** a saved job can be moved through statuses and its timeline is recorded.
+**Done when:** a saved job can be moved through statuses, undone, and its timeline is recorded.
+
+---
+
+## Stage 3b: Company directory (added after Stage 3)
+
+**Goal:** know the employer, once. Resumes, cover letters and cold emails read better when they reflect what the company does and values, and that should not be re-researched for every job. Details: [STAGE-3B-COMPANIES.md](STAGE-3B-COMPANIES.md).
+
+- **`companies` directory:** one row per employer, shared by all its jobs. Markdown fields: what they do, mission/values/principles, culture, and your private notes; plus website, aliases and sources. Jobs link to it automatically (names compared after dropping case, punctuation and suffixes like Inc/LLC; aliases such as YouTube → Google); duplicates can be merged
+- **From the posting:** extraction also copies what the posting says about the employer (`aboutCompany`); it seeds an empty company profile
+- **Research, cheapest first:** directory (skip if already researched) → the posting's own text → the company's own site (About pages; Playwright only for thin pages that loaded) → **one** combined web search (Tavily, `TAVILY_API_KEY`) only if that is thin. One structured extraction over the sources, constrained to them. Failure or a missing key never blocks saving the job. A "Research / Refresh from web" button does the same on the company page
+- **Your edits win:** every text field records who wrote it (posting, web, you). Anything you edit is never overwritten by research; clearing a field hands it back to automation
+- **Export:** Markdown for a job now includes an "About the company" section (profile, your notes, the posting's own text, sources); the company page exports its own profile
 
 ---
 

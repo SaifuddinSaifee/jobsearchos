@@ -38,7 +38,7 @@ export type FetchedPosting = {
 };
 
 export type FetchStep = {
-  step: "detect" | "fetch" | "render" | "structure";
+  step: "detect" | "fetch" | "render" | "structure" | "company";
   status: "running" | "done" | "skipped";
   detail?: string;
 };

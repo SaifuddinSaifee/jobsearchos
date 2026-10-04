@@ -5,6 +5,8 @@ const EnvSchema = z.object({
   TEST_DATABASE_URL: z.string().optional(),
   // Optional here so build and tests run without it; LLM calls fail clearly when it's missing.
   TOGETHER_AI_API_KEY: z.string().optional(),
+  // Optional: web search for company research (https://tavily.com). Without it, research is skipped.
+  TAVILY_API_KEY: z.string().optional(),
   /** Writing: resume, cover letter, cold email. */
   WRITER_MODEL: z.string().default("MiniMaxAI/MiniMax-M3"),
   /** Extraction, parsing, scoring, classification, summarization. */

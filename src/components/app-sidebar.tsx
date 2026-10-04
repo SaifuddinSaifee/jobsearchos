@@ -3,6 +3,7 @@
 import {
   Briefcase,
   Compass,
+  Building2,
   LayoutDashboard,
   Moon,
   PlusCircle,
@@ -29,6 +30,7 @@ const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/new", label: "New Application", icon: PlusCircle },
+  { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/discover", label: "Discover", icon: Compass },
   { href: "/profile", label: "Profile", icon: UserRound },
   { href: "/settings", label: "Settings", icon: Settings },
