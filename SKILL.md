@@ -1,6 +1,6 @@
 ---
 name: "job-application-kit"
-description: Tailor a resume to a job description, write a cover letter, and write a short punchy cold email to a recruiter or hiring manager. Use this skill whenever the user shares a resume and/or a job description (JD) and asks for a tailored ATS-optimized resume, a cover letter, a cold email, outreach message, or any combination of these. Also trigger when they say things like "curate my resume for this role", "make my resume fit this JD", "write me a cover letter", "draft a cold email for this job", or paste a JD along with their resume, even if they don't name every deliverable.
+description: Tailor a resume to a job description, write a cover letter, and write a short cold email (plus follow-up) to a founder, recruiter, or hiring manager that earns a reply instead of restating the cover letter. Use this skill whenever the user shares a resume and/or a job description (JD) and asks for a tailored ATS-optimized resume, a cover letter, a cold email, outreach message, or any combination of these. Also trigger when they say things like "curate my resume for this role", "make my resume fit this JD", "write me a cover letter", "draft a cold email for this job", "email the founder", "write a follow-up", or paste a JD along with their resume, even if they don't name every deliverable.
 ---
 
 # Job Application Kit
@@ -40,7 +40,7 @@ The only purpose of company details is to make the documents feel personalized, 
 **When details are provided:**
 - **Resume:** at most a subtle nudge. If a summary exists, it can echo the company's domain or mission in a few words ("building AI for small business finances"). Bullets can favor wording that matches the company's world (e.g., "consumers" vs "enterprises"). Never quote the mission statement and never name the company in the resume body.
 - **Cover letter:** the "Why this company" part draws on one or two specific details, tied to something the user has done or cares about. One or two sentences total, not a paragraph of praise.
-- **Cold email:** use at most one detail, as the unique touch or inside the hook. One clause is often enough.
+- **Cold email:** use at most one detail, as the unique touch or inside the hook. One clause is often enough. Exception: with the proof-of-work angle, the company's own product is the hook.
 - Pick the detail that connects best to the user's experience, not the most impressive-sounding one. Skip the rest.
 - Don't repeat the company's own marketing language back to them word for word, and don't flatter ("your visionary mission...").
 
@@ -149,48 +149,89 @@ Use the recipient's name if given, otherwise "Dear Hiring Manager" or "Dear [Tea
 
 ## 3. Cold email
 
-A busy recruiter or hiring manager reads this in 15 seconds on their phone, between other things. It has to read like a note from a sharp person, not a pitch. If it looks like it could be mass-sent with the name swapped, it gets ignored, so the whole email must be impossible to send to any other company.
+A cold email has a different job from a cover letter. The letter makes the case; the email only has to earn a reply. The most common failure is writing a shrunken cover letter: same story, same proof points, same order, fewer words. Founders and hiring managers at startups get buried in email, read on their phone in 15 seconds, and reply to notes that are about *them* (their product, their problem) and that come from someone who has visibly done something. So the email is built on its own angle, never on the cover letter's hook.
 
-### Shape
+### Step 1: pick the angle
 
-- **60 to 110 words**, 3 or 4 very short paragraphs. Plain prose. **No bullets and no labels** ("What I'd bring:", "Highlights:") by default: those are what make it look like a template. Use bullets only if the user asks for them.
-- **Paragraph 1, the hook (1 to 3 sentences):** one specific story or observation from the resume, ideally the same "smaller version of your problem" thread as the cover letter (see section 2). Start in the middle of it. The first sentence should make the reader want the second.
-- **Paragraph 2, the bridge and proof (1 to 2 sentences):** connect the story to this team, name the role, and add at most 1 or 2 more numbers, folded into a sentence.
-- **Paragraph 3, the ask (1 to 2 sentences):** specific, human, low-friction, with an easy out. E.g., "If you're the one hiring for this, I'd love 15 minutes. If not, who should I talk to?" The out makes it easy to reply even when they aren't the right person.
-- **Sign-off:** first name, plus one line with LinkedIn/GitHub/portfolio if the resume has them.
+Before writing, decide which angle the user's material supports. Prefer the highest one that is honestly available:
 
-### Subject line
+1. **Proof of work with their product.** The user built something with the company's product, API, or SDK, or did a concrete teardown of it (timed the signup, mocked a fix, wrote an integration). The hook is the artifact itself, one link, and one real observation (where they got stuck, what they'd change). This is the strongest angle by far, and nearly mandatory for dev tools, DevRel, and product roles, because it shows the job instead of describing it. If the JD says applicants should have used the product, this angle also proves the requirement.
+2. **Value-first offer.** Offer to do a small, concrete slice of the job now: an early version of their take-home on something they choose, an audit of one flow, one pipeline for one report. The ask becomes a one-word reply ("Which partner would you pick?"). Only suggest offers the user can realistically deliver in about a week.
+3. **Sharp question or observation.** One specific, informed observation or question about their product or the problem the role exists to solve, followed by one line of why the user is worth answering.
+4. **Plain direct intro.** Who the user is, why they're writing, why the reader should care, with one or two concrete proof points. Still effective; plain beats clever.
 
-Offer 2 options, under 8 words. They should create curiosity from the story itself, the way a good headline does ("A third of our tickets were a search problem"), not read like a resume headline ("Engineer with 500K events/day experience") or a form ("Application for SWE role"). Sentence case or lowercase is fine; no clickbait, no emojis.
+Never invent the artifact, the snag, or the result. If the best angle depends on work the user hasn't done yet (angle 1 almost always does), write that email with clearly marked placeholders (e.g. `[link]`, `[real snag you hit]`) and label it "send after you build it", then also give a second email using a different angle that can be sent today.
+
+### Step 2: shape
+
+- **Body: 60 to 120 words**, 3 or 4 very short paragraphs, plain prose. No bullets or labels ("What I'd bring:") unless the user asks; they make it read like a template.
+- **First sentence is about them or a thing**, not the sender: their product, their problem, an artifact, their hiring process. Never "My name is", never the user's title or excitement.
+- **Why care:** one or two concrete proof points with numbers, folded into a sentence. Pick ones that map to the role's top need. The cover letter's main story may appear here as one clause of proof, never as the hook.
+- **One ask**, specific and easy to say yes to: a 15-minute call, a one-word choice, or a real question. Add an out when the reader might not be the right person ("If you're not the right person, who is?"). Never two asks, never a vague "let me know".
+- If the user has applied through a posting, one clause saying so is fine.
+- **Sign-off:** first name, then one link (LinkedIn, GitHub, or portfolio). At most two links in the whole email, no attachments, no images or formatting.
+
+### Step 3: subject line
+
+Offer 2 options, 2 to 6 words, lowercase or sentence case. The best ones look like an internal email or name the artifact or offer ("gensql, now inside claude", "your take-home, early", "your onboarding, timed"), so the reader opens it because it's about their thing. Avoid resume headlines ("Experienced engineer with 500K events/day"), form titles ("Application for SWE role"), clickbait, and emojis.
+
+### Step 4: follow-up
+
+Always include one follow-up, to send once after 4 to 5 business days with no reply. Under 50 words, in the same thread, and it must add something new: a shipped link, a second finding, the blog post that goes with the demo. Never "just checking in" or "bumping this to the top of your inbox". One follow-up, two at most; more reads as spam. Unanswered emails are usually unseen or forgotten, not rejected, which is why the follow-up matters.
+
+### Step 5: sending note
+
+After the emails, add a sending note of 2 to 3 lines: who to send to (at startups, the founder or CEO, since they are usually the hiring manager; at larger companies, the hiring manager; never info@ or careers@ addresses), to verify the address rather than guess the format, to apply through the portal first if there's a posting, and to send Tuesday to Thursday morning in the recipient's time zone. Use the recipient's name if the user gave it or it appears in the posting; otherwise write `Hi [Name]`.
 
 ### Voice rules
 
-- Same voice rules and banned phrases as the cover letter, plus these cold-email tells: "I hope this finds you well", "My name is", "I came across", "reaching out", "I'd love to connect", "Worth a quick chat?" (as a stock line), "perfect fit", "I'm a huge fan", "Looking forward".
-- The unique touch comes from the story, not from a tacked-on personality line ("I still get excited when...") or a list of awards. Mention an award only if it directly serves the hook.
-- Don't repeat the cover letter's sentences verbatim; same thread, fresh wording.
+- Same voice rules and banned phrases as the cover letter, plus these cold-email tells: "I hope this finds you well", "My name is", "I came across", "reaching out", "I'd love to connect", "Worth a quick chat?" (as a stock line), "perfect fit", "I'm a huge fan", "Looking forward", "I know you're busy", "pick your brain".
+- No fake personalization ("I saw your post on LinkedIn!") and no claimed fandom unless the user said it's true. Finding them through a funding announcement or a job board is fine and needs no dressing up.
+- No fancy words. Replace every abstraction with the concrete thing: "drove impact" becomes "cut support tickets 36%". Read it aloud; if a line sounds like LinkedIn, cut it.
+- Personality comes from the specific observation or artifact, not from a tacked-on line or a list of awards.
 - Never use em dashes.
 
-### Example shape (illustrative, different domain, don't copy)
+### Example shapes (illustrative, different domains, don't copy)
 
-Subject: the refund form nobody finished
+Proof of work:
+
+Subject: your onboarding, timed
 
 Hi Priya,
 
-Last year 40% of our refund requests died halfway through the form. I cut it to three taps, and completed refunds doubled in a month.
+I signed up for Ledgerly last week and timed it: 11 minutes to my first invoice, and 6 of those went to connecting a bank. I mocked a version that moves that step after the first invoice: [link]
 
-Your Payments PM role reads like that problem with a few more zeros. I've also run the unglamorous parts: pricing experiments, and the billing migration nobody wanted to own.
+I've applied for the Growth PM role. At my last company I rebuilt a checkout flow and completed purchases doubled in a month.
 
-If you're the one hiring for this, I'd love 15 minutes. If not, who should I talk to?
+Could I walk you through the mock in 15 minutes? If you're not the right person, who is?
 
-Name
+Sam
 linkedin.com/in/...
+
+Value-first offer:
+
+Subject: one report, on me
+
+Hi Marco,
+
+Your Data Engineer posting mentions untangling the reporting pipeline. Send me one report your team still rebuilds by hand every week, and I'll come back in five days with a working pipeline for it.
+
+For context: at my last job I moved 40 manual reports onto scheduled pipelines and the analytics team's Monday went from six hours to one.
+
+Which report would you pick?
+
+Sam
+github.com/...
 
 ### Self-check
 
-- Delete the company and role names. Does it still work for another company? Rewrite.
-- Read it aloud. Does it sound like a person or a template? Any line that sounds like LinkedIn goes.
-- Is the first sentence about something that happened, not about the sender?
-- Under 110 words, no bullets, one ask, no banned phrases.
+- Does it read like a shrunken cover letter (same hook, same proof points in the same order)? Rewrite it around a different angle.
+- Is the first sentence about them, their product, or an artifact, rather than the sender?
+- Delete the company and role names. Could it be sent to another company? Rewrite.
+- Read it aloud. Does it sound like a person? Any line that sounds like a template goes.
+- 60 to 120 words, no bullets, one ask, at most two links, no attachments, no banned phrases, no em dashes.
+- Every artifact, snag, and number is real or clearly marked as a placeholder.
+- A follow-up and a sending note are included.
 
 ---
 
@@ -201,7 +242,7 @@ linkedin.com/in/...
 - Resume structure matches the original section-for-section
 - Every JD requirement is covered in the resume, each in a meaningful sentence
 - Cover letter is built on one story with a real hook, passes its self-check, and contains no banned phrases
-- Cold email is plain prose, under 110 words, hooks on a story, has one ask with an out, and passes its self-check
+- Cold email is built on its own angle (proof of work, value-first offer, sharp question, or plain intro), not a compressed cover letter; plain prose, 60 to 120 words, one ask with an out, a follow-up and a sending note included, passes its self-check
 - Exact JD keywords used (not synonyms), acronyms expanded once, no stuffing
 - Company details (if given) used lightly: one or two touches, nothing invented if not given
 - No fit warnings or hedging about missing requirements
