@@ -3,7 +3,14 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import { connectedAccount, missingConfig, redirectUri } from "@/lib/email/gmail";
+import { providerKeys } from "@/lib/email/providers";
+import { getColdEmailSettings } from "@/lib/email/settings";
 import { together } from "@/lib/llm/client";
+import { ContactProvidersCard } from "@/components/settings/contact-providers-card";
+import { EmailSettingsForm } from "@/components/settings/email-settings-form";
+import { GmailCard } from "@/components/settings/gmail-card";
+import { SettingsTabs } from "@/components/settings/settings-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -51,14 +58,27 @@ async function checks(): Promise<Check[]> {
         },
   );
 
+  try {
+    const account = await connectedAccount();
+    out.push(
+      !account
+        ? { name: "Gmail", ok: false, detail: "Not connected. Connect it on the Email tab to send cold emails." }
+        : account.needsReconnect
+          ? { name: "Gmail", ok: false, detail: `${account.email} needs to be reconnected on the Email tab` }
+          : { name: "Gmail", ok: true, detail: `Connected as ${account.email}` },
+    );
+  } catch (err) {
+    out.push({ name: "Gmail", ok: false, detail: (err as Error).message });
+  }
+
   return out;
 }
 
 export default async function SettingsPage() {
-  const results = await checks();
+  const [results, account, coldEmail] = await Promise.all([checks(), connectedAccount(), getColdEmailSettings()]);
   const e = env();
 
-  return (
+  const general = (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">Whether the services the app depends on are reachable, and which models it uses.</p>
 
@@ -94,4 +114,26 @@ export default async function SettingsPage() {
       </Card>
     </div>
   );
+
+  const email = (
+    <>
+      <GmailCard
+        state={{
+          missing: missingConfig(),
+          redirectUri: redirectUri(),
+          showSetup: process.env.NODE_ENV !== "production",
+          account: account && {
+            email: account.email,
+            scopes: account.scopes,
+            connectedAt: account.connectedAt.toISOString(),
+            needsReconnect: account.needsReconnect,
+          },
+        }}
+      />
+      <ContactProvidersCard keys={providerKeys()} />
+      <EmailSettingsForm initial={coldEmail} />
+    </>
+  );
+
+  return <SettingsTabs general={general} email={email} />;
 }

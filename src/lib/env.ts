@@ -7,6 +7,16 @@ const EnvSchema = z.object({
   TOGETHER_AI_API_KEY: z.string().optional(),
   // Optional: web search for company research (https://tavily.com). Without it, research is skipped.
   TAVILY_API_KEY: z.string().optional(),
+  // Optional: Gmail connection for cold email (see the "Setup: Gmail" section of the README).
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  /** Where the app is reached; the Gmail OAuth redirect URI is `${APP_URL}/api/gmail/callback`. */
+  APP_URL: z.string().default("http://localhost:3000"),
+  /** 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts the stored Gmail tokens. */
+  TOKEN_ENCRYPTION_KEY: z.string().optional(),
+  // Optional: contact finders for cold email.
+  HUNTER_API_KEY: z.string().optional(),
+  APOLLO_API_KEY: z.string().optional(),
   /** Writing: resume, cover letter, cold email. */
   WRITER_MODEL: z.string().default("MiniMaxAI/MiniMax-M3"),
   /** Extraction, parsing, scoring, classification, summarization. */
@@ -35,4 +45,9 @@ export function env(): Env {
     cached = parsed.data;
   }
   return cached;
+}
+
+/** Forgets the parsed environment so tests can change `process.env` between cases. */
+export function resetEnv(): void {
+  cached = undefined;
 }

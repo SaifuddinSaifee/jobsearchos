@@ -286,7 +286,8 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
   3. Email pattern inference + verification (Hunter verifier) when only a name is known
   4. The LLM **ranks candidates** by relevance to the role (hiring manager for that team > team lead > technical recruiter > general recruiter) and explains why
   5. Manual add/edit always available
-- **Gmail integration:** OAuth with `gmail.send` scope; tokens stored locally, encrypted
+- **Settings and Gmail connection first (Stage 7a, built):** the Email tab in Settings connects Gmail (OAuth, tokens encrypted in Postgres), holds the sending rules, writing defaults and contact-finder key status. Details: [STAGE-7A-EMAIL-SETTINGS.md](STAGE-7A-EMAIL-SETTINGS.md). Writing and sending rules: [cold-email.md](cold-email.md)
+- **Gmail integration:** OAuth with `gmail.send` and `gmail.readonly` scopes (both requested at connect time, so reply detection needs no reconnect); tokens stored locally, encrypted
 - **Send flow:** pick contact → choose cold-email version → edit → preview → **Send** (explicit click, never automatic)
 - Store message and thread IDs in `outreach_emails`; show sent history on the job
 - Later: read replies on the thread (needs `gmail.readonly`) to flag responses

@@ -1,5 +1,6 @@
 import {
   type AnyPgColumn,
+  boolean,
   date,
   index,
   integer,
@@ -13,6 +14,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
 import type {
   GenerationInstructions,
@@ -301,6 +303,37 @@ export const quickLinks = pgTable(
   (t) => [index("quick_links_position_idx").on(t.position)],
 );
 
+/** App-wide configuration. One row (`id = 'default'`); unlike profile versions, edits overwrite. */
+export const appSettings = pgTable("app_settings", {
+  id: text("id").primaryKey(),
+  coldEmail: jsonb("cold_email").$type<ColdEmailSettings>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** A connected mail account. Tokens are AES-GCM encrypted. Disconnecting is soft (`disconnected_at`). */
+export const emailAccounts = pgTable(
+  "email_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").$type<"gmail">().notNull(),
+    email: text("email").notNull(),
+    scopes: text("scopes").array().notNull(),
+    refreshTokenEnc: text("refresh_token_enc").notNull(),
+    accessTokenEnc: text("access_token_enc"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    /** Set when Google rejected the refresh token (revoked, or expired in Testing mode); the user must reconnect. */
+    needsReconnect: boolean("needs_reconnect").notNull().default(false),
+    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("email_accounts_one_active_idx")
+      .on(t.provider)
+      .where(sql`${t.disconnectedAt} is null`),
+  ],
+);
+
+export type EmailAccountRow = typeof emailAccounts.$inferSelect;
 export type QueueRow = typeof applicationQueue.$inferSelect;
 export type QuickLinkRow = typeof quickLinks.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
