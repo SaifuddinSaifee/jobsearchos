@@ -4,28 +4,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { useForm, type UseFormReturn } from "react-hook-form";
 import { toast } from "sonner";
 import { saveJobAction } from "@/app/(app)/new/actions";
-import { LinesField, TagsField } from "@/components/profile/fields";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { NativeSelect } from "@/components/ui/native-select";
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { draftToMarkdownJob } from "@/lib/jobs/markdown";
-import { JobDraftSchema, REMOTE_TYPES, type JobDraft } from "@/lib/jobs/schema";
+import { JobDraftSchema, type JobDraft, type JobExtraction } from "@/lib/jobs/schema";
+import { JobFields } from "./job-fields";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
-
-function Text({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
-    </div>
-  );
-}
 
 export function JobReviewForm({
   initial,
@@ -42,7 +29,7 @@ export function JobReviewForm({
   const [pending, startTransition] = useTransition();
   const [duplicate, setDuplicate] = useState<{ id: string; company: string; title: string } | null>(null);
   const form = useForm<JobDraft>({ resolver: zodResolver(JobDraftSchema), defaultValues: initial });
-  const { register, control, handleSubmit, formState } = form;
+  const { handleSubmit } = form;
 
   const submit = handleSubmit(
     (values) =>
@@ -63,98 +50,11 @@ export function JobReviewForm({
     () => toast.error("Fix the highlighted fields first"),
   );
 
-  const err = (name: keyof JobDraft) =>
-    formState.errors[name] && (
-      <p className="text-xs text-destructive animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none">
-        Required or invalid
-      </p>
-    );
-
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Text label="Company" htmlFor="f-company">
-            <Input id="f-company" {...register("company")} />
-            {err("company")}
-          </Text>
-          <Text label="Title" htmlFor="f-title">
-            <Input id="f-title" {...register("title")} />
-            {err("title")}
-          </Text>
-          <Text label="Location" htmlFor="f-location">
-            <Input id="f-location" {...register("location")} />
-          </Text>
-          <Text label="Remote type" htmlFor="f-remoteType">
-            <NativeSelect id="f-remoteType" {...register("remoteType")}>
-              {REMOTE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </NativeSelect>
-          </Text>
-          <Text label="Employment type" htmlFor="f-employmentType">
-            <Input id="f-employmentType" {...register("employmentType")} />
-          </Text>
-          <Text label="Posted (YYYY-MM-DD)" htmlFor="f-postedAt">
-            <Input id="f-postedAt" {...register("postedAt")} />
-          </Text>
-          <Text label="Salary min" htmlFor="f-salaryMin">
-            <Input id="f-salaryMin" {...register("salaryMin", { setValueAs: (v) => (v === "" || v == null ? null : Number(v)) })} />
-          </Text>
-          <Text label="Salary max" htmlFor="f-salaryMax">
-            <Input id="f-salaryMax" {...register("salaryMax", { setValueAs: (v) => (v === "" || v == null ? null : Number(v)) })} />
-          </Text>
-          <Text label="Currency" htmlFor="f-salaryCurrency">
-            <Input id="f-salaryCurrency" {...register("salaryCurrency")} placeholder="USD" />
-          </Text>
-          <Text label="Period" htmlFor="f-salaryPeriod">
-            <Input id="f-salaryPeriod" {...register("salaryPeriod")} placeholder="year / month / hour" />
-          </Text>
-        </div>
-        <Text label="Application URL" htmlFor="f-applicationUrl">
-            <Input id="f-applicationUrl" {...register("applicationUrl")} />
-        </Text>
-
-        <Controller
-          control={control}
-          name="responsibilities"
-          render={({ field }) => (
-            <LinesField label="Responsibilities" rows={6} value={field.value} onChange={field.onChange} />
-          )}
-        />
-        <Controller
-          control={control}
-          name="requirements.required"
-          render={({ field }) => (
-            <LinesField label="Required qualifications" rows={6} value={field.value} onChange={field.onChange} />
-          )}
-        />
-        <Controller
-          control={control}
-          name="requirements.preferred"
-          render={({ field }) => (
-            <LinesField label="Preferred qualifications" rows={4} value={field.value} onChange={field.onChange} />
-          )}
-        />
-        <Controller
-          control={control}
-          name="technologies"
-          render={({ field }) => <TagsField label="Technologies" value={field.value} onChange={field.onChange} />}
-        />
-        <Controller
-          control={control}
-          name="keywords"
-          render={({ field }) => (
-            <TagsField label="Keywords" value={field.value} onChange={field.onChange} hint="Used to find similar past resumes. Separate with commas." />
-          )}
-        />
-
-        <div className="space-y-1.5">
-          <Label htmlFor="aboutCompany">About the company (as written in the posting)</Label>
-          <Textarea id="aboutCompany" rows={5} {...register("aboutCompany")} placeholder="Nothing about the employer was found in the posting." />
-        </div>
+        {/* JobDraft extends JobExtraction, so the shared fields can drive this form. */}
+        <JobFields form={form as unknown as UseFormReturn<JobExtraction>} />
 
         {(initial.companyNote || initial.companyResearch) && (
           <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">

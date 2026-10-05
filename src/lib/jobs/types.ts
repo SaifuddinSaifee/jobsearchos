@@ -61,3 +61,9 @@ export type PreviousState = {
   expected: ApplicationStatus;
 };
 
+
+/** What a delete removed, so Undo can bring it back. Companies are the ones left without jobs. */
+export type DeletedState = {
+  jobIds: string[];
+  companies: { id: string; name: string }[];
+};

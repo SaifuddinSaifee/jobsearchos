@@ -1,4 +1,4 @@
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   applications,
@@ -90,11 +90,13 @@ function toRow(r: Awaited<ReturnType<typeof selectRows>>[number]): JobRow {
   };
 }
 
-function selectRows(db: Db) {
+/** Rows of jobs that are not deleted. */
+function selectRows(db: Db, where?: SQL) {
   return db
     .select(rowSelection)
     .from(jobs)
-    .innerJoin(applications, eq(applications.jobId, jobs.id));
+    .innerJoin(applications, eq(applications.jobId, jobs.id))
+    .where(and(isNull(jobs.deletedAt), where));
 }
 
 export async function listJobRows(db: Db = defaultDb()): Promise<JobRow[]> {
@@ -103,7 +105,7 @@ export async function listJobRows(db: Db = defaultDb()): Promise<JobRow[]> {
 }
 
 export async function getJobDetail(jobId: string, db: Db = defaultDb()): Promise<JobDetail | null> {
-  const [r] = await selectRows(db).where(eq(jobs.id, jobId)).limit(1);
+  const [r] = await selectRows(db, eq(jobs.id, jobId)).limit(1);
   if (!r) return null;
 
   const [extra] = await db
@@ -277,10 +279,9 @@ export type ExportRow = JobRow & { notes: string };
 /** Rows for CSV, in the order of `applicationIds` (or newest first when null). */
 export async function exportRows(applicationIds: string[] | null, db: Db = defaultDb()): Promise<ExportRow[]> {
   if (applicationIds && applicationIds.length === 0) return [];
-  const base = selectRows(db);
   const rows = applicationIds
-    ? await base.where(inArray(applications.id, applicationIds))
-    : await base.orderBy(desc(jobs.createdAt));
+    ? await selectRows(db, inArray(applications.id, applicationIds))
+    : await selectRows(db).orderBy(desc(jobs.createdAt));
   const notes = await db
     .select({ id: applications.id, notes: applications.notes })
     .from(applications)
@@ -350,6 +351,7 @@ export async function dashboardData(db: Db = defaultDb(), now = new Date()): Pro
     .from(statusEvents)
     .innerJoin(applications, eq(applications.id, statusEvents.applicationId))
     .innerJoin(jobs, eq(jobs.id, applications.jobId))
+    .where(isNull(jobs.deletedAt))
     .orderBy(desc(statusEvents.at), desc(statusEvents.id))
     .limit(10);
 

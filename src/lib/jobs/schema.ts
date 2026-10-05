@@ -28,6 +28,27 @@ export const JobExtractionSchema = z.object({
 });
 export type JobExtraction = z.infer<typeof JobExtractionSchema>;
 
+const Line = z.string().max(2_000);
+const Lines = z.array(Line).max(200);
+
+/** What the user can change on a saved job. Company and title are required. */
+export const JobEditSchema = JobExtractionSchema.extend({
+  company: z.string().trim().min(1, "Enter a company").max(200),
+  title: z.string().trim().min(1, "Enter a title").max(300),
+  location: z.string().max(300),
+  employmentType: z.string().max(100),
+  salaryCurrency: z.string().max(10),
+  salaryPeriod: z.string().max(20),
+  postedAt: z.string().max(10),
+  applicationUrl: z.string().max(2_000),
+  aboutCompany: z.string().max(20_000),
+  responsibilities: Lines,
+  requirements: z.object({ required: Lines, preferred: Lines }),
+  technologies: z.array(z.string().max(100)).max(100),
+  keywords: z.array(z.string().max(100)).max(100),
+});
+export type JobEdit = z.infer<typeof JobEditSchema>;
+
 export const FETCH_METHODS = [
   "greenhouse",
   "lever",

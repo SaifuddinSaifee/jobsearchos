@@ -7,7 +7,10 @@ export type JobsActions = {
   /** null until after mount, so relative times never cause a hydration mismatch. */
   now: Date | null;
   openJob: (jobId: string) => void;
+  editJob: (jobId: string) => void;
   changeStatus: (applicationIds: string[], to: ApplicationStatus) => void;
+  /** Soft delete with an Undo toast. */
+  deleteJobs: (jobIds: string[]) => void;
 };
 
 const Ctx = createContext<JobsActions | null>(null);

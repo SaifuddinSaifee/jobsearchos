@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -14,11 +14,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDate, formatSalary, relativeDays, storedToDate } from "@/lib/jobs/format";
 import { sourceLabel } from "@/lib/jobs/links";
-import { MAX_NOTES, type JobDetail, type JobRow } from "@/lib/jobs/types";
+import { MAX_NOTES, type DeletedState, type JobDetail, type JobRow } from "@/lib/jobs/types";
 import { statusInfo, type ApplicationStatus } from "@/lib/jobs/status";
 import { detailToMarkdownJob } from "@/lib/jobs/markdown";
 import { cn } from "@/lib/utils";
 import { AskClaudeButton } from "./ask-claude";
+import { JobEditForm } from "./job-edit-form";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
 import { JobLinkButtons } from "./table/job-links";
 import { StatusMenu } from "./table/status-menu";
@@ -44,8 +45,13 @@ type Props = {
   onNavigate: (jobId: string) => void;
   onChangeStatus: (applicationId: string, to: ApplicationStatus) => void;
   onSetAppliedAt: (applicationId: string, date: string) => void;
-  onNotesDirty: (dirty: boolean) => void;
+  /** Unsaved notes or job edits; the table asks before throwing them away. */
+  onDirty: (dirty: boolean) => void;
   onNotesSaved: () => void;
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
+  onEdited: (removedCompanies: DeletedState["companies"]) => void;
+  onDelete: (jobId: string) => void;
 };
 
 export function JobSheet(props: Props) {
@@ -116,8 +122,12 @@ function Panel({
   onNavigate,
   onChangeStatus,
   onSetAppliedAt,
-  onNotesDirty,
+  onDirty,
   onNotesSaved,
+  editing,
+  onEditingChange,
+  onEdited,
+  onDelete,
 }: Props & { head: JobRow; detail: JobDetail | null; loading: boolean }) {
   const now = useNow();
   const dateRef = useRef<HTMLInputElement>(null);
@@ -166,9 +176,77 @@ function Panel({
             build={() => toMarkdownFile(detailToMarkdownJob(detail!))}
           />
           <AskClaudeButton disabled={!detail} build={() => detailToMarkdownJob(detail!)} />
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant={editing ? "secondary" : "outline"}
+              size="sm"
+              disabled={!detail}
+              aria-pressed={editing}
+              onClick={() => onEditingChange(!editing)}
+            >
+              <Pencil />
+              {editing ? "Editing" : "Edit"}
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => onDelete(head.jobId)}>
+              <Trash2 />
+              Delete
+            </Button>
+          </div>
         </div>
       </SheetHeader>
 
+      {editing ? (
+        detail ? (
+          <JobEditForm
+            key={detail.jobId}
+            detail={detail}
+            onCancel={() => onEditingChange(false)}
+            onSaved={onEdited}
+            onDirty={onDirty}
+          />
+        ) : (
+          <div className="space-y-3 border-t p-6">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-32 w-full" />
+          </div>
+        )
+      ) : (
+        <PanelBody
+          head={head}
+          detail={detail}
+          loading={loading}
+          now={now}
+          dateRef={dateRef}
+          onChangeStatus={onChangeStatus}
+          onSetAppliedAt={onSetAppliedAt}
+          onDirty={onDirty}
+          onNotesSaved={onNotesSaved}
+        />
+      )}
+    </>
+  );
+}
+
+function PanelBody({
+  head,
+  detail,
+  loading,
+  now,
+  dateRef,
+  onChangeStatus,
+  onSetAppliedAt,
+  onDirty,
+  onNotesSaved,
+}: Pick<Props, "onChangeStatus" | "onSetAppliedAt" | "onDirty" | "onNotesSaved"> & {
+  head: JobRow;
+  detail: JobDetail | null;
+  loading: boolean;
+  now: Date | null;
+  dateRef: React.RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <div className="animate-in fade-in duration-200 motion-reduce:animate-none">
       <Section title="Tracking">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
@@ -205,7 +283,7 @@ function Panel({
           applicationId={head.applicationId}
           initial={detail?.notes ?? ""}
           ready={Boolean(detail)}
-          onDirty={onNotesDirty}
+          onDirty={onDirty}
           onSaved={onNotesSaved}
         />
       </Section>
@@ -309,7 +387,7 @@ function Panel({
           )}
         </>
       ) : null}
-    </>
+    </div>
   );
 }
 

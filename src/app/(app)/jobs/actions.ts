@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { deleteJobs, restoreDeleted, updateJob } from "@/lib/jobs/service";
 import { STATUS_VALUES } from "@/lib/jobs/status";
 import {
   changeStatus,
@@ -25,6 +26,7 @@ async function run<T extends object>(fn: () => Promise<T>): Promise<MutationResu
     const out = await fn();
     revalidatePath("/jobs");
     revalidatePath("/");
+    revalidatePath("/companies", "layout");
     return { ok: true, ...out };
   } catch (err) {
     if (err instanceof z.ZodError) return { ok: false, error: "Invalid request" };
@@ -76,4 +78,21 @@ export async function saveNotesAction(applicationId: string, notes: string) {
     await saveNotes(Id.parse(applicationId), z.string().max(MAX_NOTES).parse(notes));
     return {};
   });
+}
+
+export async function updateJobAction(jobId: string, edit: unknown) {
+  return run(async () => updateJob(Id.parse(jobId), edit));
+}
+
+export async function deleteJobsAction(jobIds: string[]) {
+  return run(async () => ({ deleted: await deleteJobs(z.array(Id).min(1).max(MAX_BULK).parse(jobIds)) }));
+}
+
+const DeletedSchema = z.object({
+  jobIds: z.array(Id).max(MAX_BULK),
+  companies: z.array(z.object({ id: Id, name: z.string() })).max(MAX_BULK),
+});
+
+export async function restoreDeletedAction(deleted: unknown) {
+  return run(async () => restoreDeleted(DeletedSchema.parse(deleted)));
 }

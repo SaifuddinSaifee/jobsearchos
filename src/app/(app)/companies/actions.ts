@@ -9,6 +9,7 @@ import {
   applyResearch,
   companyJobUrls,
   createCompany,
+  deleteCompany,
   getCompanyDetail,
   mergeCompanies,
   updateCompany,
@@ -23,8 +24,9 @@ export type CompanyResult<T = object> = ({ ok: true } & T) | { ok: false; error:
 async function run<T extends object>(fn: () => Promise<T>): Promise<CompanyResult<T>> {
   try {
     const out = await fn();
-    revalidatePath("/companies");
+    revalidatePath("/companies", "layout");
     revalidatePath("/jobs");
+    revalidatePath("/");
     return { ok: true, ...out };
   } catch (err) {
     if (err instanceof z.ZodError) return { ok: false, error: "Invalid request" };
@@ -52,6 +54,11 @@ export async function updateCompanyAction(id: string, edit: unknown) {
     await updateCompany(Id.parse(id), EditSchema.parse(edit));
     return {};
   });
+}
+
+/** Soft-deletes the company and its jobs; the result can be passed to restoreDeletedAction for Undo. */
+export async function deleteCompanyAction(id: string) {
+  return run(async () => ({ deleted: await deleteCompany(Id.parse(id)) }));
 }
 
 export async function mergeCompaniesAction(sourceId: string, targetId: string) {

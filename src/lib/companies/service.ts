@@ -24,6 +24,10 @@ type DbOrTx = Db | Tx;
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
+/** Deleted rows are kept (soft delete) but are invisible everywhere. */
+const liveCompany = isNull(companies.deletedAt);
+const liveJob = isNull(jobs.deletedAt);
+
 /** Names are compared after dropping case, punctuation and suffixes like Inc/LLC/GmbH. */
 export function normalizeCompanyName(name: string): string {
   return normalizeForDedup(name) || name.toLowerCase().trim();
@@ -53,7 +57,7 @@ export function toProfile(c: CompanyRow, parent: CompanyRow | null = null): Comp
 /** Loads the company's direct parent, if any. */
 export async function loadParent(c: CompanyRow, db: DbOrTx = defaultDb()): Promise<CompanyRow | null> {
   if (!c.parentId) return null;
-  const [p] = await db.select().from(companies).where(eq(companies.id, c.parentId));
+  const [p] = await db.select().from(companies).where(and(eq(companies.id, c.parentId), liveCompany));
   return p ?? null;
 }
 
@@ -61,13 +65,17 @@ export async function loadParent(c: CompanyRow, db: DbOrTx = defaultDb()): Promi
 export async function findCompanyByName(name: string, db: DbOrTx = defaultDb()): Promise<CompanyRow | null> {
   const key = normalizeCompanyName(name);
   if (!key) return null;
-  const [direct] = await db.select().from(companies).where(eq(companies.normalizedName, key)).limit(1);
+  const [direct] = await db
+    .select()
+    .from(companies)
+    .where(and(eq(companies.normalizedName, key), liveCompany))
+    .limit(1);
   if (direct) return direct;
   const [viaAlias] = await db
     .select({ company: companies })
     .from(companyAliases)
     .innerJoin(companies, eq(companies.id, companyAliases.companyId))
-    .where(eq(companyAliases.normalizedAlias, key))
+    .where(and(eq(companyAliases.normalizedAlias, key), liveCompany))
     .limit(1);
   return viaAlias?.company ?? null;
 }
@@ -86,7 +94,7 @@ export async function resolveCompany(
     const [created] = await db
       .insert(companies)
       .values({ name, normalizedName: normalizeCompanyName(name) })
-      .onConflictDoNothing({ target: companies.normalizedName })
+      .onConflictDoNothing({ target: companies.normalizedName, where: sql`deleted_at is null` })
       .returning();
     company = created ?? (await findCompanyByName(name, db))!; // lost a race with another save
   }
@@ -106,11 +114,19 @@ export async function resolveCompany(
 /** Posting URLs of this company's saved jobs; used to find the company's own website. */
 export async function companyJobUrls(id: string, db: Db = defaultDb()): Promise<string[]> {
   // A group's own site often hosts its brands' job postings (YouTube roles live on Google's careers site).
-  const children = await db.select({ id: companies.id }).from(companies).where(eq(companies.parentId, id));
+  const children = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(and(eq(companies.parentId, id), liveCompany));
   const rows = await db
     .select({ url: jobs.canonicalUrl })
     .from(jobs)
-    .where(or(eq(jobs.companyId, id), children.length ? inArray(jobs.companyId, children.map((c) => c.id)) : undefined))
+    .where(
+      and(
+        liveJob,
+        or(eq(jobs.companyId, id), children.length ? inArray(jobs.companyId, children.map((c) => c.id)) : undefined),
+      ),
+    )
     .orderBy(sql`${jobs.createdAt} desc`)
     .limit(5);
   return rows.map((r) => r.url).filter((u): u is string => Boolean(u));
@@ -126,7 +142,7 @@ export async function backfillCompanies(db: Db = defaultDb()): Promise<void> {
   const orphans = await db
     .select({ id: jobs.id, company: jobs.company, aboutCompany: jobs.aboutCompany })
     .from(jobs)
-    .where(isNull(jobs.companyId));
+    .where(and(isNull(jobs.companyId), liveJob));
   for (const j of orphans) {
     const c = await resolveCompany({ name: j.company, aboutFromPosting: j.aboutCompany }, db);
     await db.update(jobs).set({ companyId: c.id }).where(eq(jobs.id, j.id));
@@ -139,9 +155,10 @@ export async function listCompanies(db: Db = defaultDb()): Promise<CompanySummar
     .select({
       company: companies,
       // Literal names: Drizzle drops table prefixes in single-table selects, which would make this subquery ambiguous.
-      jobCount: sql<number>`(select count(*)::int from "jobs" j where j."company_id" = "companies"."id")`,
+      jobCount: sql<number>`(select count(*)::int from "jobs" j where j."company_id" = "companies"."id" and j."deleted_at" is null)`,
     })
     .from(companies)
+    .where(liveCompany)
     .orderBy(asc(companies.normalizedName));
   const aliases = await db.select().from(companyAliases);
   const byCompany = new Map<string, string[]>();
@@ -163,11 +180,15 @@ export async function listCompanies(db: Db = defaultDb()): Promise<CompanySummar
 }
 
 export async function getCompanyDetail(id: string, db: Db = defaultDb()): Promise<CompanyDetail | null> {
-  const [c] = await db.select().from(companies).where(eq(companies.id, id));
+  const [c] = await db.select().from(companies).where(and(eq(companies.id, id), liveCompany));
   if (!c) return null;
   const [parent, children, aliases, jobRows] = await Promise.all([
     loadParent(c, db),
-    db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.parentId, id)).orderBy(asc(companies.name)),
+    db
+      .select({ id: companies.id, name: companies.name })
+      .from(companies)
+      .where(and(eq(companies.parentId, id), liveCompany))
+      .orderBy(asc(companies.name)),
     db.select().from(companyAliases).where(eq(companyAliases.companyId, id)).orderBy(asc(companyAliases.alias)),
     db
       .select({
@@ -178,7 +199,7 @@ export async function getCompanyDetail(id: string, db: Db = defaultDb()): Promis
       })
       .from(jobs)
       .innerJoin(applications, eq(applications.jobId, jobs.id))
-      .where(eq(jobs.companyId, id))
+      .where(and(eq(jobs.companyId, id), liveJob))
       .orderBy(sql`${jobs.createdAt} desc`),
   ]);
   return {
@@ -213,7 +234,7 @@ export async function updateCompany(id: string, edit: CompanyEdit, db: Db = defa
     }
   }
   await db.transaction(async (tx) => {
-    const [c] = await tx.select().from(companies).where(eq(companies.id, id)).for("update");
+    const [c] = await tx.select().from(companies).where(and(eq(companies.id, id), liveCompany)).for("update");
     if (!c) throw new Error("Company not found");
 
     const patch: Partial<typeof companies.$inferInsert> = { updatedAt: new Date() };
@@ -234,7 +255,10 @@ export async function updateCompany(id: string, edit: CompanyEdit, db: Db = defa
         let cursor: string | null = edit.parentId;
         for (let depth = 0; cursor && depth < 10; depth++) {
           if (cursor === id) throw new Error("That would make the two companies part of each other");
-          const [row] = await tx.select({ parentId: companies.parentId }).from(companies).where(eq(companies.id, cursor));
+          const [row] = await tx
+            .select({ parentId: companies.parentId })
+            .from(companies)
+            .where(and(eq(companies.id, cursor), liveCompany));
           if (!row && depth === 0) throw new Error("Parent company not found");
           cursor = row?.parentId ?? null;
         }
@@ -266,6 +290,7 @@ export async function updateCompany(id: string, edit: CompanyEdit, db: Db = defa
         if (owner && owner.id !== id) throw new Error(`"${owner.name}" already uses the name "${wanted.get(key)}"`);
       }
       await tx.delete(companyAliases).where(eq(companyAliases.companyId, id));
+      await releaseDeletedAliases([...wanted.keys()], tx);
       if (wanted.size) {
         await tx
           .insert(companyAliases)
@@ -279,8 +304,8 @@ export async function updateCompany(id: string, edit: CompanyEdit, db: Db = defa
 export async function mergeCompanies(sourceId: string, targetId: string, db: Db = defaultDb()): Promise<void> {
   if (sourceId === targetId) throw new Error("Pick a different company to merge into");
   await db.transaction(async (tx) => {
-    const [src] = await tx.select().from(companies).where(eq(companies.id, sourceId)).for("update");
-    const [dst] = await tx.select().from(companies).where(eq(companies.id, targetId)).for("update");
+    const [src] = await tx.select().from(companies).where(and(eq(companies.id, sourceId), liveCompany)).for("update");
+    const [dst] = await tx.select().from(companies).where(and(eq(companies.id, targetId), liveCompany)).for("update");
     if (!src || !dst) throw new Error("Company not found");
 
     await tx.update(jobs).set({ companyId: targetId }).where(eq(jobs.companyId, sourceId));
@@ -306,6 +331,7 @@ export async function mergeCompanies(sourceId: string, targetId: string, db: Db 
 
     await tx.delete(companies).where(eq(companies.id, sourceId));
     if (src.normalizedName !== dst.normalizedName) {
+      await releaseDeletedAliases([src.normalizedName], tx);
       await tx
         .insert(companyAliases)
         .values({ companyId: targetId, alias: src.name, normalizedAlias: src.normalizedName })
@@ -343,3 +369,69 @@ export function needsResearch(c: Pick<CompanyRow, "about" | "principles" | "cult
   return !c.researchedAt && !(c.about.trim() && c.principles.trim() && c.culture.trim());
 }
 
+
+/** Aliases of deleted companies would otherwise keep their names reserved forever. */
+async function releaseDeletedAliases(keys: string[], db: DbOrTx): Promise<void> {
+  if (!keys.length) return;
+  await db
+    .delete(companyAliases)
+    .where(
+      and(
+        inArray(companyAliases.normalizedAlias, keys),
+        inArray(
+          companyAliases.companyId,
+          db.select({ id: companies.id }).from(companies).where(sql`${companies.deletedAt} is not null`),
+        ),
+      ),
+    );
+}
+
+export type RemovedCompany = { id: string; name: string };
+
+/**
+ * Soft-deletes the given companies that no longer have any jobs. A company that other companies are
+ * part of (a group like Google) is kept, since it is still in use.
+ */
+export async function removeCompaniesWithoutJobs(ids: string[], db: DbOrTx = defaultDb()): Promise<RemovedCompany[]> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return [];
+  return db
+    .update(companies)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        inArray(companies.id, unique),
+        liveCompany,
+        // Literal names: Drizzle drops table prefixes in single-table statements, which would make these ambiguous.
+        sql`not exists (select 1 from "jobs" j where j."company_id" = "companies"."id" and j."deleted_at" is null)`,
+        sql`not exists (select 1 from "companies" c where c."parent_id" = "companies"."id" and c."deleted_at" is null)`,
+      ),
+    )
+    .returning({ id: companies.id, name: companies.name });
+}
+
+/**
+ * Soft-deletes a company together with all of its jobs. Companies that were part of it become
+ * independent. Returns what was deleted so it can be restored.
+ */
+export async function deleteCompany(
+  id: string,
+  db: Db = defaultDb(),
+): Promise<{ jobIds: string[]; companies: RemovedCompany[] }> {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const [c] = await tx
+      .update(companies)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(companies.id, id), liveCompany))
+      .returning({ id: companies.id, name: companies.name });
+    if (!c) throw new Error("Company not found");
+    const deleted = await tx
+      .update(jobs)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(jobs.companyId, id), liveJob))
+      .returning({ id: jobs.id });
+    await tx.update(companies).set({ parentId: null, updatedAt: now }).where(eq(companies.parentId, id));
+    return { jobIds: deleted.map((j) => j.id), companies: [c] };
+  });
+}

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   applicationQueue,
@@ -101,7 +101,11 @@ export async function enqueueUrls(urls: string[], db: Db = defaultDb()): Promise
       result.skipped.push({ input, reason: "Already in the queue" });
       continue;
     }
-    const [saved] = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.canonicalUrl, canonical)).limit(1);
+    const [saved] = await db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(and(eq(jobs.canonicalUrl, canonical), isNull(jobs.deletedAt)))
+      .limit(1);
     if (saved) {
       result.skipped.push({ input, reason: "Already saved in Jobs" });
       continue;

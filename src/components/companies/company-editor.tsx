@@ -1,15 +1,17 @@
 "use client";
 
-import { Globe, Merge, Save } from "lucide-react";
+import { Globe, Merge, Save, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
+  deleteCompanyAction,
   mergeCompaniesAction,
   researchCompanyAction,
   updateCompanyAction,
 } from "@/app/(app)/companies/actions";
+import { restoreDeletedAction } from "@/app/(app)/jobs/actions";
 import { MarkdownButtons } from "@/components/jobs/markdown-actions";
 import { TagsField } from "@/components/profile/fields";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +134,68 @@ function MergeDialog({ company, others }: { company: CompanyDetail; others: Othe
   );
 }
 
+function DeleteDialog({ company }: { company: CompanyDetail }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const count = company.jobs.length;
+
+  async function remove() {
+    setBusy(true);
+    const res = await deleteCompanyAction(company.id);
+    setBusy(false);
+    if (!res.ok) return void toast.error(res.error);
+    setOpen(false);
+    router.push("/companies");
+    toast(`Deleted ${company.name}`, {
+      description: count ? `${count} job${count === 1 ? " was" : "s were"} deleted with it.` : undefined,
+      duration: 8000,
+      action: {
+        label: "Undo",
+        onClick: async () => {
+          const undo = await restoreDeletedAction(res.deleted);
+          if (!undo.ok) return void toast.error(undo.error);
+          router.refresh();
+          toast.success(
+            undo.skipped
+              ? `Restored. ${undo.skipped} job${undo.skipped === 1 ? " was" : "s were"} saved again in the meantime and left as is.`
+              : "Restored",
+          );
+        },
+      },
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<Button variant="destructive" size="sm" />}>
+        <Trash2 /> Delete
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete {company.name}?</DialogTitle>
+          <DialogDescription>
+            {count
+              ? `Its ${count} job${count === 1 ? "" : "s"} will be deleted too. `
+              : "It has no jobs. "}
+            {company.children.length > 0 && "Companies that are part of it become independent. "}
+            You can undo this right after. Adding a job here again later creates a fresh entry.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={() => void remove()} loading={busy}>
+            <Trash2 />
+            Delete{count ? ` company and ${count} job${count === 1 ? "" : "s"}` : " company"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function CompanyEditor({ company, others }: { company: CompanyDetail; others: Others }) {
   const router = useRouter();
   const [name, setName] = useState(company.name);
@@ -210,6 +274,7 @@ export function CompanyEditor({ company, others }: { company: CompanyDetail; oth
             {company.researchedAt ? "Refresh from web" : "Research on the web"}
           </Button>
           <MergeDialog company={company} others={others} />
+          <DeleteDialog company={company} />
         </div>
       </div>
 

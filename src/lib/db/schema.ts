@@ -9,8 +9,10 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { JobDraft } from "@/lib/jobs/schema";
 import type {
   GenerationInstructions,
@@ -108,25 +110,31 @@ export type CompanyResearchLog = {
 /**
  * One row per employer, shared by every job there. The text fields are Markdown. `provenance` records
  * who last wrote each field; a field marked "user" is never overwritten by automated research.
+ * Deleting is soft (`deleted_at`); names only have to be unique among companies that are not deleted.
  */
-export const companies = pgTable("companies", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  normalizedName: text("normalized_name").notNull().unique(),
-  website: text("website").notNull().default(""),
-  about: text("about").notNull().default(""),
-  principles: text("principles").notNull().default(""),
-  culture: text("culture").notNull().default(""),
-  notes: text("notes").notNull().default(""),
-  provenance: jsonb("provenance").$type<CompanyProvenance>().notNull().default({}),
-  sources: jsonb("sources").$type<CompanySource[]>().notNull().default([]),
-  researchLog: jsonb("research_log").$type<CompanyResearchLog | null>(),
-  /** The group this company belongs to (YouTube is part of Google). One level is enough for exports. */
-  parentId: uuid("parent_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
-  researchedAt: timestamp("researched_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const companies = pgTable(
+  "companies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    website: text("website").notNull().default(""),
+    about: text("about").notNull().default(""),
+    principles: text("principles").notNull().default(""),
+    culture: text("culture").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    provenance: jsonb("provenance").$type<CompanyProvenance>().notNull().default({}),
+    sources: jsonb("sources").$type<CompanySource[]>().notNull().default([]),
+    researchLog: jsonb("research_log").$type<CompanyResearchLog | null>(),
+    /** The group this company belongs to (YouTube is part of Google). One level is enough for exports. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
+    researchedAt: timestamp("researched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("companies_normalized_name_live_idx").on(t.normalizedName).where(sql`deleted_at is null`)],
+);
 
 /** Other names that mean the same company (e.g. "YouTube" -> Google). */
 export const companyAliases = pgTable("company_aliases", {
@@ -139,12 +147,16 @@ export const companyAliases = pgTable("company_aliases", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** `search_vector` (generated tsvector + GIN index) is added in the 0002 SQL migration. */
+/**
+ * `search_vector` (generated tsvector + GIN index) is added in the 0002 SQL migration. Deleting is soft
+ * (`deleted_at`); the URL and dedup key only have to be unique among jobs that are not deleted, so a
+ * deleted job can be added again.
+ */
 export const jobs = pgTable(
   "jobs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    canonicalUrl: text("canonical_url").unique(),
+    canonicalUrl: text("canonical_url"),
     applicationUrl: text("application_url"),
     ats: text("ats"),
     atsJobId: text("ats_job_id"),
@@ -167,11 +179,17 @@ export const jobs = pgTable(
     technologies: text("technologies").array().notNull(),
     origin: jobOrigin("origin").notNull().default("manual"),
     status: jobStatus("status").notNull().default("saved"),
-    dedupKey: text("dedup_key").notNull().unique(),
+    dedupKey: text("dedup_key").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("jobs_created_idx").on(t.createdAt), index("jobs_company_idx").on(t.companyId)],
+  (t) => [
+    index("jobs_created_idx").on(t.createdAt),
+    index("jobs_company_idx").on(t.companyId),
+    uniqueIndex("jobs_canonical_url_live_idx").on(t.canonicalUrl).where(sql`deleted_at is null`),
+    uniqueIndex("jobs_dedup_key_live_idx").on(t.dedupKey).where(sql`deleted_at is null`),
+  ],
 );
 
 /** Immutable: a DB trigger rejects UPDATE and DELETE (see drizzle/0002_jobs.sql). */

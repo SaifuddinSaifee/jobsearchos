@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, X } from "lucide-react";
+import { Download, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,11 +13,13 @@ import { StatusItems } from "./status-menu";
 export function BulkBar({
   count,
   onChangeStatus,
+  onDelete,
   onExport,
   onClear,
 }: {
   count: number;
   onChangeStatus: (to: ApplicationStatus) => void;
+  onDelete: () => void;
   onExport: () => void;
   onClear: () => void;
 }) {
@@ -41,6 +43,9 @@ export function BulkBar({
       </DropdownMenu>
       <Button variant="outline" size="sm" onClick={onExport}>
         <Download /> Export selected
+      </Button>
+      <Button variant="destructive" size="sm" onClick={onDelete}>
+        <Trash2 /> Delete
       </Button>
       <Button variant="ghost" size="sm" className="ml-auto" onClick={onClear}>
         <X /> Clear

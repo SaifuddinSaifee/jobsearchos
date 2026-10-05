@@ -23,6 +23,8 @@ import { toast } from "sonner";
 import {
   bulkChangeStatusAction,
   changeStatusAction,
+  deleteJobsAction,
+  restoreDeletedAction,
   revertStatusAction,
   setAppliedAtAction,
 } from "@/app/(app)/jobs/actions";
@@ -40,7 +42,7 @@ import {
   type TabValue,
   TABS,
 } from "@/lib/jobs/status";
-import type { JobRow, PreviousState } from "@/lib/jobs/types";
+import type { DeletedState, JobRow, PreviousState } from "@/lib/jobs/types";
 import { JobSheet } from "../job-sheet";
 import { useNow } from "../use-now";
 import { BulkBar } from "./bulk-bar";
@@ -57,7 +59,8 @@ const COLUMNS_KEY = "jobs.columns.v1";
 type Patch =
   | { type: "status"; ids: string[]; to: ApplicationStatus; appliedDate?: string }
   | { type: "revert"; previous: PreviousState[] }
-  | { type: "appliedAt"; applicationId: string; date: string };
+  | { type: "appliedAt"; applicationId: string; date: string }
+  | { type: "remove"; jobIds: string[] };
 
 function reduce(rows: JobRow[], p: Patch): JobRow[] {
   const nowIso = new Date().toISOString();
@@ -91,7 +94,22 @@ function reduce(rows: JobRow[], p: Patch): JobRow[] {
       return rows.map((r) =>
         r.applicationId === p.applicationId ? { ...r, appliedAt: dateToStored(p.date).toISOString() } : r,
       );
+    case "remove": {
+      const ids = new Set(p.jobIds);
+      return rows.filter((r) => !ids.has(r.jobId));
+    }
   }
+}
+
+function shortTitle(title: string) {
+  return title.length > 40 ? `${title.slice(0, 40)}...` : title;
+}
+
+/** "Acme was removed from Companies" for companies a delete or edit left without jobs. */
+function companiesNote(companies: DeletedState["companies"]) {
+  if (!companies.length) return undefined;
+  const names = companies.map((c) => c.name).join(", ");
+  return `${names} had no other jobs and ${companies.length === 1 ? "was" : "were"} removed from Companies.`;
 }
 
 function parseSort(param: string): SortingState | null {
@@ -126,9 +144,10 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>({ ...DEFAULT_HIDDEN });
   const [activeId, setActiveId] = useState<string | null>(null);
   const [focusDate, setFocusDate] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const notesDirty = useRef(false);
+  const dirty = useRef(false);
 
   const [, startTransition] = useTransition();
   const [optimisticRows, applyOptimistic] = useOptimistic(rows, reduce);
@@ -247,7 +266,7 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
       invalidateJobs();
       if (res.previous.length === 0) return;
       const single = changing.length === 1 ? changing[0] : null;
-      const title = single && single.title.length > 40 ? `${single.title.slice(0, 40)}…` : single?.title;
+      const title = single ? shortTitle(single.title) : undefined;
       toast(single ? `Moved “${title}” to ${label}` : `Moved ${changing.length} jobs to ${label}`, {
         duration: 8000,
         action: { label: "Undo", onClick: () => undo(res.previous) },
@@ -257,6 +276,66 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
             : undefined,
       });
     });
+  }
+
+  function undoDelete(deleted: DeletedState) {
+    startTransition(async () => {
+      const res = await restoreDeletedAction(deleted);
+      if (!res.ok) return void toast.error(res.error);
+      invalidateJobs();
+      if (res.skipped) {
+        toast.warning(
+          `${res.skipped} job${res.skipped === 1 ? " was" : "s were"} saved again in the meantime and left as is`,
+        );
+      } else {
+        toast.success("Restored");
+      }
+    });
+  }
+
+  function deleteJobs(jobIds: string[]) {
+    const ids = new Set(jobIds);
+    const removing = optimisticRows.filter((r) => ids.has(r.jobId));
+    if (removing.length === 0) return;
+    if (jobId && ids.has(jobId)) {
+      // The open job is going away: close it without asking about unsaved edits.
+      dirty.current = false;
+      setEditing(false);
+      setFocusDate(false);
+      void setJobId(null);
+    }
+    setRowSelection((s) => {
+      const next = { ...s };
+      for (const r of removing) delete next[r.applicationId];
+      return next;
+    });
+    startTransition(async () => {
+      applyOptimistic({ type: "remove", jobIds: removing.map((r) => r.jobId) });
+      const res = await deleteJobsAction(removing.map((r) => r.jobId));
+      if (!res.ok) return void toast.error(res.error);
+      invalidateJobs();
+      const single = removing.length === 1 ? removing[0] : null;
+      toast(single ? `Deleted "${shortTitle(single.title)}"` : `Deleted ${removing.length} jobs`, {
+        description: companiesNote(res.deleted.companies),
+        duration: 8000,
+        action: { label: "Undo", onClick: () => undoDelete(res.deleted) },
+      });
+    });
+  }
+
+  function onDirty(next: boolean) {
+    dirty.current = next;
+  }
+
+  function editJob(id: string) {
+    if (openJob(id)) setEditing(true);
+  }
+
+  function finishEdit(removedCompanies: DeletedState["companies"]) {
+    dirty.current = false;
+    setEditing(false);
+    invalidateJobs();
+    toast.success("Job updated", { description: companiesNote(removedCompanies) });
   }
 
   function setAppliedDate(applicationId: string, date: string) {
@@ -271,7 +350,7 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
 
   // ---- navigation (panel + keyboard share these) -------------------------------------------
   function confirmDiscard(): boolean {
-    return !notesDirty.current || window.confirm("You have unsaved notes. Discard them?");
+    return !dirty.current || window.confirm("You have unsaved changes. Discard them?");
   }
 
   function revealRow(row: JobRow) {
@@ -280,18 +359,24 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
     if (idx >= 0) setPageIndex(Math.floor(idx / pageSize));
   }
 
-  function openJob(id: string, withDateFocus = false) {
-    if (id !== jobId && !confirmDiscard()) return;
-    notesDirty.current = false;
+  /** Returns false when the user chose to keep unsaved changes on the open job. */
+  function openJob(id: string, withDateFocus = false): boolean {
+    if (id !== jobId) {
+      if (!confirmDiscard()) return false;
+      dirty.current = false;
+      setEditing(false);
+    }
     const row = optimisticRows.find((r) => r.jobId === id);
     if (row) revealRow(row);
     setFocusDate(withDateFocus);
     void setJobId(id);
+    return true;
   }
 
   function closeJob() {
     if (!confirmDiscard()) return;
-    notesDirty.current = false;
+    dirty.current = false;
+    setEditing(false);
     setFocusDate(false);
     void setJobId(null);
   }
@@ -429,7 +514,7 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
     .map((c) => ({ id: c.id, label: COLUMN_LABELS[c.id] ?? c.id, visible: c.getIsVisible() }));
 
   return (
-    <JobsActionsProvider value={{ now, openJob, changeStatus }}>
+    <JobsActionsProvider value={{ now, openJob, editJob, changeStatus, deleteJobs }}>
       <div className="space-y-3">
         <Tabs
           value={tab}
@@ -482,6 +567,9 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
             <BulkBar
               count={lastSelected}
               onChangeStatus={(to) => changeStatus(selectedIds, to)}
+              onDelete={() =>
+                deleteJobs(ordered.filter((r) => rowSelection[r.applicationId]).map((r) => r.jobId))
+              }
               onExport={() => void exportCsv(true)}
               onClear={() => setRowSelection({})}
             />
@@ -560,10 +648,16 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
         onNavigate={(id) => openJob(id)}
         onChangeStatus={(applicationId, to) => changeStatus([applicationId], to)}
         onSetAppliedAt={setAppliedDate}
-        onNotesDirty={(dirty) => {
-          notesDirty.current = dirty;
-        }}
+        onDirty={onDirty}
         onNotesSaved={invalidateJobs}
+        editing={editing}
+        onEditingChange={(next) => {
+          if (!next && !confirmDiscard()) return;
+          if (!next) dirty.current = false;
+          setEditing(next);
+        }}
+        onEdited={finishEdit}
+        onDelete={(id) => deleteJobs([id])}
       />
     </JobsActionsProvider>
   );

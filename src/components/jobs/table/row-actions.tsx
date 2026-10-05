@@ -1,6 +1,6 @@
 "use client";
 
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +20,7 @@ import { useJobsActions } from "./context";
 import { StatusItems } from "./status-menu";
 
 export function RowActions({ job }: { job: JobRow }) {
-  const { openJob, changeStatus } = useJobsActions();
+  const { openJob, editJob, changeStatus, deleteJobs } = useJobsActions();
   const posting = safeHref(job.postingUrl);
   const apply = safeHref(job.applyUrl);
 
@@ -33,6 +33,10 @@ export function RowActions({ job }: { job: JobRow }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem onClick={() => openJob(job.jobId)}>Open details</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => editJob(job.jobId)}>
+          <Pencil aria-hidden />
+          Edit job
+        </DropdownMenuItem>
         {posting && (
           <DropdownMenuItem render={<a href={posting} target="_blank" rel="noopener noreferrer" />}>
             Open job posting
@@ -78,6 +82,11 @@ export function RowActions({ job }: { job: JobRow }) {
             <StatusItems onSelect={(to) => changeStatus([job.applicationId], to)} />
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={() => deleteJobs([job.jobId])}>
+          <Trash2 aria-hidden />
+          Delete job
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
