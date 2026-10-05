@@ -2,7 +2,7 @@
 
 Gmail connection, sending rules, writing defaults and contact-finder status, configured once in Settings.
 
-Status: built. Deviation from the plan: `email_accounts` also has a `needs_reconnect` flag, set when Google rejects the refresh token (`invalid_grant`), so Settings can show "Reconnect needed".
+Status: built. Note: Hunter and Apollo were dropped for Prospeo (see [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md)), so the contact-finder card and the provider-order setting described below now cover Prospeo only. Deviation from the plan: `email_accounts` also has a `needs_reconnect` flag, set when Google rejects the refresh token (`invalid_grant`), so Settings can show "Reconnect needed".
 
 ---
 

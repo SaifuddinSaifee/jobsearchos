@@ -33,13 +33,6 @@ const ANGLE_OPTIONS = [
   ["direct", "Plain direct intro"],
 ] as const;
 
-const PROVIDER_ORDERS = [
-  ["hunter,apollo", "Hunter, then Apollo"],
-  ["apollo,hunter", "Apollo, then Hunter"],
-  ["hunter", "Hunter only"],
-  ["apollo", "Apollo only"],
-] as const;
-
 function Field({ label, htmlFor, hint, error, children }: { label: string; htmlFor?: string; hint?: string; error?: FieldError; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -220,24 +213,21 @@ export function EmailSettingsForm({ initial }: { initial: ColdEmailSettings }) {
       <Card>
         <CardHeader>
           <CardTitle>Contact finding</CardTitle>
-          <CardDescription>How the app looks up the person to email.</CardDescription>
+          <CardDescription>Which addresses the app may suggest.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Field label="Provider order" htmlFor="providerOrder">
-            <Controller
-              control={control}
-              name="providerOrder"
-              render={({ field }) => (
-                <NativeSelect id="providerOrder" value={field.value.join(",")} onChange={(e) => field.onChange(e.target.value.split(","))}>
-                  {PROVIDER_ORDERS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </NativeSelect>
-              )}
-            />
-          </Field>
+          <Controller
+            control={control}
+            name="autoRevealBest"
+            render={({ field }) => (
+              <Toggle
+                label="Find the best match's email automatically"
+                hint="After a search, looks for the top person's email: your saved contacts first, then a public web search, then one Prospeo credit. Only for people whose identity is solid."
+                checked={field.value}
+                onChange={field.onChange}
+              />
+            )}
+          />
           <Controller control={control} name="excludeGenericInboxes" render={({ field }) => <Toggle label="Skip shared inboxes" hint="Never suggest info@, careers@, jobs@ or hr@ addresses." checked={field.value} onChange={field.onChange} />} />
         </CardContent>
       </Card>

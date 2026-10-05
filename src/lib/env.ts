@@ -14,9 +14,8 @@ const EnvSchema = z.object({
   APP_URL: z.string().default("http://localhost:3000"),
   /** 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts the stored Gmail tokens. */
   TOKEN_ENCRYPTION_KEY: z.string().optional(),
-  // Optional: contact finders for cold email.
-  HUNTER_API_KEY: z.string().optional(),
-  APOLLO_API_KEY: z.string().optional(),
+  // Optional: Prospeo finds people at a company and reveals their verified email (https://prospeo.io).
+  PROSPEO_API_KEY: z.string().optional(),
   /** Writing: resume, cover letter, cold email. */
   WRITER_MODEL: z.string().default("MiniMaxAI/MiniMax-M3"),
   /** Extraction, parsing, scoring, classification, summarization. */

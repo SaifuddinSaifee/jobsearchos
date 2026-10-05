@@ -1,0 +1,106 @@
+"use server";
+
+import { z } from "zod";
+import { enqueueSearch } from "@/lib/outreach/searches";
+import { kickWorker } from "@/lib/queue/worker";
+import type { SendWarning } from "@/lib/outreach/checks";
+import {
+  addContact,
+  markVerified,
+  revealContactEmail,
+  OutreachError,
+  removeContact,
+  reuseAsDraft,
+  saveDraft,
+  sendDraft,
+  setDoNotContact,
+  setJobCompanyWebsite,
+  snapshot,
+  updateContact,
+  type ContactInput,
+} from "@/lib/outreach/service";
+import type { DraftDTO, SentDTO } from "@/lib/outreach/types";
+
+const Id = z.uuid();
+
+type Snapshot = Awaited<ReturnType<typeof snapshot>>;
+export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; error: string; needs?: SendWarning[] };
+
+async function run<T extends object>(fn: () => Promise<T>): Promise<ActionResult<T>> {
+  try {
+    return { ok: true, ...(await fn()) };
+  } catch (err) {
+    if (err instanceof OutreachError) return { ok: false, error: err.message, needs: err.needs };
+    if (err instanceof z.ZodError) return { ok: false, error: err.issues[0]?.message ?? "Invalid request" };
+    console.error(err);
+    return { ok: false, error: err instanceof Error ? err.message : "Something went wrong" };
+  }
+}
+
+/** Runs a contact change, then returns the fresh lists so the page never shows stale data. */
+function withSnapshot<T extends object = object>(jobId: string, fn: () => Promise<T | void>) {
+  return run(async () => {
+    const extra = (await fn()) ?? ({} as T);
+    return { ...(extra as T), ...(await snapshot(Id.parse(jobId))) };
+  });
+}
+
+/** Queues "find people" for the background worker and returns at once; the page follows its progress. */
+export async function startSearchAction(jobId: string) {
+  return run(async () => {
+    const { item, alreadyActive } = await enqueueSearch(Id.parse(jobId));
+    kickWorker();
+    return { search: item, alreadyActive };
+  });
+}
+
+/** The current contacts and sent mail, for when a background search finishes while the page is open. */
+export async function refreshAction(jobId: string) {
+  return run(async () => snapshot(Id.parse(jobId)));
+}
+
+export async function addContactAction(jobId: string, input: ContactInput) {
+  return withSnapshot(jobId, async () => ({ added: await addContact(Id.parse(jobId), input) }));
+}
+
+export async function updateContactAction(jobId: string, contactId: string, input: ContactInput) {
+  return withSnapshot(jobId, () => updateContact(Id.parse(contactId), input).then(() => undefined));
+}
+
+export async function removeContactAction(jobId: string, contactId: string) {
+  return withSnapshot(jobId, () => removeContact(Id.parse(contactId)));
+}
+
+export async function doNotContactAction(jobId: string, contactId: string, value: boolean) {
+  return withSnapshot(jobId, () => setDoNotContact(Id.parse(contactId), value));
+}
+
+export async function markVerifiedAction(jobId: string, contactId: string) {
+  return withSnapshot(jobId, () => markVerified(Id.parse(contactId)));
+}
+
+export async function revealEmailAction(jobId: string, contactId: string) {
+  return withSnapshot(jobId, async () => ({ found: await revealContactEmail(Id.parse(contactId)) }));
+}
+
+export async function setWebsiteAction(jobId: string, website: string) {
+  return run(async () => ({ domain: await setJobCompanyWebsite(Id.parse(jobId), website) }));
+}
+
+export async function saveDraftAction(jobId: string, input: { subject: string; body: string; contactId?: string | null }) {
+  return run(async (): Promise<{ draft: DraftDTO }> => {
+    const contactId = input.contactId === undefined || input.contactId === null ? input.contactId : Id.parse(input.contactId);
+    return { draft: await saveDraft(Id.parse(jobId), { ...input, contactId }) };
+  });
+}
+
+export async function sendAction(jobId: string, acknowledge: string[]) {
+  return run(async (): Promise<{ sentEmail: SentDTO } & Snapshot> => {
+    const sentEmail = await sendDraft(Id.parse(jobId), { acknowledge: z.array(z.string()).max(10).parse(acknowledge) });
+    return { sentEmail, ...(await snapshot(jobId)) };
+  });
+}
+
+export async function reuseAction(jobId: string, sentId: string) {
+  return run(async () => ({ draft: await reuseAsDraft(Id.parse(jobId), Id.parse(sentId)) }));
+}

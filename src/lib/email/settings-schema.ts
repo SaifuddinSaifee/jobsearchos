@@ -3,7 +3,6 @@ import { z } from "zod";
 
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const ANGLES = ["auto", "proof_of_work", "value_offer", "question", "direct"] as const;
-export const CONTACT_PROVIDERS = ["hunter", "apollo"] as const;
 
 const Time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM, 24-hour");
 
@@ -32,8 +31,9 @@ export const ColdEmailSettingsSchema = z
     extraBannedPhrases: z.array(z.string().trim().min(1)),
     defaultAngle: z.enum(ANGLES),
     // Contacts
-    providerOrder: z.array(z.enum(CONTACT_PROVIDERS)),
     excludeGenericInboxes: z.boolean(),
+    /** After a search, look up the email of the single best match (may use one Prospeo credit). */
+    autoRevealBest: z.boolean(),
   })
   .refine((s) => s.minWords <= s.maxWords, {
     path: ["maxWords"],
@@ -64,6 +64,6 @@ export const defaultColdEmailSettings = (): ColdEmailSettings => ({
   followUpMaxWords: 50,
   extraBannedPhrases: [],
   defaultAngle: "auto",
-  providerOrder: ["hunter", "apollo"],
   excludeGenericInboxes: true,
+  autoRevealBest: true,
 });

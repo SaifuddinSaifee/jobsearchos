@@ -16,6 +16,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
+import type { ContactKind, ContactSource, EmailStatus, OutreachStatus, SearchStatus, SearchSteps } from "@/lib/outreach/types";
 import type {
   GenerationInstructions,
   Preferences,
@@ -333,6 +334,108 @@ export const emailAccounts = pgTable(
   ],
 );
 
+/** People who could receive the cold email for one job: found by lookup, named in the posting, or added by hand. */
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    name: text("name").notNull(),
+    title: text("title").notNull().default(""),
+    email: text("email"),
+    emailStatus: text("email_status").$type<EmailStatus>().notNull().default("none"),
+    confidence: integer("confidence"),
+    source: text("source").$type<ContactSource>().notNull(),
+    linkedinUrl: text("linkedin_url"),
+    /** The finder's own id for this person (Prospeo's person_id), used to reveal their email. */
+    providerId: text("provider_id"),
+    /** A short bio or headline (for example a founder's Y Combinator bio). */
+    about: text("about").notNull().default(""),
+    /** Where the address came from: "Prospeo", "Seen publicly at github.com", "Added by you"... */
+    emailSource: text("email_source"),
+    kind: text("kind").$type<ContactKind>().notNull().default("other"),
+    rank: integer("rank"),
+    reason: text("reason").notNull().default(""),
+    doNotContact: boolean("do_not_contact").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("contacts_job_idx").on(t.jobId),
+    index("contacts_email_idx").on(sql`lower(${t.email})`),
+    uniqueIndex("contacts_job_email_live_idx")
+      .on(t.jobId, sql`lower(${t.email})`)
+      .where(sql`${t.deletedAt} is null and ${t.email} is not null`),
+  ],
+);
+
+/** One working draft per job (`status = 'draft'`); sending turns the draft into a sent record. */
+export const outreachEmails = pgTable(
+  "outreach_emails",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    contactId: uuid("contact_id").references(() => contacts.id),
+    toEmail: text("to_email"),
+    subject: text("subject").notNull().default(""),
+    body: text("body").notNull().default(""),
+    status: text("status").$type<OutreachStatus>().notNull().default("draft"),
+    gmailMessageId: text("gmail_message_id"),
+    gmailThreadId: text("gmail_thread_id"),
+    error: text("error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("outreach_emails_job_idx").on(t.jobId, t.status),
+    uniqueIndex("outreach_emails_one_draft_idx")
+      .on(t.jobId)
+      .where(sql`${t.status} = 'draft'`),
+    index("outreach_emails_sent_idx").on(t.sentAt),
+  ],
+);
+
+/**
+ * "Find people" runs waiting for, or being handled by, the background worker (the same one that processes the job
+ * queue), so a search keeps going when the page is closed. At most one is active per job.
+ */
+export const contactSearches = pgTable(
+  "contact_searches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    status: text("status").$type<SearchStatus>().notNull().default("queued"),
+    steps: jsonb("steps").$type<SearchSteps>().notNull().default({}),
+    found: integer("found"),
+    notes: jsonb("notes").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while a search is running. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("contact_searches_status_idx").on(t.status, t.createdAt),
+    index("contact_searches_job_idx").on(t.jobId, t.createdAt),
+    uniqueIndex("contact_searches_one_active_idx")
+      .on(t.jobId)
+      .where(sql`${t.status} in ('queued', 'running')`),
+  ],
+);
+
+export type ContactSearchRow = typeof contactSearches.$inferSelect;
+export type ContactRow = typeof contacts.$inferSelect;
+export type OutreachEmailRow = typeof outreachEmails.$inferSelect;
 export type EmailAccountRow = typeof emailAccounts.$inferSelect;
 export type QueueRow = typeof applicationQueue.$inferSelect;
 export type QuickLinkRow = typeof quickLinks.$inferSelect;

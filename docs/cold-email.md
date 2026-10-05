@@ -205,7 +205,7 @@ The app sends from the user's own Gmail through the Gmail API (`gmail.send`), so
 
 - These are personal, one-to-one emails about a specific job, not marketing. Keep them honest and easy to ignore.
 - If someone asks not to be contacted, mark the contact `do_not_contact` and never email them again, including for other jobs at that company.
-- Contact data from Hunter or Apollo is used only to email that person about that job, and is stored locally.
+- Contact data from Prospeo or web search is used only to email that person about that job, and is stored locally.
 - No pretexting: never imply a referral, a mutual connection or a prior conversation that did not happen.
 
 ---

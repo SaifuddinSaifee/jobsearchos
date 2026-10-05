@@ -49,7 +49,7 @@ For each saved job, the app suggests **the best person to contact** (hiring mana
 | Fetching         | `fetch` → ATS APIs / JSON-LD → Playwright fallback for JS-rendered pages → Readability                                                                            | Cheapest and most reliable method first                                                                                |
 | Background jobs  | **pg-boss** (queue on Postgres)                                                                                                                                   | Extraction, embedding, discovery runs; no Redis                                                                        |
 | Email            | **Gmail API** (OAuth, `gmail.send` scope)                                                                                                                         | Sends from the user's own address; thread IDs stored for follow-ups                                                    |
-| Contact finding  | Hunter.io / Apollo.io API (pluggable `ContactFinder`) + JD parsing                                                                                                | Finds names, titles, verified emails                                                                                   |
+| Contact finding  | Prospeo API (Hunter needs a work email to sign up) + web search (Tavily) + JD parsing                                                                                                | Finds names, titles, verified emails                                                                                   |
 | Files            | Local disk, content-addressed (`storage/<sha256>`)                                                                                                                | Uploaded resumes and final PDFs are write-once                                                                         |
 | UI               | **shadcn/ui** (Radix primitives + Tailwind CSS v4), full frontend stack below                                                                                     | Components are copied into the repo, so there is no component-library runtime and only what is used ships              |
 | Dev              | Docker Compose (Postgres), npm, Vitest, Playwright e2e                                                                                                            | —                                                                                                                      |
@@ -282,8 +282,8 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 - **Contact finding**, behind a pluggable `ContactFinder` interface:
   1. Parse the JD/page for a named recruiter or hiring manager
-  2. Look up people at the company domain via **Hunter.io** or **Apollo.io** API (names, titles, emails)
-  3. Email pattern inference + verification (Hunter verifier) when only a name is known
+  2. Look up people at the company via **Prospeo** (search by company and title) and the web (Tavily), then reveal a chosen person's verified email on demand. Built: [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md)
+  3. Email format suggestions (first.last@, flast@, ...) when only a name is known, shown as unverified guesses
   4. The LLM **ranks candidates** by relevance to the role (hiring manager for that team > team lead > technical recruiter > general recruiter) and explains why
   5. Manual add/edit always available
 - **Settings and Gmail connection first (Stage 7a, built):** the Email tab in Settings connects Gmail (OAuth, tokens encrypted in Postgres), holds the sending rules, writing defaults and contact-finder key status. Details: [STAGE-7A-EMAIL-SETTINGS.md](STAGE-7A-EMAIL-SETTINGS.md). Writing and sending rules: [cold-email.md](cold-email.md)

@@ -4,6 +4,17 @@ import { env } from "@/lib/env";
 import { FetchError, type FetchStep } from "@/lib/jobs/fetch/types";
 import { defaultPipelineDeps, runPipeline, type PipelineDeps } from "@/lib/jobs/pipeline";
 import { saveJob } from "@/lib/jobs/service";
+import { findContacts, type FindDeps } from "@/lib/outreach/service";
+import {
+  claimNextSearches,
+  getSearchRow,
+  markSearchDone,
+  markSearchFailed,
+  saveSearchSteps,
+  sweepStaleSearches,
+  touchSearch,
+} from "@/lib/outreach/searches";
+import type { SearchSteps } from "@/lib/outreach/types";
 import { isClean, reviewReason } from "./clean";
 import {
   claimNext,
@@ -21,6 +32,10 @@ const TICK_MS = 3000;
 const HEARTBEAT_MS = 20_000;
 /** One item may take at most this long (fetching, rendering, AI, research). */
 const ITEM_TIMEOUT_MS = 4 * 60_000;
+/** A contact search is a few web calls and one ranking call; it should never take this long. */
+const SEARCH_TIMEOUT_MS = 3 * 60_000;
+/** Contact searches that may run at once, separate from job extractions so neither waits for the other. */
+const SEARCH_CONCURRENCY = 2;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -79,9 +94,37 @@ export async function processItem(id: string, deps: Partial<WorkerDeps> = {}): P
   }
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/** Finds and ranks people for one claimed search, recording each step as it goes. The people are saved by `findContacts`. */
+export async function processSearch(
+  id: string,
+  deps: { db?: Db; find?: typeof findContacts; timeoutMs?: number } = {},
+): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  const row = await getSearchRow(id, db);
+  if (!row || row.status !== "running") return;
+
+  const steps: SearchSteps = {};
+  let chain: Promise<unknown> = Promise.resolve();
+  const onStep: NonNullable<FindDeps["onStep"]> = (name, state) => {
+    steps[name] = state;
+    const snapshot = { ...steps };
+    chain = chain.then(() => saveSearchSteps(id, snapshot, db)).catch(() => {});
+  };
+
+  try {
+    const timeoutMs = deps.timeoutMs ?? SEARCH_TIMEOUT_MS;
+    const result = await withTimeout((deps.find ?? findContacts)(row.jobId, { onStep }, db), timeoutMs, "Timed out after 3 minutes");
+    await chain;
+    await markSearchDone(id, result.found, result.notes, db);
+  } catch (err) {
+    await chain;
+    await markSearchFailed(id, err instanceof Error ? err.message : "Could not search for people", db);
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 minutes"): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("Timed out after 4 minutes")), ms);
+    const t = setTimeout(() => reject(new Error(message)), ms);
     p.then(
       (v) => (clearTimeout(t), resolve(v)),
       (e) => (clearTimeout(t), reject(e)),
@@ -89,12 +132,15 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-type WorkerState = { running: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
+type WorkerState = { running: Set<string>; searching: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
 const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  return (g.__queueWorker ??= { running: new Set(), ticking: false, again: false, timer: null });
+  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), ticking: false, again: false, timer: null });
+  // A dev server that hot-reloaded from older code may hold a state without the search slots.
+  s.searching ??= new Set();
+  return s;
 }
 
 /**
@@ -121,6 +167,19 @@ async function tick(): Promise<void> {
           .finally(() => {
             clearInterval(beat);
             s.running.delete(id);
+            void tick();
+          });
+      }
+
+      await sweepStaleSearches();
+      for (const id of await claimNextSearches(SEARCH_CONCURRENCY - s.searching.size)) {
+        s.searching.add(id);
+        const beat = setInterval(() => void touchSearch(id).catch(() => {}), HEARTBEAT_MS);
+        void processSearch(id)
+          .catch((err) => console.error("[queue] unexpected search failure", id, err))
+          .finally(() => {
+            clearInterval(beat);
+            s.searching.delete(id);
             void tick();
           });
       }
