@@ -1,11 +1,11 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowRight, ChevronLeft, ChevronRight, Pencil, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { saveNotesAction } from "@/app/(app)/jobs/actions";
+import { fillAdditionalDetailsAction, saveNotesAction } from "@/app/(app)/jobs/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -335,6 +335,8 @@ function PanelBody({
             <BulletList items={detail.responsibilities} />
           </Section>
 
+          <AdditionalDetailsSection detail={detail} />
+
           <CompanySection detail={detail} />
 
           {detail.keywords.length > 0 && (
@@ -388,6 +390,52 @@ function PanelBody({
         </>
       ) : null}
     </div>
+  );
+}
+
+function AdditionalDetailsSection({ detail }: { detail: JobDetail }) {
+  const queryClient = useQueryClient();
+  const [finding, setFinding] = useState(false);
+
+  async function find() {
+    setFinding(true);
+    const res = await fillAdditionalDetailsAction(detail.jobId);
+    setFinding(false);
+    if (!res.ok) return void toast.error(res.error);
+    await queryClient.invalidateQueries({ queryKey: ["job", detail.jobId] });
+    if (res.details.length) toast.success("Additional details added");
+    else toast.message("The posting has no other details");
+  }
+
+  return (
+    <Section title="Additional details">
+      {detail.additionalDetails.length ? (
+        <div className="space-y-3 animate-in fade-in duration-200 motion-reduce:animate-none">
+          {detail.additionalDetails.map((d, i) => (
+            <div key={i} className="space-y-1">
+              <p className="text-xs font-medium">{d.heading}</p>
+              <BulletList items={d.items} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">Nothing saved yet for this job.</p>
+          {detail.snapshot && (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={finding}
+              onClick={() => void find()}
+              title="Reads the posting text saved with this job, so it works even if the posting was taken down"
+            >
+              <Sparkles />
+              Find in saved posting
+            </Button>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 

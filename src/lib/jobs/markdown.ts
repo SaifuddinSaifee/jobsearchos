@@ -1,6 +1,6 @@
 import { companySection, type CompanyMarkdownInput } from "@/lib/companies/markdown";
 import { sourceLabel } from "./links";
-import type { JobDraft } from "./schema";
+import type { AdditionalDetail, JobDraft } from "./schema";
 import type { JobDetail } from "./types";
 
 /** Everything the extraction produced, in one shape shared by the saved-job panel and the review form. */
@@ -20,6 +20,7 @@ export type MarkdownJob = {
   applyUrl: string | null;
   responsibilities: string[];
   requirements: { required: string[]; preferred: string[] };
+  additionalDetails: AdditionalDetail[];
   technologies: string[];
   keywords: string[];
   /** What the posting says about the employer, and the shared directory profile (either may be empty). */
@@ -82,6 +83,11 @@ export function jobToMarkdown(j: MarkdownJob): string {
     j.requirements.preferred.length ? `### Preferred\n\n${bullets(j.requirements.preferred)}` : "",
   ].filter(Boolean);
   if (req.length) out.push(`## Requirements\n\n${req.join("\n\n")}`);
+  const details = j.additionalDetails
+    .map((d) => ({ heading: oneLine(d.heading) || "Other details", body: bullets(d.items) }))
+    .filter((d) => d.body)
+    .map((d) => `### ${d.heading}\n\n${d.body}`);
+  if (details.length) out.push(`## Additional details\n\n${details.join("\n\n")}`);
   section("## Technologies", j.technologies.map(oneLine).filter(Boolean).join(", "));
   section("## Keywords", j.keywords.map(oneLine).filter(Boolean).join(", "));
   out.push(companySection(j.companyProfile, j.aboutCompany, 2));
@@ -120,6 +126,7 @@ export function detailToMarkdownJob(d: JobDetail): MarkdownJob {
     applyUrl: d.applyUrl,
     responsibilities: d.responsibilities,
     requirements: d.requirements,
+    additionalDetails: d.additionalDetails,
     technologies: d.technologies,
     keywords: d.keywords,
     aboutCompany: d.aboutCompany,
@@ -146,6 +153,7 @@ export function draftToMarkdownJob(d: JobDraft): MarkdownJob {
     applyUrl: d.applicationUrl || null,
     responsibilities: d.responsibilities,
     requirements: d.requirements,
+    additionalDetails: d.additionalDetails,
     technologies: d.technologies,
     keywords: d.keywords,
     aboutCompany: d.aboutCompany,

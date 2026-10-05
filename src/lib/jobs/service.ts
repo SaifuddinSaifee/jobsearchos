@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   applications,
@@ -14,7 +14,8 @@ import { applyResearch, removeCompaniesWithoutJobs, resolveCompany } from "@/lib
 import { dedupKey } from "./dedup";
 import { canonicalizeUrl } from "./fetch/url";
 import { safeHref } from "./links";
-import { JobDraftSchema, JobEditSchema } from "./schema";
+import { extractAdditionalDetails } from "./extract";
+import { JobDraftSchema, JobEditSchema, type AdditionalDetail } from "./schema";
 import type { DeletedState } from "./types";
 
 export type SaveResult =
@@ -47,6 +48,13 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 function isUniqueViolation(err: unknown): boolean {
   const e = err as { code?: string; cause?: { code?: string } };
   return e?.code === "23505" || e?.cause?.code === "23505";
+}
+
+/** Trims headings and items, drops empty items and groups left with nothing in them. */
+export function cleanDetails(list: AdditionalDetail[]): AdditionalDetail[] {
+  return list
+    .map((d) => ({ heading: d.heading.trim() || "Other details", items: d.items.map((i) => i.trim()).filter(Boolean) }))
+    .filter((d) => d.items.length > 0);
 }
 
 function cleanKeywords(list: string[]): string[] {
@@ -102,6 +110,7 @@ export async function saveJob(input: unknown, db: Db = defaultDb()): Promise<Sav
           postedAt: /^\d{4}-\d{2}-\d{2}$/.test(draft.postedAt) ? draft.postedAt : null,
           responsibilities: draft.responsibilities,
           requirements: draft.requirements,
+          additionalDetails: cleanDetails(draft.additionalDetails),
           technologies: draft.technologies,
           origin: "manual",
           status: "saved",
@@ -189,6 +198,7 @@ export async function updateJob(
           applicationUrl,
           responsibilities: edit.responsibilities,
           requirements: edit.requirements,
+          additionalDetails: cleanDetails(edit.additionalDetails),
           technologies: edit.technologies,
           dedupKey: key,
           updatedAt: new Date(),
@@ -288,4 +298,26 @@ export async function restoreDeleted(
     }
     return { restored, skipped };
   });
+}
+
+/**
+ * Fills a saved job's additional details from the posting text kept when it was saved. Overwrites what
+ * is there, so the panel only offers it while the section is empty.
+ */
+export async function fillAdditionalDetails(
+  jobId: string,
+  db: Db = defaultDb(),
+  extract: (text: string) => Promise<AdditionalDetail[]> = extractAdditionalDetails,
+): Promise<AdditionalDetail[]> {
+  const [snap] = await db
+    .select({ rawText: jobSnapshots.rawText })
+    .from(jobSnapshots)
+    .innerJoin(jobs, eq(jobs.id, jobSnapshots.jobId))
+    .where(and(eq(jobSnapshots.jobId, jobId), isNull(jobs.deletedAt)))
+    .orderBy(desc(jobSnapshots.fetchedAt))
+    .limit(1);
+  if (!snap) throw new Error("No saved posting text for this job");
+  const details = cleanDetails(await extract(snap.rawText));
+  await db.update(jobs).set({ additionalDetails: details, updatedAt: new Date() }).where(eq(jobs.id, jobId));
+  return details;
 }

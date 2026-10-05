@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { deleteJobs, restoreDeleted, updateJob } from "@/lib/jobs/service";
+import { deleteJobs, fillAdditionalDetails, restoreDeleted, updateJob } from "@/lib/jobs/service";
 import { STATUS_VALUES } from "@/lib/jobs/status";
 import {
   changeStatus,
@@ -95,4 +95,9 @@ const DeletedSchema = z.object({
 
 export async function restoreDeletedAction(deleted: unknown) {
   return run(async () => restoreDeleted(DeletedSchema.parse(deleted)));
+}
+
+/** Reads the saved posting text again (one LLM call) to fill the Additional details section. */
+export async function fillAdditionalDetailsAction(jobId: string) {
+  return run(async () => ({ details: await fillAdditionalDetails(Id.parse(jobId)) }));
 }

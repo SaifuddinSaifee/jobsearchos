@@ -5,6 +5,13 @@ import { z } from "zod";
 
 export const REMOTE_TYPES = ["remote", "hybrid", "onsite", "unknown"] as const;
 
+/** One group of other posting details, e.g. "Benefits" or "Interview process". */
+export const AdditionalDetailSchema = z.object({
+  heading: z.string(),
+  items: z.array(z.string()),
+});
+export type AdditionalDetail = z.infer<typeof AdditionalDetailSchema>;
+
 export const JobExtractionSchema = z.object({
   company: z.string(),
   title: z.string(),
@@ -23,6 +30,7 @@ export const JobExtractionSchema = z.object({
     required: z.array(z.string()),
     preferred: z.array(z.string()),
   }),
+  additionalDetails: z.array(AdditionalDetailSchema),
   technologies: z.array(z.string()),
   keywords: z.array(z.string()),
 });
@@ -44,6 +52,7 @@ export const JobEditSchema = JobExtractionSchema.extend({
   aboutCompany: z.string().max(20_000),
   responsibilities: Lines,
   requirements: z.object({ required: Lines, preferred: Lines }),
+  additionalDetails: z.array(z.object({ heading: z.string().max(200), items: Lines })).max(50),
   technologies: z.array(z.string().max(100)).max(100),
   keywords: z.array(z.string().max(100)).max(100),
 });
@@ -99,7 +108,8 @@ export const JobDraftSchema = JobExtractionSchema.extend({
   rawFileId: z.string().nullable(),
   rawText: z.string(),
   /** The model's output before the user's edits (stored in the snapshot). */
-  normalized: JobExtractionSchema,
+  /** Optional: model output from before additional details existed has no such field. */
+  normalized: JobExtractionSchema.partial({ additionalDetails: true }),
 });
 export type JobDraft = z.infer<typeof JobDraftSchema>;
 
@@ -119,6 +129,7 @@ export function emptyExtraction(): JobExtraction {
     aboutCompany: "",
     responsibilities: [],
     requirements: { required: [], preferred: [] },
+    additionalDetails: [],
     technologies: [],
     keywords: [],
   };

@@ -10,7 +10,14 @@ import {
   updateCompany,
 } from "@/lib/companies/service";
 import { emptyExtraction, type JobDraft, type JobEdit } from "@/lib/jobs/schema";
-import { deleteJobs, findDuplicate, restoreDeleted, saveJob, updateJob } from "@/lib/jobs/service";
+import {
+  deleteJobs,
+  fillAdditionalDetails,
+  findDuplicate,
+  restoreDeleted,
+  saveJob,
+  updateJob,
+} from "@/lib/jobs/service";
 import { dashboardData, getJobDetail, listJobRows } from "@/lib/jobs/tracker";
 import { resetDb, testDb } from "./helpers";
 
@@ -59,6 +66,7 @@ async function editOf(jobId: string): Promise<JobEdit> {
     aboutCompany: d.aboutCompany,
     responsibilities: d.responsibilities,
     requirements: d.requirements,
+    additionalDetails: d.additionalDetails,
     technologies: d.technologies,
     keywords: d.keywords,
   };
@@ -256,5 +264,43 @@ describe("deleting companies", () => {
     await updateCompany(youtube.id, { parentId: google.id }, db);
     await deleteCompany(google.id, db);
     expect((await getCompanyDetail(youtube.id, db))!.parentId).toBeNull();
+  });
+});
+
+describe("additional details", () => {
+  it("saves them cleaned: trimmed, without empty items or groups", async () => {
+    const a = await save(1, {
+      additionalDetails: [
+        { heading: " Benefits ", items: [" Health ", ""] },
+        { heading: "", items: ["Relocation"] },
+        { heading: "Empty", items: ["  "] },
+      ],
+    });
+    expect((await getJobDetail(a.jobId, db))!.additionalDetails).toEqual([
+      { heading: "Benefits", items: ["Health"] },
+      { heading: "Other details", items: ["Relocation"] },
+    ]);
+  });
+
+  it("can be edited", async () => {
+    const a = await save(1);
+    const details = [{ heading: "Interview process", items: ["Recruiter call", "Onsite"] }];
+    await updateJob(a.jobId, { ...(await editOf(a.jobId)), additionalDetails: details }, db);
+    expect((await getJobDetail(a.jobId, db))!.additionalDetails).toEqual(details);
+  });
+
+  it("are filled from the saved posting text for older jobs", async () => {
+    const a = await save(1, { rawText: "Perks: free lunch" });
+    const seen: string[] = [];
+    const out = await fillAdditionalDetails(a.jobId, db, async (text) => {
+      seen.push(text);
+      return [{ heading: "Perks", items: ["Free lunch", " "] }];
+    });
+    expect(seen).toEqual(["Perks: free lunch"]);
+    expect(out).toEqual([{ heading: "Perks", items: ["Free lunch"] }]);
+    expect((await getJobDetail(a.jobId, db))!.additionalDetails).toEqual(out);
+
+    await deleteJobs([a.jobId], db);
+    await expect(fillAdditionalDetails(a.jobId, db, async () => [])).rejects.toThrow("No saved posting text");
   });
 });

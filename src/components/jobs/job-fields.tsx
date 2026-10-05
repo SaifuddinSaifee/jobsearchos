@@ -1,6 +1,8 @@
 "use client";
 
-import { Controller, type UseFormReturn } from "react-hook-form";
+import { Plus, X } from "lucide-react";
+import { Controller, useFieldArray, type UseFormReturn } from "react-hook-form";
+import { Button } from "@/components/ui/button";
 import { LinesField, TagsField } from "@/components/profile/fields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,6 +101,7 @@ export function JobFields({ form }: { form: UseFormReturn<JobExtraction> }) {
           <LinesField label="Preferred qualifications" rows={4} value={field.value} onChange={field.onChange} />
         )}
       />
+      <AdditionalDetailsField form={form} />
       <Controller
         control={control}
         name="technologies"
@@ -127,5 +130,48 @@ export function JobFields({ form }: { form: UseFormReturn<JobExtraction> }) {
         />
       </div>
     </>
+  );
+}
+
+/** Groups like "Benefits" or "Interview process", each a heading and one item per line. */
+function AdditionalDetailsField({ form }: { form: UseFormReturn<JobExtraction> }) {
+  const { control, register } = form;
+  const { fields, append, remove } = useFieldArray({ control, name: "additionalDetails" });
+
+  return (
+    <fieldset className="space-y-3">
+      <legend className="text-sm font-medium">Additional details</legend>
+      <p className="text-xs text-muted-foreground">
+        Benefits, interview process, pay details and anything else in the posting worth keeping.
+      </p>
+      {fields.map((f, i) => (
+        <div
+          key={f.id}
+          className="space-y-2 rounded-lg border p-3 animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              aria-label={`Heading of group ${i + 1}`}
+              placeholder="Benefits"
+              {...register(`additionalDetails.${i}.heading`)}
+            />
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove this group" onClick={() => remove(i)}>
+              <X />
+            </Button>
+          </div>
+          <Controller
+            control={control}
+            name={`additionalDetails.${i}.items`}
+            render={({ field }) => (
+              <LinesField label="One item per line" rows={4} value={field.value} onChange={field.onChange} />
+            )}
+          />
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => append({ heading: "", items: [] })}>
+        <Plus />
+        Add group
+      </Button>
+    </fieldset>
   );
 }

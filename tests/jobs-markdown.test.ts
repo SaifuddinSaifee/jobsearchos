@@ -17,6 +17,11 @@ const job: MarkdownJob = {
   applyUrl: "https://boards.greenhouse.io/acme/jobs/1/apply",
   responsibilities: ["Build APIs", "Own\non-call"],
   requirements: { required: ["3y Go", "SQL"], preferred: ["Kafka"] },
+  additionalDetails: [
+    { heading: "Benefits", items: ["401(k) match", "Unlimited\nPTO"] },
+    { heading: " ", items: ["Relocation offered"] },
+    { heading: "Empty", items: [] },
+  ],
   technologies: ["Go", "Postgres"],
   keywords: ["distributed systems", "backend"],
   aboutCompany: "",
@@ -101,5 +106,20 @@ describe("markdownFilename", () => {
     expect(markdownFilename({ company: "Acme, Inc.", title: "Sr. Backend Engineer (Remote)" })).toBe("acme-inc-sr-backend-engineer-remote.md");
     expect(markdownFilename({ company: "Zürich AG", title: "Ingénieur" })).toBe("zurich-ag-ingenieur.md");
     expect(markdownFilename({ company: "", title: "" })).toBe("job.md");
+  });
+});
+
+describe("additional details", () => {
+  it("lists each group under its heading after the requirements and skips empty ones", () => {
+    const md = jobToMarkdown(job);
+    expect(md).toContain(
+      "## Additional details\n\n### Benefits\n\n- 401(k) match\n- Unlimited PTO\n\n### Other details\n\n- Relocation offered",
+    );
+    expect(md).not.toContain("### Empty");
+    expect(md.indexOf("## Requirements")).toBeLessThan(md.indexOf("## Additional details"));
+  });
+
+  it("leaves the section out when there is nothing", () => {
+    expect(jobToMarkdown({ ...job, additionalDetails: [] })).not.toContain("Additional details");
   });
 });

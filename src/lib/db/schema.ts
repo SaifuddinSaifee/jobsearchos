@@ -13,7 +13,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { JobDraft } from "@/lib/jobs/schema";
+import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
 import type {
   GenerationInstructions,
   Preferences,
@@ -176,6 +176,8 @@ export const jobs = pgTable(
     postedAt: date("posted_at"),
     responsibilities: jsonb("responsibilities").$type<string[]>().notNull(),
     requirements: jsonb("requirements").$type<JobRequirements>().notNull(),
+    /** Everything else worth keeping from the posting (benefits, interview process...), grouped under headings. */
+    additionalDetails: jsonb("additional_details").$type<AdditionalDetail[]>().notNull().default([]),
     technologies: text("technologies").array().notNull(),
     origin: jobOrigin("origin").notNull().default("manual"),
     status: jobStatus("status").notNull().default("saved"),

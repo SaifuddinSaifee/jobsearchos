@@ -29,6 +29,7 @@ function toEdit(d: JobDetail): JobEdit {
     aboutCompany: d.aboutCompany,
     responsibilities: d.responsibilities,
     requirements: d.requirements,
+    additionalDetails: d.additionalDetails,
     technologies: d.technologies,
     keywords: d.keywords,
   };

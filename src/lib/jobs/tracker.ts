@@ -113,6 +113,7 @@ export async function getJobDetail(jobId: string, db: Db = defaultDb()): Promise
       notes: applications.notes,
       responsibilities: jobs.responsibilities,
       requirements: jobs.requirements,
+      additionalDetails: jobs.additionalDetails,
       aboutCompany: jobs.aboutCompany,
       companyId: jobs.companyId,
     })
@@ -145,6 +146,7 @@ export async function getJobDetail(jobId: string, db: Db = defaultDb()): Promise
     companyProfile: company ? toProfile(company, await loadParent(company, db)) : null,
     responsibilities: extra.responsibilities,
     requirements: extra.requirements,
+    additionalDetails: extra.additionalDetails,
     keywords: keywords.map((k) => k.keyword),
     timeline: events.map((e) => ({
       id: e.id,

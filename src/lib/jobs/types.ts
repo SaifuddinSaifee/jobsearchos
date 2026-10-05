@@ -1,5 +1,6 @@
 import type { JobRequirements } from "@/lib/db/schema";
 import type { CompanyProfile } from "@/lib/companies/types";
+import type { AdditionalDetail } from "./schema";
 import type { ApplicationStatus } from "./status";
 
 // Client-safe: no database imports here, so components can import these without bundling the driver.
@@ -48,6 +49,8 @@ export type JobDetail = JobRow & {
   companyProfile: CompanyProfile | null;
   responsibilities: string[];
   requirements: JobRequirements;
+  /** Benefits, interview process and other posting details, grouped under headings. */
+  additionalDetails: AdditionalDetail[];
   keywords: string[];
   timeline: TimelineEvent[];
   snapshot: { sourceUrl: string | null; fetchMethod: string; fetchedAt: string; rawText: string } | null;

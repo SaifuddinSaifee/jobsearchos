@@ -1,11 +1,14 @@
 import { env } from "@/lib/env";
 import { chatStructured } from "@/lib/llm/structured";
 import type { Hints } from "./fetch/types";
-import { JobExtractionSchema, type JobExtraction } from "./schema";
+import { z } from "zod";
+import { AdditionalDetailSchema, JobExtractionSchema, type AdditionalDetail, type JobExtraction } from "./schema";
 
 const MAX_CHARS = 60_000;
 /** Some ATS boards store a literal placeholder (Stripe returns "LOCATION"). */
 const PLACEHOLDER = /^\s*(location|n\/a|tbd|none|-)?\s*$/i;
+
+const ADDITIONAL_RULE = `- additionalDetails: everything else in the posting worth keeping that the other fields do not cover: benefits and perks, compensation details (bonus, equity, pay ranges by location, how pay is set), the interview or hiring process and timeline, work schedule, travel, on-call, visa sponsorship, relocation, security clearance, team and reporting line, start date, application deadline and similar. Group them under short headings, using the posting's own section names where it has them (e.g. "Benefits", "Interview process"). One item per bullet, concise and in the posting's words. Do not repeat responsibilities, requirements or the text about the company. Leave out equal-opportunity and legal boilerplate. [] if the posting has nothing else.`;
 
 const SYSTEM = `You convert a job posting into structured JSON.
 Rules:
@@ -19,9 +22,10 @@ Rules:
 - aboutCompany: the paragraph(s) in the posting that describe the employer itself (what the company does, its mission, values, culture). Copy them as written with light trimming. Leave out the role's duties, perks lists and equal-opportunity statements. "" if the posting says nothing about the company.
 - responsibilities: what the person will do, one item per bullet, concise and in the posting's words.
 - requirements.required: must-have qualifications; requirements.preferred: nice-to-haves, bonus points, "preferred".
+${ADDITIONAL_RULE}
 - technologies: a flat list of every tool, language, framework, platform and cloud service named.
 - keywords: 10-25 terms an ATS or recruiter would search on for this role (skills, domains, methodologies, tools), as short phrases.
-- Ignore navigation, cookie notices, benefits boilerplate and equal-opportunity statements.`;
+- Ignore navigation, cookie notices and equal-opportunity or legal boilerplate.`;
 
 /** Values from an ATS API or JSON-LD are more reliable than the model's, so they win. */
 export function mergeHints(extraction: JobExtraction, hints: Hints): JobExtraction {
@@ -53,4 +57,24 @@ export async function extractJob(
   const user = `${known ? `Known fields (reliable, from the source):\n${known}\n\n` : ""}Job posting:\n\n${text.slice(0, MAX_CHARS)}`;
   const extraction = await chatStructured(JobExtractionSchema, { system: SYSTEM, user }, { model });
   return { extraction: mergeHints(extraction, hints), model };
+}
+
+const DetailsOnlySchema = z.object({ additionalDetails: z.array(AdditionalDetailSchema) });
+
+/**
+ * Pulls only the additional details out of a posting. Used for jobs saved before that field existed:
+ * their original posting text is kept, so this works even after the posting is taken down.
+ */
+export async function extractAdditionalDetails(text: string): Promise<AdditionalDetail[]> {
+  const system = `You read a job posting and return only the details that are not the role's duties, its requirements or the description of the company.
+Rules:
+- Use only what the posting says. Never infer or invent.
+${ADDITIONAL_RULE}
+- Ignore navigation, cookie notices and equal-opportunity or legal boilerplate.`;
+  const out = await chatStructured(
+    DetailsOnlySchema,
+    { system, user: `Job posting:\n\n${text.slice(0, MAX_CHARS)}` },
+    { model: env().EXTRACTION_MODEL },
+  );
+  return out.additionalDetails;
 }
