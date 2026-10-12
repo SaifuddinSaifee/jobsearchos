@@ -4,6 +4,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { pastResumes } from "@/lib/db/schema";
 import { extractResumeText } from "@/lib/resume/extract";
+import { kickWorker } from "@/lib/queue/worker";
+import { enqueueResumeIndex } from "@/lib/resume/indexing";
 import { putFile } from "@/lib/storage/local";
 
 export const runtime = "nodejs";
@@ -55,6 +57,7 @@ export async function POST(request: Request) {
       })
       .returning({ id: pastResumes.id });
 
+    await enqueueResumeIndex(stored.id).then(() => kickWorker()).catch(() => {});
     revalidatePath("/profile");
     return NextResponse.json({ id: row.id });
   } catch (err) {

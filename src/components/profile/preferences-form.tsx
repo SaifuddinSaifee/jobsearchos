@@ -130,8 +130,8 @@ export function PreferencesForm({ initial }: { initial: Preferences }) {
         )}
       />
 
-      <Button type="submit" disabled={pending}>
-        {pending ? "Saving…" : "Save preferences"}
+      <Button type="submit" loading={pending}>
+        {pending ? "Saving..." : "Save preferences"}
       </Button>
     </form>
   );

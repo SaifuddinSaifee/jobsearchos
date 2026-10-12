@@ -9,7 +9,7 @@ Stage-wise implementation plan, based on the PRD and the workflow walkthrough be
 ### 1. Apply to a new opportunity
 
 1. Open **New Application** and paste the job posting URL.
-2. The app fetches the page and the **Claude (Sonnet 5.5)** converts it into a structured job record in Postgres.
+2. The app fetches the page and the **extraction model (GLM-5.3 Flash)** converts it into a structured job record in Postgres.
 3. Review the extracted fields and **Save**. The job appears as a row in the **Jobs dashboard**.
 4. The row's **Actions** column offers:
    - Generate resume / View & edit resume
@@ -25,12 +25,12 @@ Every generated resume is stored and indexed. When generating a new one, the app
 
 1. Extracts keywords from the JD (e.g. "automation", "n8n", "Zapier").
 2. Asks the LLM to **expand** them with related keywords not in the JD (e.g. "workflow orchestration", "Make.com", "webhooks").
-3. Searches **past jobs and past resumes** with hybrid search (vector similarity + full-text on those keywords), then has Claude rerank the best candidates.
+3. Searches **past jobs and past resumes** with hybrid search (vector similarity + full-text on those keywords), then has the LLM rerank the best candidates.
 4. Feeds the most relevant past resume bullets/sections into generation as reference material.
 
 ### 3. Job discovery
 
-A **Discover** page in the sidebar lists openings from configured sources, starting with **Fortune 500 companies and Y Combinator startups**. Prefer official/public APIs and ATS endpoints over scraping. Each opening is normalized by Claude into a Postgres row. **Save** moves it into the Jobs dashboard, where the apply workflow takes over.
+A **Discover** page in the sidebar lists openings from configured sources, starting with **Fortune 500 companies and Y Combinator startups**. Prefer official/public APIs and ATS endpoints over scraping. Each opening is normalized by the LLM into a Postgres row. **Save** moves it into the Jobs dashboard, where the apply workflow takes over.
 
 ### 4. Contact discovery and cold email
 
@@ -44,12 +44,12 @@ For each saved job, the app suggests **the best person to contact** (hiring mana
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | App              | **Next.js (App Router) + TypeScript**                                                                                                                             | UI and API in one codebase                                                                                             |
 | DB               | **PostgreSQL + Drizzle ORM**                                                                                                                                      | Structured rows, full-text search (`tsvector`) and vector search (pgvector) for past-resume retrieval                  |
-| LLM (everything) | **Anthropic API** (`@anthropic-ai/sdk`): **Claude Opus 5.5** writes, **Claude Sonnet 5.5** extracts, scores and classifies, **Claude Haiku 4.5** does bulk triage | One provider; structured outputs (`output_config.format` + Zod) guarantee schema-valid JSON for every non-writing task |
-| Embeddings       | **`qwen3-embedding:4b`** via Ollama (local, the only local model)                                                                                                 | Vectors for past-resume retrieval, stored in pgvector; everything else uses Claude                                     |
+| LLM (everything) | **Together AI** (`together-ai`): **MiniMax M3** writes, **GLM-5.3 Flash** extracts, scores, classifies and does bulk triage | One provider, open-weight models at low cost; structured outputs (`response_format: json_schema`) plus Zod validation for every non-writing task |
+| Embeddings       | **`qwen3-embedding:4b`** via Ollama (local, the only local model)                                                                                                 | Vectors for past-resume retrieval, stored in pgvector; everything else uses Together AI                               |
 | Fetching         | `fetch` → ATS APIs / JSON-LD → Playwright fallback for JS-rendered pages → Readability                                                                            | Cheapest and most reliable method first                                                                                |
 | Background jobs  | **pg-boss** (queue on Postgres)                                                                                                                                   | Extraction, embedding, discovery runs; no Redis                                                                        |
 | Email            | **Gmail API** (OAuth, `gmail.send` scope)                                                                                                                         | Sends from the user's own address; thread IDs stored for follow-ups                                                    |
-| Contact finding  | Hunter.io / Apollo.io API (pluggable `ContactFinder`) + JD parsing                                                                                                | Finds names, titles, verified emails                                                                                   |
+| Contact finding  | Prospeo API (Hunter needs a work email to sign up) + web search (Tavily) + JD parsing                                                                                                | Finds names, titles, verified emails                                                                                   |
 | Files            | Local disk, content-addressed (`storage/<sha256>`)                                                                                                                | Uploaded resumes and final PDFs are write-once                                                                         |
 | UI               | **shadcn/ui** (Radix primitives + Tailwind CSS v4), full frontend stack below                                                                                     | Components are copied into the repo, so there is no component-library runtime and only what is used ships              |
 | Dev              | Docker Compose (Postgres), npm, Vitest, Playwright e2e                                                                                                            | —                                                                                                                      |
@@ -72,7 +72,7 @@ Goal: a UI that feels instant, even with thousands of jobs in the tables.
 | Forms                    | **React Hook Form** + **Zod**                                                    | Uncontrolled inputs (few re-renders); the same Zod schemas validate the API and the LLM's JSON output                                    |
 | Document editor          | **Tiptap** (headless, ProseMirror)                                               | Section-based editing for resume, cover letter and cold email; loaded lazily only on the editor page                                     |
 | Command palette / search | **cmdk** (shadcn `Command`)                                                      | `Ctrl+K` global search and quick actions                                                                                                 |
-| Live progress            | Server-Sent Events                                                               | Streams fetch → extract → generate steps and Claude's output token by token                                                              |
+| Live progress            | Server-Sent Events                                                               | Streams fetch → extract → generate steps and the model's output token by token                                                              |
 | Toasts / icons           | **Sonner**, **lucide-react** (tree-shaken per icon)                              | Light and consistent with shadcn                                                                                                         |
 | Charts                   | **shadcn charts** (Recharts), lazily loaded                                      | Only on the Analytics page                                                                                                               |
 
@@ -89,18 +89,20 @@ Goal: a UI that feels instant, even with thousands of jobs in the tables.
 
 ## Model routing
 
-Every LLM task goes through the Anthropic API. The one exception is embeddings (Stage 5), which use the local `qwen3-embedding:4b` model through Ollama (`EMBEDDING_MODEL`, `OLLAMA_BASE_URL`).
+Every LLM task goes through the Together AI API. The one exception is embeddings (Stage 5), which use the local `qwen3-embedding:4b` model through Ollama (`EMBEDDING_MODEL`, `OLLAMA_BASE_URL`).
 
 | Task                                                            | Model                                   | Notes                                                                     |
 | --------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| Resume, cover letter, cold email (incl. follow-ups)             | Claude Opus 5.5 (`claude-opus-5-5`)     | Prompt caching on profile + instructions                                  |
-| Resume → profile, job page → structured row                     | Claude Sonnet 5.5 (`claude-sonnet-5-5`) | Structured outputs, `effort: low`                                         |
-| Keyword extraction/~~expansion~~, query rewriting, retrieval rerank | Claude Sonnet 5.5                       |                                                                           |
-| Match scoring, classification, summarization                    | Claude Sonnet 5.5                       |                                                                           |
-| Contact ranking, accuracy check on generated documents          | Claude Sonnet 5.5                       |                                                                           |
-| Discovery prefilter (many jobs per day)                         | Claude Haiku 4.5 (`claude-haiku-4-5`)   | Cheap triage before full analysis; Batch API (50% off) for scheduled runs |
+| Resume, cover letter, cold email (incl. follow-ups)             | MiniMax M3 (`MiniMaxAI/MiniMax-M3`)      | 524K context; $0.30 / $1.20 per 1M tokens in/out                          |
+| Resume → profile, job page → structured row                     | GLM-5.3 Flash (`zai-org/GLM-5.3-Flash`) | Structured outputs; 1M context; $0.15 / $0.50 per 1M tokens in/out        |
+| Keyword extraction/~~expansion~~, query rewriting, retrieval rerank | GLM-5.3 Flash                           | Complex reranking can move to MiniMax M3 if quality needs it              |
+| Match scoring, classification, summarization                    | GLM-5.3 Flash                           |                                                                           |
+| Contact ranking, accuracy check on generated documents          | GLM-5.3 Flash                           |                                                                           |
+| Discovery prefilter (many jobs per day)                         | GLM-5.3 Flash                           | About $10 per 10k jobs at 5K in / 500 out tokens                          |
 
-Model names live in `.env` (`WRITER_MODEL`, `EXTRACTION_MODEL`, `FAST_MODEL`). Opus 5.5 and Sonnet 5.5 can decline requests via safety classifiers (`stop_reason: "refusal"`); the structured-output helper raises a clear error in that case.
+Model names live in `.env` (`WRITER_MODEL`, `EXTRACTION_MODEL`, `FAST_MODEL`); all three are Together model IDs, so swapping a model is a config change. **GPT-OSS 120B** (`openai/gpt-oss-120b`, $0.15 / $0.60, 131K context, structured outputs) is the first challenger to benchmark. Before committing to the lineup, run a bakeoff on 10–20 real JDs and the real resume-generation task.
+
+Structured outputs on Together are constrained decoding but not a hard guarantee, so `chatStructured()` also puts the schema text in the prompt (as Together recommends), validates the reply with Zod, and raises a clear error on truncation (`finish_reason: "length"`), non-JSON output, or schema mismatch.
 
 ---
 
@@ -151,12 +153,12 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 - Repo setup, Docker Compose (Postgres), Drizzle migrations, `.env` config, lint, tests
 - Core schema above (applications/contacts/outreach tables can be stubs)
-- **`chatStructured()`** (Claude Sonnet 5.5): one call constrained to a Zod schema via structured outputs; handles refusals and truncation
-- **`GenerationProvider`** interface with an `AnthropicProvider` (Claude Opus 5.5, prompt caching, token/cost logging)
+- **`chatStructured()`** (extraction model): one call constrained to a Zod schema via structured outputs; validates the reply and handles truncation
+- **`GenerationProvider`** interface with a `TogetherProvider` (writer model, token/cost logging)
 - `StorageProvider`: `put(bytes) → sha256`, `get(sha256)`
 - App shell: sidebar with **Dashboard, Jobs, New Application, Discover, Profile, Settings**
 
-**Done when:** the app boots, migrations run, and a test round-trips a structured-output call and a generation call through the Anthropic API.
+**Done when:** the app boots, migrations run, and a test round-trips a structured-output call and a generation call through the LLM API.
 
 ---
 
@@ -164,7 +166,7 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 **Goal:** a single source of truth for personalization, plus a seeded corpus for retrieval.
 
-- Upload base resume (PDF/DOCX) → text → Claude converts it to a **structured profile** (experience, skills, projects, education, certifications, achievements) → review/edit form
+- Upload base resume (PDF/DOCX) → text → the LLM converts it to a **structured profile** (experience, skills, projects, education, certifications, achievements) → review/edit form
 - Preferences: target roles, locations, remote/hybrid/on-site, minimum salary, countries, visa sponsorship, preferred technologies, excluded roles/companies
 - Generation instructions: style rules, section limits (the template is cramped, so per-section character/bullet limits matter), tone
 - **Import past resumes** (and their JDs, if available) to seed the retrieval corpus from day one
@@ -183,12 +185,15 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
   1. Detect the ATS from the URL → public JSON API (**Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable**)
   2. schema.org `JobPosting` JSON-LD in the page
   3. HTML fetch → Playwright if JS-rendered → Readability → main text
-- **Claude structuring** with a JSON schema: company, title, location, remote type, employment type, salary, posted date, responsibilities, requirements, technologies, application URL
+- **LLM structuring** with a JSON schema: company, title, location, remote type, employment type, salary, posted date, responsibilities, requirements, technologies, application URL
 - Keyword extraction runs in the same step and is saved to `job_keywords`
 - Review screen with editable fields → **Save**
 - Fallback: "paste JD text" for sites that block fetching (LinkedIn, Indeed)
 - Dedup: canonical URL + hash of normalized `company + title + location`
+- **Queue (added later, see [STAGE-2B-QUEUE.md](STAGE-2B-QUEUE.md)):** many URLs at once, processed in the background (2 at a time) so work survives page changes and closed tabs; clean results are saved automatically, doubtful ones wait for review; a sidebar tracker shows progress
 - Store raw HTML/text as an immutable `job_snapshot`
+- **Save** also creates the `applications` row (status `saved`) and its first `status_events` entry, so Stage 3 starts with data. Tables are created in the stage that uses them; `jobs.embedding` (Stage 5) and `jobs.source_id` (Stage 8) are added then.
+- Embedded-Greenhouse career pages (`?gh_jid=` on a company domain) are resolved by guessing the board from the domain
 
 **Done when:** about 90% of URLs from common ATSs and career pages extract correctly. A fixture set of 20–30 saved pages runs as regression tests to catch prompt or model changes.
 
@@ -196,15 +201,31 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 ## Stage 3: Jobs dashboard and application tracker (about 1 week)
 
-**Goal:** the central table where everything happens.
+**Goal:** the central table where everything happens. Detailed plan and as-built notes: [STAGE-3-PLAN.md](STAGE-3-PLAN.md).
 
-- **Jobs table** (TanStack Table): company, title, location, status, match score (once Stage 6 lands), date saved, documents present
-- **Actions column** per row: Generate/View resume, Generate/View cover letter, Generate/View cold email, Find contact, Send email, Change status
-- Job detail page: JD snapshot, extracted fields, documents (with version history), status timeline, notes, contacts, outreach history
-- Statuses: Saved, Preparing, Applied, Recruiter Screen, Interview, Technical Interview, Final Interview, Offer, Rejected, Withdrawn, Ghosted, with `status_events` recording the timeline
-- Tabs: All, Saved, Preparing, Applied, Interviews, Offers, Rejected
+- **Jobs table** (TanStack Table v9): company (with source), title, location, salary, status, applied date, links (posting and application page), saved date; optional columns for source, posted date, employment type, technologies and notes. Sorting, search, remote and source filters, column visibility, pagination, row selection, **CSV export**
+- **Tabs:** Active (default; hides closed), Saved, Preparing, Applied, Interviews, Offers, **Closed** (Rejected, Withdrawn, Ghosted). State lives in the URL
+- **Status changes** inline, per row or in bulk, optimistic, each with an **Undo** toast; marking Applied records today's date (editable). Every change is a `status_events` row
+- **Slide-over panel** per job: links, status, applied date, notes, details, requirements, responsibilities, keywords, timeline, source text; previous/next through the current list; deep link with `?job=<id>`
+- **Keyboard shortcuts:** `/` search, `j`/`k` move, `Enter` open, `x` select, `Shift+A` mark Applied, `Esc` close
+- **Dashboard:** funnel counts, "needs attention" (Applied with no change for 7+ days, Preparing for 3+ days), recent activity
+- Tracking is basics only (status, notes, applied date). Documents, outreach and match-score columns arrive with Stages 4, 7 and 6. There is no hard delete (snapshots are immutable): a wrong save is set to Withdrawn
+- Statuses: Saved, Preparing, Applied, Recruiter Screen, Interview, Technical Interview, Final Interview, Offer, Rejected, Withdrawn, Ghosted
 
-**Done when:** a saved job can be moved through statuses and its timeline is recorded.
+**Done when:** a saved job can be moved through statuses, undone, and its timeline is recorded.
+
+---
+
+## Stage 3b: Company directory (added after Stage 3)
+
+**Goal:** know the employer, once. Resumes, cover letters and cold emails read better when they reflect what the company does and values, and that should not be re-researched for every job. Details: [STAGE-3B-COMPANIES.md](STAGE-3B-COMPANIES.md).
+
+- **`companies` directory:** one row per employer, shared by all its jobs. Markdown fields: what they do, mission/values/principles, culture, and your private notes; plus website, aliases and sources. Jobs link to it automatically (names compared after dropping case, punctuation and suffixes like Inc/LLC; aliases such as YouTube → Google); duplicates can be merged
+- **From the posting:** extraction also copies what the posting says about the employer (`aboutCompany`); it seeds an empty company profile
+- **Research, cheapest first:** directory (skip if already researched) → the posting's own text → the company's own site (About pages; Playwright only for thin pages that loaded) → one combined web search (Tavily, `TAVILY_API_KEY`) only if that is thin → at most one follow-up search restricted to the company's own domains when mission/values are still missing. Sources are labelled company-owned or third-party; videos, job boards and review/survey aggregators are never used, and mission/values/culture come only from company-owned sources. Every run keeps a log of its queries and pages. Failure or a missing key never blocks saving the job
+- **Parent company:** a brand can be marked as part of a group (YouTube, part of Google); the parent's profile is added to exports
+- **Your edits win:** every text field records who wrote it (posting, web, you). Anything you edit is never overwritten by research; clearing a field hands it back to automation
+- **Export:** Markdown for a job now includes an "About the company" section (profile, your notes, the posting's own text, sources); the company page exports its own profile
 
 ---
 
@@ -212,14 +233,14 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 **Goal:** tailored, accurate content that is quick to copy into the user's template.
 
-- Written by **Claude Opus 5.5**. Generation input: profile version + job + generation instructions (+ retrieved references once Stage 5 lands)
+- Written by **MiniMax M3** (`WRITER_MODEL`). Generation input: profile version + job + generation instructions (+ retrieved references once Stage 5 lands)
 - **Resume output is structured by section** (summary, skills, each role's bullets, projects) with per-section length limits, so it fits the cramped template
 - **Editor** per document with version history; every save is a new version
 - **Copy helpers:** "copy section" and "copy all" buttons, with plain-text formatting that pastes cleanly into the template
 - **Cover letter** and **cold email** (short subject + 80–150 word body) generated from the same inputs
-- **Accuracy check:** a second pass with Claude Sonnet 5.5 verifies each bullet against the profile and flags anything it can't trace back. Nothing is invented.
+- **Accuracy check:** a second pass with the extraction model verifies each bullet against the profile and flags anything it can't trace back. Nothing is invented.
 - Optional upload of the final PDF made in the template → stored as an attachment
-- Generate resume, cover letter and cold email in parallel (Anthropic API calls, so local hardware is not the bottleneck)
+- Generate resume, cover letter and cold email in parallel (Together API calls, so local hardware is not the bottleneck)
 
 **Done when:** all three documents can be generated, edited, versioned and copied, and the accuracy check flags fabricated claims in test cases.
 
@@ -229,9 +250,11 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 **Goal:** new resumes reuse what worked for similar jobs before.
 
+Started early, for email attachments: resume files are indexed by a background step (embeddings in `resume_chunks`). A Resumes page with Markdown views and an optional master resume are written up in [RESUME-LIBRARY.md](RESUME-LIBRARY.md).
+
 - On save, **index** jobs (JD text) and resumes (chunked by section/bullet): `tsvector` for full-text and an embedding from **`qwen3-embedding:4b`** (local, via Ollama) stored in pgvector, with the model name saved next to each vector
-- **Keyword expansion:** Claude proposes related terms not in the JD (stored as `expanded` in `job_keywords`)
-- **Retrieval:** two candidate lists, merged with reciprocal-rank fusion: (1) vector similarity of the JD + expanded keywords against chunk embeddings, (2) Postgres full-text (`websearch_to_tsquery`) on the keywords. Take the top ~20, then Claude Sonnet 5.5 reranks them against the JD and keeps the best few
+- **Keyword expansion:** the LLM proposes related terms not in the JD (stored as `expanded` in `job_keywords`)
+- **Retrieval:** two candidate lists, merged with reciprocal-rank fusion: (1) vector similarity of the JD + expanded keywords against chunk embeddings, (2) Postgres full-text (`websearch_to_tsquery`) on the keywords. Take the top ~20, then the LLM reranks them against the JD and keeps the best few
 - Top-k past resume chunks (and the jobs they were written for) are injected into the generation prompt as **reference examples**, clearly marked as style/phrasing references, not facts
 - Show "References used" on each generated document (`reference_doc_ids`) so the user can see what the model drew on
 
@@ -246,7 +269,7 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 **Goal:** an explainable fit score, for information only.
 
 - Deterministic flags: location/country mismatch, sponsorship, salary below minimum, excluded company/role
-- Claude structured scoring: Skills, Experience, Responsibilities, Location, Preferences; overall is a weighted sum computed in code
+- LLM structured scoring: Skills, Experience, Responsibilities, Location, Preferences; overall is a weighted sum computed in code
 - Strengths, missing requirements, concerns, and "why this is relevant"
 - Score column in the Jobs table and on Discover; analysis panel on the job page
 - Cached per `(job_snapshot, profile_version)`
@@ -261,11 +284,12 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 - **Contact finding**, behind a pluggable `ContactFinder` interface:
   1. Parse the JD/page for a named recruiter or hiring manager
-  2. Look up people at the company domain via **Hunter.io** or **Apollo.io** API (names, titles, emails)
-  3. Email pattern inference + verification (Hunter verifier) when only a name is known
-  4. Claude **ranks candidates** by relevance to the role (hiring manager for that team > team lead > technical recruiter > general recruiter) and explains why
+  2. Look up people at the company via **Prospeo** (search by company and title) and the web (Tavily), then reveal a chosen person's verified email on demand. Built: [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md)
+  3. Email format suggestions (first.last@, flast@, ...) when only a name is known, shown as unverified guesses
+  4. The LLM **ranks candidates** by relevance to the role (hiring manager for that team > team lead > technical recruiter > general recruiter) and explains why
   5. Manual add/edit always available
-- **Gmail integration:** OAuth with `gmail.send` scope; tokens stored locally, encrypted
+- **Settings and Gmail connection first (Stage 7a, built):** the Email tab in Settings connects Gmail (OAuth, tokens encrypted in Postgres), holds the sending rules, writing defaults and contact-finder key status. Details: [STAGE-7A-EMAIL-SETTINGS.md](STAGE-7A-EMAIL-SETTINGS.md). Writing and sending rules: [cold-email.md](cold-email.md)
+- **Gmail integration:** OAuth with `gmail.send` and `gmail.readonly` scopes (both requested at connect time, so reply detection needs no reconnect); tokens stored locally, encrypted
 - **Send flow:** pick contact → choose cold-email version → edit → preview → **Send** (explicit click, never automatic)
 - Store message and thread IDs in `outreach_emails`; show sent history on the job
 - Later: read replies on the thread (needs `gmail.readonly`) to flag responses
@@ -283,7 +307,7 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
   - **Y Combinator:** the public YC company directory (e.g. the community `yc-oss` JSON dataset) to get companies, then their **Ashby/Greenhouse/Lever** board APIs for openings; the HN "Who is Hiring" thread via the official HN/Algolia API
   - **Aggregators (optional, paid):** Adzuna API, JSearch (Google for Jobs), TheirStack
   - **LinkedIn:** deferred; no permitted API for this use. The browser extension or pasting covers it.
-- **Pipeline:** scheduled fetch (pg-boss cron) → dedup → prefilter on preferences (roles, locations, exclusions) → Claude structuring → match score (Stage 6) → rank
+- **Pipeline:** scheduled fetch (pg-boss cron) → dedup → prefilter on preferences (roles, locations, exclusions) → LLM structuring → match score (Stage 6) → rank
 - **Discover page:** filters (company, role, location, remote, score, source, date), Save / Ignore actions; saved jobs move to the Jobs dashboard
 - Respect robots.txt, rate limits and each site's terms
 
@@ -317,11 +341,11 @@ Interview prep and tracking, reply detection and status auto-updates from Gmail,
 
 ## Cross-cutting concerns
 
-- **LLM reliability:** every structured call uses Anthropic structured outputs, so JSON is schema-valid by construction; still handle `refusal` and `max_tokens` stop reasons. Pin model IDs in `.env`; run the fixture eval suite whenever a model or prompt changes. Optionally enable the server-side refusal `fallbacks` parameter for Sonnet 5.5 / Opus 5.5 calls.
-- **Cost:** log tokens and cost for every Claude call; prompt caching on profile + instructions keeps repeated generations cheap.
+- **LLM reliability:** every structured call uses Together structured outputs plus Zod validation; handle truncation (`finish_reason: "length"`), invalid JSON and schema mismatches with clear errors. Pin model IDs in `.env`; run the fixture eval suite whenever a model or prompt changes.
+- **Cost:** log tokens and cost for every LLM call. The models are cheap enough that bulk discovery is affordable without a separate batch pipeline.
 - **LLM quality:** fixture suite of real JDs with expected extractions, run as an eval script whenever the model or prompts change
 - **Immutability:** versioned documents and profiles, DB triggers on locked rows, content-addressed files
-- **Privacy:** your data lives in local Postgres and disk, but every LLM step sends content to the Anthropic API: your resume and profile (Stage 1 parsing), job pages, and retrieved past resumes. Gmail and the contact-finder API also receive data. Review Anthropic's data-retention terms for your account; OAuth tokens and API keys stay in `.env`/encrypted storage
+- **Privacy:** your data lives in local Postgres and disk, but every LLM step sends content to the Together AI API: your resume and profile (Stage 1 parsing), job pages, and retrieved past resumes. Gmail and the contact-finder API also receive data. Review Together AI's data-retention terms for your account; OAuth tokens and API keys stay in `.env`/encrypted storage
 - **Email safety:** no automatic sending; daily send cap; every sent email logged
 - **Legal:** prefer official and public APIs; respect robots.txt and site terms
 

@@ -1,12 +1,24 @@
 import {
+  type AnyPgColumn,
+  boolean,
+  date,
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import type { ColdEmailSettings } from "@/lib/email/settings-schema";
+import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
+import type { IndexStatus } from "@/lib/resume/types";
+import type { ContactKind, ContactSource, EmailStatus, OutreachStatus, SearchStatus, SearchSteps } from "@/lib/outreach/types";
 import type {
   GenerationInstructions,
   Preferences,
@@ -50,6 +62,8 @@ export const pastResumes = pgTable(
     role: text("role"),
     jdText: text("jd_text"),
     jdUrl: text("jd_url"),
+    /** Set when the resume was uploaded for a specific job (for example while attaching it to an email). */
+    jobId: uuid("job_id").references(() => jobs.id),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     extractedText: text("extracted_text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -57,6 +71,437 @@ export const pastResumes = pgTable(
   (t) => [index("past_resumes_created_idx").on(t.createdAt)],
 );
 
+export const jobStatus = pgEnum("job_status", ["discovered", "saved", "ignored"]);
+export const jobOrigin = pgEnum("job_origin", ["manual", "discovery"]);
+export const remoteType = pgEnum("remote_type", ["remote", "hybrid", "onsite", "unknown"]);
+export const fetchMethod = pgEnum("fetch_method", [
+  "greenhouse",
+  "lever",
+  "ashby",
+  "workday",
+  "smartrecruiters",
+  "workable",
+  "jsonld",
+  "html",
+  "playwright",
+  "paste",
+]);
+export const keywordKind = pgEnum("keyword_kind", ["extracted", "expanded"]);
+export const applicationStatus = pgEnum("application_status", [
+  "saved",
+  "preparing",
+  "applied",
+  "recruiter_screen",
+  "interview",
+  "technical_interview",
+  "final_interview",
+  "offer",
+  "rejected",
+  "withdrawn",
+  "ghosted",
+]);
+
+export type JobRequirements = { required: string[]; preferred: string[] };
+
+export type CompanyField = "about" | "principles" | "culture";
+export type CompanyProvenance = Partial<Record<CompanyField, "posting" | "web" | "user">>;
+export type CompanySource = { url: string; title: string; kind?: "owned" | "third-party" };
+
+/** What a research run looked at, kept so it can be inspected later. */
+export type CompanyResearchLog = {
+  via: "company-site" | "web-search";
+  queries: string[];
+  pages: { url: string; title: string; kind: "owned" | "third-party"; origin: "site" | "search" }[];
+};
+
+/**
+ * One row per employer, shared by every job there. The text fields are Markdown. `provenance` records
+ * who last wrote each field; a field marked "user" is never overwritten by automated research.
+ * Deleting is soft (`deleted_at`); names only have to be unique among companies that are not deleted.
+ */
+export const companies = pgTable(
+  "companies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    website: text("website").notNull().default(""),
+    about: text("about").notNull().default(""),
+    principles: text("principles").notNull().default(""),
+    culture: text("culture").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    provenance: jsonb("provenance").$type<CompanyProvenance>().notNull().default({}),
+    sources: jsonb("sources").$type<CompanySource[]>().notNull().default([]),
+    researchLog: jsonb("research_log").$type<CompanyResearchLog | null>(),
+    /** The group this company belongs to (YouTube is part of Google). One level is enough for exports. */
+    parentId: uuid("parent_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
+    researchedAt: timestamp("researched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("companies_normalized_name_live_idx").on(t.normalizedName).where(sql`deleted_at is null`)],
+);
+
+/** Other names that mean the same company (e.g. "YouTube" -> Google). */
+export const companyAliases = pgTable("company_aliases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  alias: text("alias").notNull(),
+  normalizedAlias: text("normalized_alias").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * `search_vector` (generated tsvector + GIN index) is added in the 0002 SQL migration. Deleting is soft
+ * (`deleted_at`); the URL and dedup key only have to be unique among jobs that are not deleted, so a
+ * deleted job can be added again.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    canonicalUrl: text("canonical_url"),
+    applicationUrl: text("application_url"),
+    ats: text("ats"),
+    atsJobId: text("ats_job_id"),
+    company: text("company").notNull(),
+    /** Link to the shared directory entry; null only for jobs saved before the directory existed. */
+    companyId: uuid("company_id").references(() => companies.id),
+    /** What this posting itself says about the employer (copied as written). */
+    aboutCompany: text("about_company").notNull().default(""),
+    title: text("title").notNull(),
+    location: text("location").notNull().default(""),
+    remoteType: remoteType("remote_type").notNull().default("unknown"),
+    employmentType: text("employment_type"),
+    salaryMin: integer("salary_min"),
+    salaryMax: integer("salary_max"),
+    salaryCurrency: text("salary_currency"),
+    salaryPeriod: text("salary_period"),
+    postedAt: date("posted_at"),
+    responsibilities: jsonb("responsibilities").$type<string[]>().notNull(),
+    requirements: jsonb("requirements").$type<JobRequirements>().notNull(),
+    /** Everything else worth keeping from the posting (benefits, interview process...), grouped under headings. */
+    additionalDetails: jsonb("additional_details").$type<AdditionalDetail[]>().notNull().default([]),
+    technologies: text("technologies").array().notNull(),
+    origin: jobOrigin("origin").notNull().default("manual"),
+    status: jobStatus("status").notNull().default("saved"),
+    dedupKey: text("dedup_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("jobs_created_idx").on(t.createdAt),
+    index("jobs_company_idx").on(t.companyId),
+    uniqueIndex("jobs_canonical_url_live_idx").on(t.canonicalUrl).where(sql`deleted_at is null`),
+    uniqueIndex("jobs_dedup_key_live_idx").on(t.dedupKey).where(sql`deleted_at is null`),
+  ],
+);
+
+/** Immutable: a DB trigger rejects UPDATE and DELETE (see drizzle/0002_jobs.sql). */
+export const jobSnapshots = pgTable("job_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .references(() => jobs.id),
+  sourceUrl: text("source_url"),
+  fetchMethod: fetchMethod("fetch_method").notNull(),
+  rawFileId: uuid("raw_file_id").references(() => files.id),
+  rawText: text("raw_text").notNull(),
+  normalized: jsonb("normalized").notNull(),
+  model: text("model").notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const jobKeywords = pgTable(
+  "job_keywords",
+  {
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    keyword: text("keyword").notNull(),
+    kind: keywordKind("kind").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.jobId, t.keyword, t.kind] })],
+);
+
+export const applications = pgTable("applications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  jobId: uuid("job_id")
+    .notNull()
+    .unique()
+    .references(() => jobs.id),
+  status: applicationStatus("status").notNull().default("saved"),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  applicationUrl: text("application_url"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const statusEvents = pgTable("status_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  applicationId: uuid("application_id")
+    .notNull()
+    .references(() => applications.id),
+  fromStatus: applicationStatus("from_status"),
+  toStatus: applicationStatus("to_status").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  note: text("note"),
+});
+
+export const queueStatus = pgEnum("queue_status", ["queued", "running", "saved", "needs_review", "duplicate", "failed"]);
+
+export type QueueStepName = "detect" | "fetch" | "render" | "structure" | "company";
+export type QueueSteps = Partial<Record<QueueStepName, { status: "running" | "done" | "skipped"; detail?: string }>>;
+
+/**
+ * Job URLs / pasted postings waiting to be turned into saved jobs. A worker inside the app server processes
+ * them in the background, so work survives page changes and closed tabs. `draft` is kept only while the
+ * result needs a human (status needs_review); a saved item points at its job instead.
+ */
+export const applicationQueue = pgTable(
+  "application_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").$type<"url" | "text">().notNull(),
+    /** The job URL, or the pasted posting text. */
+    input: text("input").notNull(),
+    /** For pasted text: an optional URL used for de-duplication. */
+    sourceUrl: text("source_url"),
+    /** What to show in lists: the URL, then "Company - Title" once known. */
+    label: text("label").notNull(),
+    status: queueStatus("status").notNull().default("queued"),
+    steps: jsonb("steps").$type<QueueSteps>().notNull().default({}),
+    draft: jsonb("draft").$type<JobDraft>(),
+    error: text("error"),
+    errorCode: text("error_code"),
+    jobId: uuid("job_id").references(() => jobs.id),
+    duplicateJobId: uuid("duplicate_job_id").references(() => jobs.id),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while an item is running. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("application_queue_status_idx").on(t.status, t.createdAt)],
+);
+
+/** Bookmarks for the job boards and career pages visited every day; `last_opened_at` drives the daily round. */
+export const quickLinks = pgTable(
+  "quick_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    note: text("note").notNull().default(""),
+    /** Optional heading the link is shown under, e.g. "Job boards". */
+    group: text("group").notNull().default(""),
+    position: integer("position").notNull().default(0),
+    lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("quick_links_position_idx").on(t.position)],
+);
+
+/** App-wide configuration. One row (`id = 'default'`); unlike profile versions, edits overwrite. */
+export const appSettings = pgTable("app_settings", {
+  id: text("id").primaryKey(),
+  coldEmail: jsonb("cold_email").$type<ColdEmailSettings>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** A connected mail account. Tokens are AES-GCM encrypted. Disconnecting is soft (`disconnected_at`). */
+export const emailAccounts = pgTable(
+  "email_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").$type<"gmail">().notNull(),
+    email: text("email").notNull(),
+    scopes: text("scopes").array().notNull(),
+    refreshTokenEnc: text("refresh_token_enc").notNull(),
+    accessTokenEnc: text("access_token_enc"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    /** Set when Google rejected the refresh token (revoked, or expired in Testing mode); the user must reconnect. */
+    needsReconnect: boolean("needs_reconnect").notNull().default(false),
+    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("email_accounts_one_active_idx")
+      .on(t.provider)
+      .where(sql`${t.disconnectedAt} is null`),
+  ],
+);
+
+/** People who could receive the cold email for one job: found by lookup, named in the posting, or added by hand. */
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    name: text("name").notNull(),
+    title: text("title").notNull().default(""),
+    email: text("email"),
+    emailStatus: text("email_status").$type<EmailStatus>().notNull().default("none"),
+    confidence: integer("confidence"),
+    source: text("source").$type<ContactSource>().notNull(),
+    linkedinUrl: text("linkedin_url"),
+    /** The finder's own id for this person (Prospeo's person_id), used to reveal their email. */
+    providerId: text("provider_id"),
+    /** A short bio or headline (for example a founder's Y Combinator bio). */
+    about: text("about").notNull().default(""),
+    /** Where the address came from: "Prospeo", "Seen publicly at github.com", "Added by you"... */
+    emailSource: text("email_source"),
+    kind: text("kind").$type<ContactKind>().notNull().default("other"),
+    rank: integer("rank"),
+    reason: text("reason").notNull().default(""),
+    doNotContact: boolean("do_not_contact").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("contacts_job_idx").on(t.jobId),
+    index("contacts_email_idx").on(sql`lower(${t.email})`),
+    uniqueIndex("contacts_job_email_live_idx")
+      .on(t.jobId, sql`lower(${t.email})`)
+      .where(sql`${t.deletedAt} is null and ${t.email} is not null`),
+  ],
+);
+
+/** One working draft per job (`status = 'draft'`); sending turns the draft into a sent record. */
+export const outreachEmails = pgTable(
+  "outreach_emails",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    contactId: uuid("contact_id").references(() => contacts.id),
+    toEmail: text("to_email"),
+    subject: text("subject").notNull().default(""),
+    body: text("body").notNull().default(""),
+    status: text("status").$type<OutreachStatus>().notNull().default("draft"),
+    gmailMessageId: text("gmail_message_id"),
+    gmailThreadId: text("gmail_thread_id"),
+    /** The resume attached to this email. Files are content-addressed and never changed, so this is exactly what was sent. */
+    attachmentFileId: uuid("attachment_file_id").references(() => files.id),
+    attachmentName: text("attachment_name"),
+    error: text("error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("outreach_emails_job_idx").on(t.jobId, t.status),
+    uniqueIndex("outreach_emails_one_draft_idx")
+      .on(t.jobId)
+      .where(sql`${t.status} = 'draft'`),
+    index("outreach_emails_sent_idx").on(t.sentAt),
+  ],
+);
+
+/**
+ * "Find people" runs waiting for, or being handled by, the background worker (the same one that processes the job
+ * queue), so a search keeps going when the page is closed. At most one is active per job.
+ */
+export const contactSearches = pgTable(
+  "contact_searches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    status: text("status").$type<SearchStatus>().notNull().default("queued"),
+    steps: jsonb("steps").$type<SearchSteps>().notNull().default({}),
+    found: integer("found"),
+    notes: jsonb("notes").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while a search is running. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("contact_searches_status_idx").on(t.status, t.createdAt),
+    index("contact_searches_job_idx").on(t.jobId, t.createdAt),
+    uniqueIndex("contact_searches_one_active_idx")
+      .on(t.jobId)
+      .where(sql`${t.status} in ('queued', 'running')`),
+  ],
+);
+
+/**
+ * Where each resume file is in the search-index pipeline (extract text, structure it, split it into sections, embed
+ * them). Keyed by file, so the base resume and every uploaded one go through the same steps, and identical bytes are
+ * only processed once. Worked off by the same background worker as the job queue.
+ */
+export const resumeIndexes = pgTable(
+  "resume_indexes",
+  {
+    fileId: uuid("file_id")
+      .primaryKey()
+      .references(() => files.id),
+    status: text("status").$type<IndexStatus>().notNull().default("queued"),
+    /** The resume as structured data, when the model could read it. */
+    parsed: jsonb("parsed").$type<Profile>(),
+    /** Something worth telling the user even though indexing succeeded. */
+    note: text("note"),
+    error: text("error"),
+    chunkCount: integer("chunk_count").notNull().default(0),
+    embeddingModel: text("embedding_model"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while indexing is running. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("resume_indexes_status_idx").on(t.status, t.createdAt)],
+);
+
+/** One searchable piece of a resume (a job, a project, the skills list...) with its embedding. */
+export const resumeChunks = pgTable(
+  "resume_chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id),
+    ordinal: integer("ordinal").notNull(),
+    section: text("section").notNull(),
+    label: text("label").notNull(),
+    text: text("text").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
+    embeddingModel: text("embedding_model").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("resume_chunks_file_ordinal_idx").on(t.fileId, t.ordinal),
+    index("resume_chunks_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
+);
+
+export type ResumeIndexRow = typeof resumeIndexes.$inferSelect;
+export type ResumeChunkRow = typeof resumeChunks.$inferSelect;
+
+export type ContactSearchRow = typeof contactSearches.$inferSelect;
+export type ContactRow = typeof contacts.$inferSelect;
+export type OutreachEmailRow = typeof outreachEmails.$inferSelect;
+export type EmailAccountRow = typeof emailAccounts.$inferSelect;
+export type QueueRow = typeof applicationQueue.$inferSelect;
+export type QuickLinkRow = typeof quickLinks.$inferSelect;
+export type JobRow = typeof jobs.$inferSelect;
+export type CompanyRow = typeof companies.$inferSelect;
 export type ProfileVersionRow = typeof profileVersions.$inferSelect;
 export type PastResumeRow = typeof pastResumes.$inferSelect;
 export type FileRow = typeof files.$inferSelect;

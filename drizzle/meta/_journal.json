@@ -15,6 +15,97 @@
       "when": 1791099091076,
       "tag": "0001_immutable_profile_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791104460647,
+      "tag": "0002_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791108770487,
+      "tag": "0003_companies",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791110227573,
+      "tag": "0004_company_parent_and_research_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791111402679,
+      "tag": "0005_application_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791127093804,
+      "tag": "0006_quick_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791186733420,
+      "tag": "0007_soft_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791188279848,
+      "tag": "0008_job_additional_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791211286159,
+      "tag": "0009_email_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791214825250,
+      "tag": "0010_outreach",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791215546632,
+      "tag": "0011_prospeo",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791216254426,
+      "tag": "0012_contact_searches",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791217420946,
+      "tag": "0013_contact_about_email_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791222891833,
+      "tag": "0014_resume_library",
+      "breakpoints": true
     }
   ]
 }

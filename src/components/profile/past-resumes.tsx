@@ -1,12 +1,14 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { deletePastResumeAction } from "@/app/(app)/profile/actions";
+import { IndexBadge } from "@/components/resume/index-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Collapse } from "@/components/ui/collapse";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -18,10 +20,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { ResumeDropzone } from "./resume-dropzone";
 
 export type PastResumeSummary = {
   id: string;
+  fileId: string;
   title: string;
   company: string | null;
   role: string | null;
@@ -72,13 +76,14 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
           Resumes you have sent before. They become reference material when generating new ones.
           Adding the job description each one was written for makes retrieval much better.
         </p>
-        <Button onClick={() => setOpen((v) => !v)} variant={open ? "outline" : "default"}>
-          <Plus /> Add past resume
+        <Button onClick={() => setOpen((v) => !v)} variant={open ? "outline" : "default"} aria-expanded={open}>
+          <Plus className={cn("transition-transform duration-200", open && "rotate-45")} aria-hidden />
+          {open ? "Cancel" : "Add past resume"}
         </Button>
       </div>
 
-      {open && (
-        <Card>
+      <Collapse open={open}>
+        <Card className="mb-1">
           <CardContent>
             <form onSubmit={submit} className="space-y-4">
               <ResumeDropzone
@@ -102,13 +107,13 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
                 <Label htmlFor="jdText">Job description (optional)</Label>
                 <Textarea id="jdText" name="jdText" rows={5} />
               </div>
-              <Button type="submit" disabled={busy}>
-                {busy ? "Saving…" : "Save past resume"}
+              <Button type="submit" loading={busy}>
+                {busy ? "Saving..." : "Save past resume"}
               </Button>
             </form>
           </CardContent>
         </Card>
-      )}
+      </Collapse>
 
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No past resumes yet.</p>
@@ -121,6 +126,7 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
               <TableHead>Role</TableHead>
               <TableHead>Applied</TableHead>
               <TableHead>JD</TableHead>
+              <TableHead>Search index</TableHead>
               <TableHead className="text-right">Text size</TableHead>
               <TableHead />
             </TableRow>
@@ -133,11 +139,24 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
                 <TableCell>{r.role ?? "—"}</TableCell>
                 <TableCell>{r.appliedAt ? r.appliedAt.slice(0, 10) : "—"}</TableCell>
                 <TableCell>{r.hasJd ? "Yes" : "No"}</TableCell>
+                <TableCell>
+                  <IndexBadge fileId={r.fileId} />
+                </TableCell>
                 <TableCell className="text-right">{r.chars.toLocaleString()} chars</TableCell>
                 <TableCell className="text-right">
+                  <a
+                    href={`/api/files/${r.fileId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open the file for ${r.title}`}
+                    className="mr-1 inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-[background-color,color,scale] hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.92]"
+                  >
+                    <ExternalLink className="size-4" aria-hidden />
+                  </a>
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Remove ${r.title}`}
                     disabled={deleting}
                     onClick={() =>
                       startDelete(async () => {

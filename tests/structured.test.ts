@@ -1,39 +1,49 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-const parse = vi.fn();
-vi.mock("@/lib/llm/client", () => ({ anthropic: () => ({ messages: { parse } }) }));
+const create = vi.fn();
+vi.mock("@/lib/llm/client", () => ({ together: () => ({ chat: { completions: { create } } }) }));
 
 process.env.DATABASE_URL ??= "postgres://unused";
 const { chatStructured } = await import("@/lib/llm/structured");
 
 const Schema = z.object({ name: z.string() });
 const input = { system: "s", user: "u" };
+const reply = (content: string, finish_reason = "stop") => ({
+  choices: [{ finish_reason, message: { content } }],
+});
 
-beforeEach(() => parse.mockReset());
+beforeEach(() => create.mockReset());
 
 describe("chatStructured", () => {
-  it("returns parsed output and requests low effort on the extraction model", async () => {
-    parse.mockResolvedValue({ stop_reason: "end_turn", parsed_output: { name: "Ada" } });
+  it("returns validated output and sends the schema on the extraction model", async () => {
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
     await expect(chatStructured(Schema, input)).resolves.toEqual({ name: "Ada" });
 
-    const args = parse.mock.calls[0][0];
-    expect(args.model).toBe("claude-sonnet-5-5");
-    expect(args.output_config.effort).toBe("low");
+    const args = create.mock.calls[0][0];
+    expect(args.model).toBe(process.env.EXTRACTION_MODEL ?? "zai-org/GLM-5.3-Flash");
+    expect(args.response_format.type).toBe("json_schema");
+    expect(args.response_format.json_schema.schema.properties.name).toBeDefined();
+    expect(args.messages[0].content).toContain('"name"');
   });
 
-  it("throws on refusal", async () => {
-    parse.mockResolvedValue({ stop_reason: "refusal", parsed_output: null });
-    await expect(chatStructured(Schema, input)).rejects.toThrow(/declined/);
+  it("accepts JSON wrapped in code fences", async () => {
+    create.mockResolvedValue(reply('```json\n{"name":"Ada"}\n```'));
+    await expect(chatStructured(Schema, input)).resolves.toEqual({ name: "Ada" });
   });
 
   it("throws when output is truncated", async () => {
-    parse.mockResolvedValue({ stop_reason: "max_tokens", parsed_output: null });
+    create.mockResolvedValue(reply('{"na', "length"));
     await expect(chatStructured(Schema, input)).rejects.toThrow(/cut off/);
   });
 
+  it("throws when output is not JSON", async () => {
+    create.mockResolvedValue(reply("Sorry, I can't help with that."));
+    await expect(chatStructured(Schema, input)).rejects.toThrow(/not valid JSON/);
+  });
+
   it("throws when output does not match the schema", async () => {
-    parse.mockResolvedValue({ stop_reason: "end_turn", parsed_output: null });
+    create.mockResolvedValue(reply('{"name":42}'));
     await expect(chatStructured(Schema, input)).rejects.toThrow(/schema/);
   });
 });

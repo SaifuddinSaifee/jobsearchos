@@ -1,0 +1,6 @@
+{
+  "http://localhost:8765/ld.html": {
+    "status": 200,
+    "body": "<!doctype html><html><head><script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"JobPosting\",\"title\":\"Data Analyst\",\"description\":\"<p>Analyze product data using SQL and Python, build dashboards in Looker, and partner with product managers. Analyze product data using SQL and Python, build dashboards in Looker, and partner with product managers. Analyze product data using SQL and Python, build dashboards in Looker, and partner with product managers. Analyze product data using SQL and Python, build dashboards in Looker, and partner with product managers. Analyze product data using SQL and Python, build dashboards in Looker, and partner with product managers. </p>\",\"datePosted\":\"2026-09-01\",\"hiringOrganization\":{\"@type\":\"Organization\",\"name\":\"Orbital Labs\"},\"jobLocation\":{\"address\":{\"addressLocality\":\"Denver\",\"addressRegion\":\"CO\",\"addressCountry\":\"US\"}}}</script></head><body><p>Data Analyst</p></body></html>\n"
+  }
+}
