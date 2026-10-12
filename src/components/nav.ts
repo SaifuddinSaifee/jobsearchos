@@ -21,7 +21,7 @@ export type NavItem = {
 /** The app's sections. Drives both the sidebar and the page title in the top bar. */
 export const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/jobs", label: "Jobs", icon: Briefcase, childLabel: "Outreach" },
   { href: "/new", label: "New Application", icon: PlusCircle },
   { href: "/links", label: "Quick links", icon: Rocket },
   { href: "/companies", label: "Companies", icon: Building2, childLabel: "Company profile" },

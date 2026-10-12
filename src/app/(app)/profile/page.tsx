@@ -49,6 +49,7 @@ export default async function ProfilePage() {
         }))}
         pastResumes={resumes.map((r) => ({
           id: r.id,
+          fileId: r.fileId,
           title: r.title,
           company: r.company,
           role: r.role,

@@ -3,7 +3,9 @@
 import { useRouter, usePathname } from "next/navigation";
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { useQueue, useQueueTransitions } from "./use-queue";
+import { useSearches } from "@/components/outreach/use-searches";
+import type { SearchItem } from "@/lib/outreach/types";
+import { useQueue, useQueueTransitions, useStatusTransitions } from "./use-queue";
 
 /**
  * Tells you when background work finishes, wherever you are in the app. Quiet on the New Application page
@@ -44,5 +46,25 @@ export function QueueNotifier() {
   );
 
   useQueueTransitions(snapshot.items, isSuccess, onChange);
+
+  // Contact searches: say when one finishes, unless you are already looking at that job's outreach page.
+  const { searches, isSuccess: searchesLoaded } = useSearches();
+  const onSearchChange = useCallback(
+    (changes: { item: SearchItem; from: string }[]) => {
+      for (const { item, from } of changes) {
+        if (from !== "queued" && from !== "running") continue;
+        if (pathname === `/jobs/${item.jobId}/outreach`) continue;
+        const open = { label: "Open", onClick: () => router.push(`/jobs/${item.jobId}/outreach`) };
+        if (item.status === "done") {
+          const n = item.found ?? 0;
+          toast.success(n > 0 ? `Found ${n} ${n === 1 ? "person" : "people"} for ${item.label}` : `No one found for ${item.label}`, { action: open });
+        } else if (item.status === "failed") {
+          toast.error(`Could not search for people at ${item.label}`, { description: item.error ?? undefined, action: open });
+        }
+      }
+    },
+    [pathname, router],
+  );
+  useStatusTransitions(searches, searchesLoaded, onSearchChange);
   return null;
 }

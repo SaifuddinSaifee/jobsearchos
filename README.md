@@ -83,6 +83,18 @@ npm run dev
 
 Open <http://localhost:3000/settings>. Both health cards should be green (Postgres connected, Together AI credentials working and all three model IDs found). Then open **Profile** and upload your resume to try the Stage 1 flow end to end.
 
+### Setup: Gmail (optional, for cold email)
+
+Only needed for Stage 7. Sending uses your own Gmail account through Google's API.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable the **Gmail API**.
+2. Under **Google Auth Platform**, set up the consent screen as **External** in **Testing** mode and add your own Gmail address as a **test user**.
+3. Create an **OAuth client ID** of type **Web application** with the authorized redirect URI `http://localhost:3000/api/gmail/callback` (use your `APP_URL` if it differs).
+4. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and generate the key that encrypts the stored tokens: `openssl rand -base64 32`, saved as `TOKEN_ENCRYPTION_KEY`. Restart the app.
+5. Open **Settings**, then the **Email** tab, and press **Connect Gmail**. Google warns that the app is unverified; that is expected for your own project in Testing mode, so continue.
+
+In Testing mode Google expires the login after 7 days; Settings then shows **Reconnect needed**. Optional contact finders use `HUNTER_API_KEY` and `APOLLO_API_KEY`.
+
 ### 7. Check everything works
 
 ```bash

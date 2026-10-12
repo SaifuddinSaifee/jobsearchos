@@ -64,6 +64,48 @@
       "when": 1791188279848,
       "tag": "0008_job_additional_details",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791211286159,
+      "tag": "0009_email_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791214825250,
+      "tag": "0010_outreach",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791215546632,
+      "tag": "0011_prospeo",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791216254426,
+      "tag": "0012_contact_searches",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791217420946,
+      "tag": "0013_contact_about_email_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791222891833,
+      "tag": "0014_resume_library",
+      "breakpoints": true
     }
   ]
 }

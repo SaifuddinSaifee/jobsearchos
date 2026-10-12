@@ -1,13 +1,13 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, ChevronRight, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Mail, Pencil, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fillAdditionalDetailsAction, saveNotesAction } from "@/app/(app)/jobs/actions";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -176,6 +176,10 @@ function Panel({
             build={() => toMarkdownFile(detailToMarkdownJob(detail!))}
           />
           <AskClaudeButton disabled={!detail} build={() => detailToMarkdownJob(detail!)} />
+          <Link href={`/jobs/${head.jobId}/outreach`} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+            <Mail />
+            Email a contact
+          </Link>
           <div className="ml-auto flex items-center gap-2">
             <Button
               variant={editing ? "secondary" : "outline"}

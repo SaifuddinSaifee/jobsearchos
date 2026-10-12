@@ -95,7 +95,7 @@ The app never invents an artifact, snag or result. If the best angle needs work 
 ## 5. Structure
 
 - **Length:** 60 to 120 words in the body. Three or four very short paragraphs.
-- **Format:** plain prose. No bullets, bold, labels ("What I'd bring:"), images or attachments.
+- **Format:** plain prose. No bullets, bold, labels ("What I'd bring:") or images. A resume attachment is the user's choice (see Attachments below); nothing else is attached.
 - **First sentence** is about them or a thing: their product, their problem, an artifact. Never "My name is", never the sender's title, never excitement.
 - **Why care:** one or two proof points with numbers, folded into a sentence, chosen because they map to the role's top need.
 - **Applied clause** (if applied): one clause, for example "I've applied for the Data Engineer role."
@@ -193,8 +193,9 @@ The app sends from the user's own Gmail through the Gmail API (`gmail.send`), so
 
 - **Timing:** Tuesday to Thursday, morning in the **recipient's** time zone (inferred from the company or job location). If the user clicks Send outside that window, offer "schedule for Tue 9:00 their time" alongside "Send now".
 - **Volume:** keep it low and steady, around 20 to 30 personalized emails a day at most, and far below Gmail's daily recipient cap. A sudden burst from a personal account looks like spam.
-- **Format:** plain text (or minimal HTML that mirrors it). No tracking pixels, no link shorteners, no attachments; all three hurt deliverability and trust.
+- **Format:** plain text (or minimal HTML that mirrors it). No tracking pixels and no link shorteners; both hurt deliverability and trust. Attachments are covered below.
 - **Links:** full, readable URLs to the user's own profiles. At most two.
+- **Attachments:** some people want the resume in the first email, and the user chooses. Attach one file only, a PDF where possible (it looks the same everywhere; DOCX can reflow), well under 1 MB, with a plain file name such as "Jane Doe Resume.pdf". Never attach anything else, and say in the email that it is attached so the reader is not surprised. A resume sent is the exact file stored in the app, so the sent history always shows what went out.
 - **One recipient per email.** No CC or BCC lists.
 - **Verified addresses only** by default. Bounces hurt the sender's reputation; an unverified address needs an extra confirmation.
 - **Never automatic.** Every send, including follow-ups, is an explicit click after a preview.
@@ -205,7 +206,7 @@ The app sends from the user's own Gmail through the Gmail API (`gmail.send`), so
 
 - These are personal, one-to-one emails about a specific job, not marketing. Keep them honest and easy to ignore.
 - If someone asks not to be contacted, mark the contact `do_not_contact` and never email them again, including for other jobs at that company.
-- Contact data from Hunter or Apollo is used only to email that person about that job, and is stored locally.
+- Contact data from Prospeo or web search is used only to email that person about that job, and is stored locally.
 - No pretexting: never imply a referral, a mutual connection or a prior conversation that did not happen.
 
 ---
@@ -229,7 +230,7 @@ The app runs the mechanical checks in code and shows failures next to the editor
 - Body is 60 to 120 words; follow-up under 50
 - No banned phrase, no em dash, no bullets
 - Only one ask (flag more than one question in the closing paragraph)
-- At most two links; no attachments
+- At most two links; at most one attachment (the resume), under 1 MB
 - No unfilled `[placeholder]`
 - Recipient name matches the selected contact
 

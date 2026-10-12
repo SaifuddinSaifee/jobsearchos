@@ -1,9 +1,22 @@
+import { and, eq } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
-import { type QueueSteps } from "@/lib/db/schema";
+import { resumeIndexes, type QueueSteps } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { FetchError, type FetchStep } from "@/lib/jobs/fetch/types";
 import { defaultPipelineDeps, runPipeline, type PipelineDeps } from "@/lib/jobs/pipeline";
 import { saveJob } from "@/lib/jobs/service";
+import { findContacts, type FindDeps } from "@/lib/outreach/service";
+import {
+  claimNextSearches,
+  getSearchRow,
+  markSearchDone,
+  markSearchFailed,
+  saveSearchSteps,
+  sweepStaleSearches,
+  touchSearch,
+} from "@/lib/outreach/searches";
+import type { SearchSteps } from "@/lib/outreach/types";
+import { backfillResumeIndexes, claimNextIndexes, processResumeIndex, sweepStaleIndexes, touchIndex } from "@/lib/resume/indexing";
 import { isClean, reviewReason } from "./clean";
 import {
   claimNext,
@@ -21,6 +34,14 @@ const TICK_MS = 3000;
 const HEARTBEAT_MS = 20_000;
 /** One item may take at most this long (fetching, rendering, AI, research). */
 const ITEM_TIMEOUT_MS = 4 * 60_000;
+/** A contact search is a few web calls and one ranking call; it should never take this long. */
+const SEARCH_TIMEOUT_MS = 3 * 60_000;
+/** Contact searches that may run at once, separate from job extractions so neither waits for the other. */
+const SEARCH_CONCURRENCY = 2;
+/** Resume files indexed at once. One, because embeddings run on the local Ollama model and a second would only slow both. */
+const INDEX_CONCURRENCY = 1;
+/** Reading, structuring and embedding one resume. */
+const INDEX_TIMEOUT_MS = 5 * 60_000;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -79,9 +100,50 @@ export async function processItem(id: string, deps: Partial<WorkerDeps> = {}): P
   }
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/** Finds and ranks people for one claimed search, recording each step as it goes. The people are saved by `findContacts`. */
+export async function processSearch(
+  id: string,
+  deps: { db?: Db; find?: typeof findContacts; timeoutMs?: number } = {},
+): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  const row = await getSearchRow(id, db);
+  if (!row || row.status !== "running") return;
+
+  const steps: SearchSteps = {};
+  let chain: Promise<unknown> = Promise.resolve();
+  const onStep: NonNullable<FindDeps["onStep"]> = (name, state) => {
+    steps[name] = state;
+    const snapshot = { ...steps };
+    chain = chain.then(() => saveSearchSteps(id, snapshot, db)).catch(() => {});
+  };
+
+  try {
+    const timeoutMs = deps.timeoutMs ?? SEARCH_TIMEOUT_MS;
+    const result = await withTimeout((deps.find ?? findContacts)(row.jobId, { onStep }, db), timeoutMs, "Timed out after 3 minutes");
+    await chain;
+    await markSearchDone(id, result.found, result.notes, db);
+  } catch (err) {
+    await chain;
+    await markSearchFailed(id, err instanceof Error ? err.message : "Could not search for people", db);
+  }
+}
+
+/** Indexes one claimed resume file; failures are recorded on its row by `processResumeIndex`. */
+export async function processIndex(fileId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  try {
+    await withTimeout((deps.run ?? processResumeIndex)(fileId, { db }), deps.timeoutMs ?? INDEX_TIMEOUT_MS, "Timed out after 5 minutes");
+  } catch (err) {
+    await db
+      .update(resumeIndexes)
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(resumeIndexes.fileId, fileId), eq(resumeIndexes.status, "running")));
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 minutes"): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("Timed out after 4 minutes")), ms);
+    const t = setTimeout(() => reject(new Error(message)), ms);
     p.then(
       (v) => (clearTimeout(t), resolve(v)),
       (e) => (clearTimeout(t), reject(e)),
@@ -89,12 +151,16 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-type WorkerState = { running: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
+type WorkerState = { running: Set<string>; searching: Set<string>; indexing: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
 const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  return (g.__queueWorker ??= { running: new Set(), ticking: false, again: false, timer: null });
+  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), ticking: false, again: false, timer: null });
+  // A dev server that hot-reloaded from older code may hold a state without the search slots.
+  s.searching ??= new Set();
+  s.indexing ??= new Set();
+  return s;
 }
 
 /**
@@ -124,6 +190,32 @@ async function tick(): Promise<void> {
             void tick();
           });
       }
+
+      await sweepStaleSearches();
+      for (const id of await claimNextSearches(SEARCH_CONCURRENCY - s.searching.size)) {
+        s.searching.add(id);
+        const beat = setInterval(() => void touchSearch(id).catch(() => {}), HEARTBEAT_MS);
+        void processSearch(id)
+          .catch((err) => console.error("[queue] unexpected search failure", id, err))
+          .finally(() => {
+            clearInterval(beat);
+            s.searching.delete(id);
+            void tick();
+          });
+      }
+
+      await sweepStaleIndexes();
+      for (const fileId of await claimNextIndexes(INDEX_CONCURRENCY - s.indexing.size)) {
+        s.indexing.add(fileId);
+        const beat = setInterval(() => void touchIndex(fileId).catch(() => {}), HEARTBEAT_MS);
+        void processIndex(fileId)
+          .catch((err) => console.error("[queue] unexpected index failure", fileId, err))
+          .finally(() => {
+            clearInterval(beat);
+            s.indexing.delete(fileId);
+            void tick();
+          });
+      }
     } while (s.again);
   } catch (err) {
     console.error("[queue] tick failed", err instanceof Error ? err.message : err);
@@ -138,6 +230,8 @@ export function startQueueWorker(): void {
   if (s.timer) return;
   s.timer = setInterval(() => void tick(), TICK_MS);
   s.timer.unref?.();
+  // Resumes stored before indexing existed (or while the worker was off) get indexed now.
+  void backfillResumeIndexes().catch((err) => console.error("[queue] resume backfill failed", err instanceof Error ? err.message : err));
   void tick();
 }
 

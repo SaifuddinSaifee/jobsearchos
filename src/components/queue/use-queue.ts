@@ -31,11 +31,11 @@ export function useQueue() {
   return { ...q, snapshot: q.data ?? EMPTY };
 }
 
-/** Calls `onChange(previous, next)` for items whose status changed since the last poll (not for the first load). */
-export function useQueueTransitions(
-  items: QueueSnapshot["items"],
+/** Calls `onChange` for items whose status changed since the last poll (not for the first load). */
+export function useStatusTransitions<T extends { id: string; status: string }>(
+  items: T[],
   loaded: boolean,
-  onChange: (changes: { item: QueueSnapshot["items"][number]; from: string }[]) => void,
+  onChange: (changes: { item: T; from: string }[]) => void,
 ) {
   const seen = useRef<Map<string, string> | null>(null);
   useEffect(() => {
@@ -49,4 +49,13 @@ export function useQueueTransitions(
     }
     seen.current = next;
   }, [items, loaded, onChange]);
+}
+
+/** Status changes of the job queue's items. */
+export function useQueueTransitions(
+  items: QueueSnapshot["items"],
+  loaded: boolean,
+  onChange: (changes: { item: QueueSnapshot["items"][number]; from: string }[]) => void,
+) {
+  useStatusTransitions(items, loaded, onChange);
 }

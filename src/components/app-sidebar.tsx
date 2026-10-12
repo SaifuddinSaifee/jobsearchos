@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { NAV, isActive } from "@/components/nav";
 import { QueueTracker } from "@/components/queue/queue-tracker";
+import { SearchTracker } from "@/components/queue/search-tracker";
 import {
   Sidebar,
   SidebarContent,
@@ -45,6 +46,7 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <QueueTracker />
+        <SearchTracker />
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
