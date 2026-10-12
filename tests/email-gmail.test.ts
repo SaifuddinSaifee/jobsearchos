@@ -8,6 +8,7 @@ import {
   connectedAccount,
   disconnect,
   getAccessToken,
+  MAX_ATTACHMENT_BYTES,
   ReconnectRequiredError,
   sendEmail,
 } from "@/lib/email/gmail";
@@ -91,6 +92,53 @@ describe("buildRawMessage", () => {
     const text = decodeRaw(buildRawMessage({ to: "a@b.com", subject: "café", body: "x", inReplyTo: "<id@mail>" }));
     expect(text).toMatch(/Subject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=/);
     expect(text).toContain("In-Reply-To: <id@mail>");
+  });
+});
+
+describe("buildRawMessage with attachments", () => {
+  const pdf = Buffer.from("%PDF-1.4 fake resume bytes \u0000\u0001\u0002", "latin1");
+
+  it("builds multipart/mixed with the text first and the file as a base64 attachment", () => {
+    const text = decodeRaw(buildRawMessage({ from: "me@example.com", to: "you@example.com", subject: "hello", body: "See attached", attachments: [{ filename: "Jane Doe Resume.pdf", mime: "application/pdf", content: pdf }] }));
+    const boundary = /Content-Type: multipart\/mixed; boundary="([^"]+)"/.exec(text)?.[1];
+    expect(boundary).toBeTruthy();
+    const [, ...parts] = text.split(`--${boundary}`).map((p) => p.trim());
+    expect(parts).toHaveLength(3);
+    expect(parts[2]).toBe("--");
+
+    const [bodyHead, bodyData] = parts[0].split("\r\n\r\n");
+    expect(bodyHead).toContain("Content-Type: text/plain; charset=UTF-8");
+    expect(Buffer.from(bodyData.replace(/\r\n/g, ""), "base64").toString("utf8")).toBe("See attached");
+
+    const [fileHead, fileData] = parts[1].split("\r\n\r\n");
+    expect(fileHead).toContain('Content-Type: application/pdf; name="Jane Doe Resume.pdf"');
+    expect(fileHead).toContain('Content-Disposition: attachment; filename="Jane Doe Resume.pdf"');
+    expect(fileHead).toContain("Content-Transfer-Encoding: base64");
+    expect(Buffer.from(fileData.replace(/\r\n/g, ""), "base64")).toEqual(pdf);
+    expect(fileData.split("\r\n").every((l) => l.length <= 76)).toBe(true);
+  });
+
+  it("encodes non-ASCII file names and strips quotes and line breaks from them", () => {
+    const text = decodeRaw(buildRawMessage({ to: "a@b.com", subject: "s", body: "x", attachments: [{ filename: 'Rés"umé\r\nBcc: evil@x.com.pdf', mime: "application/pdf", content: pdf }] }));
+    expect(text).toMatch(/filename="=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?="/);
+    expect(text.split("\r\n\r\n")[0]).not.toMatch(/^Bcc:/m);
+    expect(text).not.toMatch(/^Bcc: evil/m);
+  });
+
+  it("keeps the plain single-part format when there is nothing to attach", () => {
+    expect(decodeRaw(buildRawMessage({ to: "a@b.com", subject: "s", body: "x", attachments: [] }))).not.toContain("multipart");
+  });
+});
+
+describe("sendEmail attachments", () => {
+  it("refuses attachments over the size limit before calling Gmail", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await seedAccount();
+    await expect(
+      sendEmail({ to: "a@b.com", subject: "s", body: "x", attachments: [{ filename: "big.pdf", mime: "application/pdf", content: Buffer.alloc(MAX_ATTACHMENT_BYTES + 1) }] }, db),
+    ).rejects.toThrow(/larger than 5 MB/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

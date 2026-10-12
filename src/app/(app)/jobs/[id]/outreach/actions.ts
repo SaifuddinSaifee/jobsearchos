@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { enqueueSearch } from "@/lib/outreach/searches";
 import { kickWorker } from "@/lib/queue/worker";
+import { ensureResumeIndex } from "@/lib/resume/indexing";
 import type { SendWarning } from "@/lib/outreach/checks";
 import {
   addContact,
@@ -87,10 +88,17 @@ export async function setWebsiteAction(jobId: string, website: string) {
   return run(async () => ({ domain: await setJobCompanyWebsite(Id.parse(jobId), website) }));
 }
 
-export async function saveDraftAction(jobId: string, input: { subject: string; body: string; contactId?: string | null }) {
+const optionalId = (v: string | null | undefined) => (v === undefined || v === null ? v : Id.parse(v));
+
+export async function saveDraftAction(
+  jobId: string,
+  input: { subject: string; body: string; contactId?: string | null; attachmentFileId?: string | null },
+) {
   return run(async (): Promise<{ draft: DraftDTO }> => {
-    const contactId = input.contactId === undefined || input.contactId === null ? input.contactId : Id.parse(input.contactId);
-    return { draft: await saveDraft(Id.parse(jobId), { ...input, contactId }) };
+    const draft = await saveDraft(Id.parse(jobId), { ...input, contactId: optionalId(input.contactId), attachmentFileId: optionalId(input.attachmentFileId) });
+    // Whatever gets attached is also kept in the resume library, so make sure it is being indexed.
+    if (draft.attachment && (await ensureResumeIndex(draft.attachment.fileId).catch(() => false))) kickWorker();
+    return { draft };
   });
 }
 

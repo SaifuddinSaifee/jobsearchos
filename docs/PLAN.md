@@ -250,6 +250,8 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 **Goal:** new resumes reuse what worked for similar jobs before.
 
+Started early, for email attachments: resume files are indexed by a background step (embeddings in `resume_chunks`). A Resumes page with Markdown views and an optional master resume are written up in [RESUME-LIBRARY.md](RESUME-LIBRARY.md).
+
 - On save, **index** jobs (JD text) and resumes (chunked by section/bullet): `tsvector` for full-text and an embedding from **`qwen3-embedding:4b`** (local, via Ollama) stored in pgvector, with the model name saved next to each vector
 - **Keyword expansion:** the LLM proposes related terms not in the JD (stored as `expanded` in `job_keywords`)
 - **Retrieval:** two candidate lists, merged with reciprocal-rank fusion: (1) vector similarity of the JD + expanded keywords against chunk embeddings, (2) Postgres full-text (`websearch_to_tsquery`) on the keywords. Take the top ~20, then the LLM reranks them against the JD and keeps the best few

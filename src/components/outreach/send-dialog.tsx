@@ -1,10 +1,10 @@
 "use client";
 
-import { AlertTriangle, Send } from "lucide-react";
+import { AlertTriangle, FileText, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { SendWarning } from "@/lib/outreach/checks";
-import type { ContactDTO } from "@/lib/outreach/types";
+import { formatBytes, type AttachmentDTO, type ContactDTO } from "@/lib/outreach/types";
 import { EmailStatusBadge } from "./badges";
 
 /** The last look before an email goes out: exactly who gets what, from which address, and anything worth a second thought. */
@@ -14,6 +14,7 @@ export function SendDialog({
   from,
   subject,
   body,
+  attachment,
   warnings,
   sentToday,
   dailyCap,
@@ -27,6 +28,7 @@ export function SendDialog({
   from: string;
   subject: string;
   body: string;
+  attachment: AttachmentDTO | null;
   warnings: SendWarning[];
   sentToday: number;
   dailyCap: number;
@@ -54,6 +56,18 @@ export function SendDialog({
           </dd>
           <dt className="text-muted-foreground">Subject</dt>
           <dd className="font-medium">{subject}</dd>
+          <dt className="text-muted-foreground">Attached</dt>
+          <dd className="flex min-w-0 items-center gap-2">
+            {attachment ? (
+              <>
+                <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate font-medium">{attachment.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(attachment.size)}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">Nothing attached</span>
+            )}
+          </dd>
         </dl>
 
         <div className="max-h-64 overflow-y-auto rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed whitespace-pre-wrap">{body}</div>

@@ -1,5 +1,6 @@
+import { and, eq } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
-import { type QueueSteps } from "@/lib/db/schema";
+import { resumeIndexes, type QueueSteps } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { FetchError, type FetchStep } from "@/lib/jobs/fetch/types";
 import { defaultPipelineDeps, runPipeline, type PipelineDeps } from "@/lib/jobs/pipeline";
@@ -15,6 +16,7 @@ import {
   touchSearch,
 } from "@/lib/outreach/searches";
 import type { SearchSteps } from "@/lib/outreach/types";
+import { backfillResumeIndexes, claimNextIndexes, processResumeIndex, sweepStaleIndexes, touchIndex } from "@/lib/resume/indexing";
 import { isClean, reviewReason } from "./clean";
 import {
   claimNext,
@@ -36,6 +38,10 @@ const ITEM_TIMEOUT_MS = 4 * 60_000;
 const SEARCH_TIMEOUT_MS = 3 * 60_000;
 /** Contact searches that may run at once, separate from job extractions so neither waits for the other. */
 const SEARCH_CONCURRENCY = 2;
+/** Resume files indexed at once. One, because embeddings run on the local Ollama model and a second would only slow both. */
+const INDEX_CONCURRENCY = 1;
+/** Reading, structuring and embedding one resume. */
+const INDEX_TIMEOUT_MS = 5 * 60_000;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -122,6 +128,19 @@ export async function processSearch(
   }
 }
 
+/** Indexes one claimed resume file; failures are recorded on its row by `processResumeIndex`. */
+export async function processIndex(fileId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  try {
+    await withTimeout((deps.run ?? processResumeIndex)(fileId, { db }), deps.timeoutMs ?? INDEX_TIMEOUT_MS, "Timed out after 5 minutes");
+  } catch (err) {
+    await db
+      .update(resumeIndexes)
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(resumeIndexes.fileId, fileId), eq(resumeIndexes.status, "running")));
+  }
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 minutes"): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(message)), ms);
@@ -132,14 +151,15 @@ function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 
   });
 }
 
-type WorkerState = { running: Set<string>; searching: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
+type WorkerState = { running: Set<string>; searching: Set<string>; indexing: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
 const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), ticking: false, again: false, timer: null });
+  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), ticking: false, again: false, timer: null });
   // A dev server that hot-reloaded from older code may hold a state without the search slots.
   s.searching ??= new Set();
+  s.indexing ??= new Set();
   return s;
 }
 
@@ -183,6 +203,19 @@ async function tick(): Promise<void> {
             void tick();
           });
       }
+
+      await sweepStaleIndexes();
+      for (const fileId of await claimNextIndexes(INDEX_CONCURRENCY - s.indexing.size)) {
+        s.indexing.add(fileId);
+        const beat = setInterval(() => void touchIndex(fileId).catch(() => {}), HEARTBEAT_MS);
+        void processIndex(fileId)
+          .catch((err) => console.error("[queue] unexpected index failure", fileId, err))
+          .finally(() => {
+            clearInterval(beat);
+            s.indexing.delete(fileId);
+            void tick();
+          });
+      }
     } while (s.again);
   } catch (err) {
     console.error("[queue] tick failed", err instanceof Error ? err.message : err);
@@ -197,6 +230,8 @@ export function startQueueWorker(): void {
   if (s.timer) return;
   s.timer = setInterval(() => void tick(), TICK_MS);
   s.timer.unref?.();
+  // Resumes stored before indexing existed (or while the worker was off) get indexed now.
+  void backfillResumeIndexes().catch((err) => console.error("[queue] resume backfill failed", err instanceof Error ? err.message : err));
   void tick();
 }
 

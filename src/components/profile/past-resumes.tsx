@@ -1,10 +1,11 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { deletePastResumeAction } from "@/app/(app)/profile/actions";
+import { IndexBadge } from "@/components/resume/index-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
@@ -24,6 +25,7 @@ import { ResumeDropzone } from "./resume-dropzone";
 
 export type PastResumeSummary = {
   id: string;
+  fileId: string;
   title: string;
   company: string | null;
   role: string | null;
@@ -124,6 +126,7 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
               <TableHead>Role</TableHead>
               <TableHead>Applied</TableHead>
               <TableHead>JD</TableHead>
+              <TableHead>Search index</TableHead>
               <TableHead className="text-right">Text size</TableHead>
               <TableHead />
             </TableRow>
@@ -136,8 +139,20 @@ export function PastResumes({ rows }: { rows: PastResumeSummary[] }) {
                 <TableCell>{r.role ?? "—"}</TableCell>
                 <TableCell>{r.appliedAt ? r.appliedAt.slice(0, 10) : "—"}</TableCell>
                 <TableCell>{r.hasJd ? "Yes" : "No"}</TableCell>
+                <TableCell>
+                  <IndexBadge fileId={r.fileId} />
+                </TableCell>
                 <TableCell className="text-right">{r.chars.toLocaleString()} chars</TableCell>
                 <TableCell className="text-right">
+                  <a
+                    href={`/api/files/${r.fileId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open the file for ${r.title}`}
+                    className="mr-1 inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-[background-color,color,scale] hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.92]"
+                  >
+                    <ExternalLink className="size-4" aria-hidden />
+                  </a>
                   <Button
                     variant="ghost"
                     size="icon"

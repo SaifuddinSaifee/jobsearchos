@@ -1,6 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { contacts, emailAccounts, outreachEmails } from "@/lib/db/schema";
+import { contacts, emailAccounts, outreachEmails, pastResumes, resumeIndexes } from "@/lib/db/schema";
+import { saveVersion } from "@/lib/profile/service";
+import { putFile } from "@/lib/storage/local";
+import { DOCX_MIME, makeDocx } from "./docx";
 import { defaultColdEmailSettings, saveColdEmailSettings } from "@/lib/email/settings";
 import { resetEnv } from "@/lib/env";
 import { emptyExtraction, type JobDraft } from "@/lib/jobs/schema";
@@ -17,9 +23,11 @@ import {
   OutreachError,
   removeContact,
   revealContactEmail,
+  resumeOptions,
   reuseAsDraft,
   saveDraft,
   sendDraft,
+  uploadResumeForJob,
   sentToday,
   setDoNotContact,
   setJobCompanyWebsite,
@@ -657,5 +665,178 @@ describe("getOutreachData", () => {
     expect(data).toMatchObject({ contacts: [], draft: null, sent: [], sentToday: 0, account: null, domain: null, canSaveWebsite: true });
     expect(data.sources.prospeo).toBe(true);
     expect(data.settings.dailyCap).toBe(25);
+  });
+});
+
+
+describe("resume attachments", () => {
+  let dir: string;
+  const send = vi.fn(async (...args: unknown[]) => (void args, { messageId: "msg-1", threadId: "thr-1" }));
+  const mime = DOCX_MIME;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "jt-attach-"));
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  beforeEach(() => {
+    send.mockClear();
+    process.env.STORAGE_DIR = dir;
+    resetEnv();
+  });
+  afterEach(() => {
+    delete process.env.STORAGE_DIR;
+    resetEnv();
+  });
+
+  async function baseResume(name = "base-resume.docx", text = "Jane Doe base resume") {
+    const f = await putFile(await makeDocx([text]), { mime, originalName: name }, { dir, db });
+    await saveVersion({ baseResumeFileId: f.id }, db);
+    return f;
+  }
+
+  async function ready(attachmentFileId?: string | null) {
+    const jobId = await seedJob();
+    await connectGmail();
+    const c = await addContact(jobId, { name: "Jane Doe", email: "jane@acme1.com", kind: "recruiter" }, db);
+    await markVerified(c.id, db);
+    await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, contactId: c.id, attachmentFileId }, db);
+    return { jobId, contactId: c.id };
+  }
+  const go = (jobId: string, ack: string[] = [], over: object = {}) => sendDraft(jobId, { acknowledge: ack }, { send, now: TUE_MORNING, ...over }, db);
+
+  it("starts a new draft with the base resume attached, and keeps the choice on later saves", async () => {
+    const base = await baseResume();
+    const jobId = await seedJob();
+    const first = await saveDraft(jobId, { subject: "s", body: "b" }, db);
+    expect(first.attachment).toMatchObject({ fileId: base.id, name: "base-resume.docx", mime });
+
+    const none = await saveDraft(jobId, { subject: "s2", body: "b2", attachmentFileId: null }, db);
+    expect(none.attachment).toBeNull();
+    const kept = await saveDraft(jobId, { subject: "s3", body: "b3" }, db);
+    expect(kept.attachment).toBeNull();
+  });
+
+  it("lists the base resume first, then this job's uploads, then the rest of the library", async () => {
+    const base = await baseResume();
+    const jobA = await seedJob(1);
+    const jobB = await seedJob(2);
+    const forA = await uploadResumeForJob(jobA, { bytes: await makeDocx(["Resume tuned for A"]), name: "for-a.docx", mime }, db);
+    const forB = await uploadResumeForJob(jobB, { bytes: await makeDocx(["Resume tuned for B"]), name: "for-b.docx", mime }, db);
+
+    const options = await resumeOptions(jobA, db);
+    expect(options.map((o) => [o.kind, o.name])).toEqual([
+      ["base", "base-resume.docx"],
+      ["job", "for-a.docx"],
+      ["past", "for-b.docx"],
+    ]);
+    expect(options[0].fileId).toBe(base.id);
+    expect(forA.kind).toBe("job");
+    expect(forB.fileId).not.toBe(forA.fileId);
+  });
+
+  it("files an uploaded resume in the library with the job it was written for, and queues its index", async () => {
+    const jobId = await seedJob();
+    const up = await uploadResumeForJob(jobId, { bytes: await makeDocx(["Tailored resume text"]), name: "tailored.docx", mime }, db);
+    const [row] = await db.select().from(pastResumes).where(eq(pastResumes.fileId, up.fileId));
+    expect(row).toMatchObject({ jobId, company: "Acme1", role: "Data Engineer 1", title: "Resume for Acme1" });
+    expect(row.extractedText).toContain("Tailored resume text");
+    expect(row.jdText).toContain("recruiter");
+    expect((await db.select().from(resumeIndexes).where(eq(resumeIndexes.fileId, up.fileId)))[0].status).toBe("queued");
+  });
+
+  it("uploading the same file twice reuses it", async () => {
+    const jobId = await seedJob();
+    const bytes = await makeDocx(["Same resume"]);
+    const a = await uploadResumeForJob(jobId, { bytes, name: "r.docx", mime }, db);
+    const b = await uploadResumeForJob(jobId, { bytes, name: "r.docx", mime }, db);
+    expect(b.fileId).toBe(a.fileId);
+    expect(await db.select().from(pastResumes)).toHaveLength(1);
+  });
+
+  it("rejects files that are not resumes or are too large", async () => {
+    const jobId = await seedJob();
+    await expect(uploadResumeForJob(jobId, { bytes: Buffer.from("hi"), name: "notes.txt", mime: "text/plain" }, db)).rejects.toThrow(/PDF and DOCX/);
+    await expect(uploadResumeForJob(jobId, { bytes: Buffer.alloc(6 * 1024 * 1024), name: "huge.pdf", mime: "application/pdf" }, db)).rejects.toThrow();
+  });
+
+  it("will not attach a stored file that is not a known resume", async () => {
+    const jobId = await seedJob();
+    const stray = await putFile(Buffer.from("secret"), { mime: "text/plain", originalName: "secret.txt" }, { dir, db });
+    await expect(saveDraft(jobId, { subject: "s", body: "b", attachmentFileId: stray.id }, db)).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("sends the attachment, records its name, and shows it in the sent list", async () => {
+    const base = await baseResume();
+    const { jobId } = await ready();
+    const sent = await go(jobId);
+
+    const message = send.mock.calls[0][0] as { attachments: { filename: string; mime: string; content: Buffer }[] };
+    expect(message.attachments).toHaveLength(1);
+    expect(message.attachments[0]).toMatchObject({ filename: "base-resume.docx", mime });
+    expect(message.attachments[0].content.length).toBe(base.size);
+    expect(sent.attachment).toMatchObject({ fileId: base.id, name: "base-resume.docx" });
+
+    const [listed] = await listSent(jobId, db);
+    expect(listed.attachment).toMatchObject({ fileId: base.id, name: "base-resume.docx", size: base.size });
+    const [row] = await db.select().from(outreachEmails).where(eq(outreachEmails.status, "sent"));
+    expect(row.attachmentName).toBe("base-resume.docx");
+  });
+
+  it("still shows exactly what was sent after the base resume changes", async () => {
+    const first = await baseResume("v1.docx", "first version");
+    const { jobId } = await ready();
+    await go(jobId);
+    await baseResume("v2.docx", "second version");
+    const [listed] = await listSent(jobId, db);
+    expect(listed.attachment).toMatchObject({ fileId: first.id, name: "v1.docx" });
+  });
+
+  it("sends nothing attached when the user chose no attachment", async () => {
+    await baseResume();
+    const { jobId } = await ready(null);
+    const sent = await go(jobId);
+    expect((send.mock.calls[0][0] as { attachments?: unknown }).attachments).toBeUndefined();
+    expect(sent.attachment).toBeNull();
+  });
+
+  it("copies the attachment when a sent email is reused", async () => {
+    const base = await baseResume();
+    const { jobId } = await ready();
+    const sent = await go(jobId);
+    const draft = await reuseAsDraft(jobId, sent.id, db);
+    expect(draft.attachment?.fileId).toBe(base.id);
+  });
+
+  it("asks for confirmation when the resume is large", async () => {
+    const big = await putFile(Buffer.concat([await makeDocx(["Big resume"]), Buffer.alloc(1_200_000, 1)]), { mime, originalName: "big.docx" }, { dir, db });
+    await saveVersion({ baseResumeFileId: big.id }, db);
+    const { jobId } = await ready();
+    const err = await go(jobId).then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(OutreachError);
+    expect((err as OutreachError).needs?.map((w) => w.code)).toContain("big_attachment");
+    expect(send).not.toHaveBeenCalled();
+    await go(jobId, ["big_attachment"]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the draft and says so when the file cannot be read", async () => {
+    await baseResume();
+    const { jobId } = await ready();
+    const unreadable = async (): Promise<Buffer> => {
+      throw new Error("ENOENT");
+    };
+    await expect(go(jobId, [], { readFile: unreadable })).rejects.toMatchObject({ code: "send_failed", message: expect.stringMatching(/Could not read the attached resume/) });
+    expect(send).not.toHaveBeenCalled();
+    expect(await getDraft(jobId, db)).not.toBeNull();
+  });
+
+  it("reports the options and the default for the page", async () => {
+    const base = await baseResume();
+    const jobId = await seedJob();
+    const data = await getOutreachData(jobId, db);
+    expect(data.defaultAttachmentId).toBe(base.id);
+    expect(data.resumes.map((r) => r.kind)).toEqual(["base"]);
   });
 });

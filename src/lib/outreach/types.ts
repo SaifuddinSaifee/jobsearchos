@@ -54,11 +54,27 @@ export type ContactDTO = {
 
 export type OutreachStatus = "draft" | "sending" | "sent" | "failed";
 
+/** A file attached to an email. Files never change once stored, so this is exactly what was (or will be) sent. */
+export type AttachmentDTO = { fileId: string; name: string; size: number; mime: string };
+
+/** A resume that can be attached: the base resume, one uploaded for this job, or one from the library. */
+export type ResumeOption = AttachmentDTO & { kind: "base" | "job" | "past"; label: string };
+
+/** Above this a resume is probably an unoptimised export, and big attachments are more likely to be filtered. */
+export const BIG_ATTACHMENT_BYTES = 1024 * 1024;
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export type DraftDTO = {
   id: string;
   contactId: string | null;
   subject: string;
   body: string;
+  attachment: AttachmentDTO | null;
   updatedAt: string;
 };
 
@@ -70,6 +86,7 @@ export type SentDTO = {
   subject: string;
   body: string;
   threadId: string | null;
+  attachment: AttachmentDTO | null;
   sentAt: string;
 };
 

@@ -9,11 +9,13 @@ export function ResumeDropzone({
   busy,
   label = "Drop your resume here, or click to choose a file",
   compact = false,
+  busyLabel = "Reading and structuring your resume…",
 }: {
   onFile: (file: File) => void;
   busy?: boolean;
   label?: string;
   compact?: boolean;
+  busyLabel?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -51,7 +53,7 @@ export function ResumeDropzone({
           className={cn("size-6 transition-transform duration-200 group-hover/drop:-translate-y-0.5", over && "-translate-y-1")}
         />
       )}
-      <span>{busy ? "Reading and structuring your resume…" : label}</span>
+      <span>{busy ? busyLabel : label}</span>
       <span className="text-xs">PDF or DOCX, up to 10 MB</span>
       <input
         ref={input}

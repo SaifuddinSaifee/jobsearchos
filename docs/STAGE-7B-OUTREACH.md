@@ -13,7 +13,8 @@ Open it from a job: **Email a contact** in the job slide-over, or go to `/jobs/<
 - **Header:** the job, and which Gmail address mail will be sent from (a warning link to Settings when Gmail is not connected).
 - **Who to email (left):** ranked people with their title, role in hiring, email address and how trustworthy it is, why they were ranked there, and where they came from. Click one to make them the recipient.
 - **Email (right):** From, To, Subject and body like a real message, a Write and Preview toggle, a live word count, and a list of checks. Pasting a whole email whose first line is `Subject: ...` fills the subject for you. The draft saves itself, one per job, and is still there after a reload.
-- **Sent for this job:** every email sent from here, expandable, with "Use as a new draft" to adapt one for someone else.
+- **Attach (a row in the email header):** the base resume is attached by default. Change it to any resume in your library (ones uploaded for this job come first), upload a different one (PDF or DOCX, up to 5 MB), or attach nothing. An uploaded resume is stored, filed in the library under this job with its company, role and posting text, and queued for the search index. The choice is part of the draft and saves with it.
+- **Sent for this job:** every email sent from here, expandable, with "Use as a new draft" to adapt one for someone else. Each shows the resume that went with it (a paperclip in the list, and a link that opens the exact file).
 - **Send** opens a confirmation showing exactly who gets what, from which address, and any warnings.
 
 ## Finding people
@@ -68,7 +69,9 @@ Checked on every keystroke in the page and again on the server, so a stale page 
 
 **Blocks sending:** no recipient, no email address, an Invalid address, a person marked **Do not contact** (on any job), no subject or body, an unfilled `[placeholder]`, Gmail not connected or needing a reconnect, or the daily limit reached.
 
-**Warns, and must be acknowledged in the confirmation:** an unverified or risky address, emailing the same person again about the same job, and sending outside your usual days and hours.
+**Warns, and must be acknowledged in the confirmation:** an unverified or risky address, emailing the same person again about the same job, sending outside your usual days and hours, and an attached resume over 1 MB.
+
+**Attachment rules:** the file must be a resume the app has stored (never an arbitrary file), and at most 5 MB; the confirmation shows its name and size. If the stored file cannot be read, nothing is sent and the draft stays.
 
 **Advice shown beside the editor:** length outside your range, template phrases and long dashes, bullet lists, more than two links, a long subject. Your extra banned phrases from Settings are included.
 
@@ -86,7 +89,11 @@ Settings, Email tab, has **Check key** for Prospeo.
 
 ## Data
 
-Migrations `0010_outreach`, `0011_prospeo`, `0012_contact_searches` and `0013_contact_about_email_source`: `contacts` (per job, with rank, reason, source, the finder's id, do-not-contact), `outreach_emails` (one working draft per job, then the sent record with Gmail ids) and `contact_searches` (the background searches, with step progress, result count and notes).
+Migrations `0010_outreach`, `0011_prospeo`, `0012_contact_searches`, `0013_contact_about_email_source` and `0014_resume_library`: `contacts` (per job, with rank, reason, source, the finder's id, do-not-contact), `outreach_emails` (one working draft per job, then the sent record with Gmail ids) and `contact_searches` (the background searches, with step progress, result count and notes). `outreach_emails.attachment_file_id` points at the stored file that was attached; files are content-addressed and never change, so it is exactly what was sent even if the base resume is replaced later.
+
+### Resume indexing (started here, for generation later)
+
+Every resume that is stored (the base resume, one uploaded in the composer, one added on the Profile page) is queued in `resume_indexes` and handled by the same background worker as job extraction: read the text, ask the model to structure it, split it into sections (one per job, project, education entry, plus summary and skills), embed each section with the local `qwen3-embedding:4b` model (1024 dimensions) and store them in `resume_chunks` (pgvector, cosine index). If the model cannot structure a resume it is split by paragraph and the note says so. `searchResumeChunks(query)` returns the closest sections and is what the writer will use. Requires Ollama running with the model pulled (see README); without it indexing fails with a clear message and can be retried from the Profile page or the attach panel. The Resumes page, Markdown views and the optional master resume are written up in [RESUME-LIBRARY.md](RESUME-LIBRARY.md).
 
 ## Not built yet
 

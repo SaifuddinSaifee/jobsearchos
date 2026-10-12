@@ -9,8 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import { checkEmail, wordCount } from "@/lib/outreach/checks";
-import { KIND_LABEL, type ContactDTO, MAX_BODY, MAX_SUBJECT } from "@/lib/outreach/types";
+import { KIND_LABEL, type AttachmentDTO, type ContactDTO, MAX_BODY, MAX_SUBJECT, type ResumeOption } from "@/lib/outreach/types";
 import { cn } from "@/lib/utils";
+import { AttachmentPicker } from "./attachment-picker";
 import { EmailStatusBadge, initials } from "./badges";
 
 export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -45,8 +46,13 @@ export function sendBlocker(args: {
 }
 
 export function Composer({
+  jobId,
   account,
   contact,
+  resumes,
+  attachment,
+  onAttachment,
+  onResumeUploaded,
   subject,
   body,
   mode,
@@ -59,8 +65,14 @@ export function Composer({
   onMode,
   onSend,
 }: {
+  jobId: string;
   account: { email: string; needsReconnect: boolean } | null;
   contact: ContactDTO | null;
+  resumes: ResumeOption[];
+  /** The attached resume, or null for none. */
+  attachment: AttachmentDTO | null;
+  onAttachment: (fileId: string | null) => void;
+  onResumeUploaded: (resume: ResumeOption) => void;
   subject: string;
   body: string;
   mode: "write" | "preview";
@@ -126,6 +138,9 @@ export function Composer({
             ) : (
               <span className="text-muted-foreground">Choose someone from the list.</span>
             )}
+          </Row>
+          <Row label="Attach" className="items-start">
+            <AttachmentPicker jobId={jobId} resumes={resumes} selected={attachment} onSelect={onAttachment} onUploaded={onResumeUploaded} />
           </Row>
           <Row label="Subject" className="border-b-0 py-1.5">
             {mode === "write" ? (

@@ -12,10 +12,12 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
+import type { IndexStatus } from "@/lib/resume/types";
 import type { ContactKind, ContactSource, EmailStatus, OutreachStatus, SearchStatus, SearchSteps } from "@/lib/outreach/types";
 import type {
   GenerationInstructions,
@@ -60,6 +62,8 @@ export const pastResumes = pgTable(
     role: text("role"),
     jdText: text("jd_text"),
     jdUrl: text("jd_url"),
+    /** Set when the resume was uploaded for a specific job (for example while attaching it to an email). */
+    jobId: uuid("job_id").references(() => jobs.id),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     extractedText: text("extracted_text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -387,6 +391,9 @@ export const outreachEmails = pgTable(
     status: text("status").$type<OutreachStatus>().notNull().default("draft"),
     gmailMessageId: text("gmail_message_id"),
     gmailThreadId: text("gmail_thread_id"),
+    /** The resume attached to this email. Files are content-addressed and never changed, so this is exactly what was sent. */
+    attachmentFileId: uuid("attachment_file_id").references(() => files.id),
+    attachmentName: text("attachment_name"),
     error: text("error"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -432,6 +439,60 @@ export const contactSearches = pgTable(
       .where(sql`${t.status} in ('queued', 'running')`),
   ],
 );
+
+/**
+ * Where each resume file is in the search-index pipeline (extract text, structure it, split it into sections, embed
+ * them). Keyed by file, so the base resume and every uploaded one go through the same steps, and identical bytes are
+ * only processed once. Worked off by the same background worker as the job queue.
+ */
+export const resumeIndexes = pgTable(
+  "resume_indexes",
+  {
+    fileId: uuid("file_id")
+      .primaryKey()
+      .references(() => files.id),
+    status: text("status").$type<IndexStatus>().notNull().default("queued"),
+    /** The resume as structured data, when the model could read it. */
+    parsed: jsonb("parsed").$type<Profile>(),
+    /** Something worth telling the user even though indexing succeeded. */
+    note: text("note"),
+    error: text("error"),
+    chunkCount: integer("chunk_count").notNull().default(0),
+    embeddingModel: text("embedding_model"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while indexing is running. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("resume_indexes_status_idx").on(t.status, t.createdAt)],
+);
+
+/** One searchable piece of a resume (a job, a project, the skills list...) with its embedding. */
+export const resumeChunks = pgTable(
+  "resume_chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id),
+    ordinal: integer("ordinal").notNull(),
+    section: text("section").notNull(),
+    label: text("label").notNull(),
+    text: text("text").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
+    embeddingModel: text("embedding_model").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("resume_chunks_file_ordinal_idx").on(t.fileId, t.ordinal),
+    index("resume_chunks_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
+);
+
+export type ResumeIndexRow = typeof resumeIndexes.$inferSelect;
+export type ResumeChunkRow = typeof resumeChunks.$inferSelect;
 
 export type ContactSearchRow = typeof contactSearches.$inferSelect;
 export type ContactRow = typeof contacts.$inferSelect;

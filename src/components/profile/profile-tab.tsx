@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ExternalLink } from "lucide-react";
+import { IndexBadge } from "@/components/resume/index-badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { emptyProfile, type Profile } from "@/lib/profile/schema";
@@ -98,6 +100,20 @@ export function ProfileTab({
 
   return (
     <div className="space-y-4">
+      {baseResumeFileId && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted/30 px-4 py-2.5 text-sm">
+          <span className="font-medium">Base resume file</span>
+          <a
+            href={`/api/files/${baseResumeFileId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Open original <ExternalLink className="size-3.5" aria-hidden />
+          </a>
+          <IndexBadge fileId={baseResumeFileId} className="ml-auto" />
+        </div>
+      )}
       <div className="max-w-md">
         <ResumeDropzone
           compact

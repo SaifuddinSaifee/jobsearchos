@@ -1,5 +1,5 @@
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
-import type { EmailStatus } from "./types";
+import { BIG_ATTACHMENT_BYTES, formatBytes, type EmailStatus } from "./types";
 
 // Pure (no database import): the composer runs these on every keystroke, and the server runs them again before sending.
 
@@ -103,14 +103,14 @@ export function isGenericInbox(email: string): boolean {
   return GENERIC_LOCALPARTS.test(email.split("@")[0] ?? "");
 }
 
-export type SendWarning = { code: "unverified" | "duplicate" | "timing"; message: string };
+export type SendWarning = { code: "unverified" | "duplicate" | "timing" | "big_attachment"; message: string };
 
 /**
  * Things worth a second look before sending that the user may still choose to do. The composer shows them in the
  * confirm dialog; the server checks that each one was acknowledged, so a stale or hand-made request cannot skip them.
  */
 export function sendWarnings(
-  to: { name: string; emailStatus: EmailStatus; sentCount: number },
+  to: { name: string; emailStatus: EmailStatus; sentCount: number; attachmentSize?: number | null },
   s: ColdEmailSettings,
   now: Date,
 ): SendWarning[] {
@@ -125,5 +125,8 @@ export function sendWarnings(
   }
   const timing = sendTimingWarning(s, now);
   if (timing) out.push({ code: "timing", message: timing });
+  if (to.attachmentSize && to.attachmentSize > BIG_ATTACHMENT_BYTES) {
+    out.push({ code: "big_attachment", message: `The attached resume is ${formatBytes(to.attachmentSize)}. A resume should be well under 1 MB; large files are more likely to be filtered or ignored.` });
+  }
   return out;
 }

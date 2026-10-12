@@ -62,13 +62,13 @@ function StatusCell({ job }: { job: JobRow }) {
   return <StatusMenu status={job.status} onChange={(to) => changeStatus([job.applicationId], to)} />;
 }
 
-function AppliedCell({ job }: { job: JobRow }) {
+function DateCell({ iso }: { iso: string | null | undefined }) {
   const { now } = useJobsActions();
-  if (!job.appliedAt) return <span className="text-muted-foreground">—</span>;
+  if (!iso) return <span className="text-muted-foreground">—</span>;
   return (
     <div className="leading-tight whitespace-nowrap">
-      {formatDate(job.appliedAt)}
-      {now && <div className="text-xs text-muted-foreground">{relativeDays(job.appliedAt, now)}</div>}
+      {formatDate(iso)}
+      {now && <div className="text-xs text-muted-foreground">{relativeDays(iso, now)}</div>}
     </div>
   );
 }
@@ -148,7 +148,7 @@ export const columns = col.columns([
   col.accessor((r) => r.appliedAt ?? undefined, {
     id: "applied",
     header: ({ column }) => <SortHeader column={column} title="Applied" />,
-    cell: ({ row }) => <AppliedCell job={row.original} />,
+    cell: ({ row }) => <DateCell iso={row.original.appliedAt} />,
     sortFn: "datetime",
     sortUndefined: "last",
     sortDescFirst: true,
@@ -168,7 +168,7 @@ export const columns = col.columns([
   col.accessor("createdAt", {
     id: "saved",
     header: ({ column }) => <SortHeader column={column} title="Saved" />,
-    cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.createdAt)}</span>,
+    cell: ({ row }) => <DateCell iso={row.original.createdAt} />,
     sortFn: "datetime",
     sortDescFirst: true,
     meta: { label: "Saved" },
@@ -176,7 +176,7 @@ export const columns = col.columns([
   col.accessor((r) => r.postedAt ?? undefined, {
     id: "posted",
     header: ({ column }) => <SortHeader column={column} title="Posted" />,
-    cell: ({ row }) => <span className="whitespace-nowrap">{formatDate(row.original.postedAt) || "—"}</span>,
+    cell: ({ row }) => <DateCell iso={row.original.postedAt} />,
     sortFn: "datetime",
     sortUndefined: "last",
     sortDescFirst: true,

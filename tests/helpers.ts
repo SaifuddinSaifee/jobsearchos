@@ -4,7 +4,7 @@ import { createDb } from "@/lib/db";
 
 export const TEST_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgres://jobtracker:jobtracker@localhost:5432/jobtracker_test";
+  "postgres://jobtracker:jobtracker@localhost:5433/jobtracker_test";
 
 export function testDb() {
   return createDb(TEST_URL);
@@ -13,6 +13,6 @@ export function testDb() {
 /** profile_versions and job_snapshots are immutable (triggers block DELETE), so TRUNCATE is the only reset. */
 export async function resetDb(db: ReturnType<typeof testDb>) {
   await db.execute(
-    sql`TRUNCATE contact_searches, outreach_emails, contacts, profile_versions, past_resumes, status_events, applications, job_keywords, job_snapshots, application_queue, jobs, company_aliases, companies, files, app_settings, email_accounts RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE resume_chunks, resume_indexes, contact_searches, outreach_emails, contacts, profile_versions, past_resumes, status_events, applications, job_keywords, job_snapshots, application_queue, jobs, company_aliases, companies, files, app_settings, email_accounts RESTART IDENTITY CASCADE`,
   );
 }
