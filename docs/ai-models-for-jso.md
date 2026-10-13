@@ -2,23 +2,24 @@
 
 Which models the app uses, which ones we are considering, and how to decide between them. Cost is treated as a first-class constraint.
 
-Status: proposal. Nothing in this document has been applied to the code or `.env`. The "Current lineup" section is verified against the repo; the "Proposed lineup" and "Candidate models" sections come from an external model-selection analysis (see "Sources and caveats") and need our own evals before any change.
+Status: proposal. Nothing in the proposed lineup has been applied to the code or `.env`. One change is applied: resume parsing now runs with low reasoning effort (see [Reasoning effort](#reasoning-effort)). The "Current lineup" section is verified against the repo; the "Proposed lineup" and "Candidate models" sections come from an external model-selection analysis (see "Sources and caveats") and need our own evals before any change.
 
-Last updated: 2026-10-05.
+Last updated: 2026-10-14.
 
 ## Contents
 
 1. [Current lineup](#current-lineup)
-2. [Guiding principle](#guiding-principle)
-3. [Proposed lineup](#proposed-lineup)
-4. [Candidate models](#candidate-models)
-5. [Pipeline](#pipeline)
-6. [Value ranking](#value-ranking)
-7. [Evals to run](#evals-to-run)
-8. [Config changes](#config-changes)
-9. [Sources and caveats](#sources-and-caveats)
-10. [Open questions](#open-questions)
-11. [Task-by-task model table](#task-by-task-model-table)
+2. [Reasoning effort](#reasoning-effort)
+3. [Guiding principle](#guiding-principle)
+4. [Proposed lineup](#proposed-lineup)
+5. [Candidate models](#candidate-models)
+6. [Pipeline](#pipeline)
+7. [Value ranking](#value-ranking)
+8. [Evals to run](#evals-to-run)
+9. [Config changes](#config-changes)
+10. [Sources and caveats](#sources-and-caveats)
+11. [Open questions](#open-questions)
+12. [Task-by-task model table](#task-by-task-model-table)
 
 ## Current lineup
 
@@ -32,6 +33,27 @@ Verified from [src/lib/env.ts](../src/lib/env.ts), `.env.example` and the call s
 | Embeddings | `EMBEDDING_MODEL` | `qwen3-embedding:4b` | Ollama (local) | Planned for Stage 5 |
 
 Every extraction row stores the model that produced it (`model` column in [src/lib/db/schema.ts](../src/lib/db/schema.ts)), so model changes stay traceable and old results can be compared with new ones.
+
+## Reasoning effort
+
+GLM-5.3 Flash always thinks before it answers, and by default the thinking is often longer than the answer. Thinking tokens are billed as output and count against `max_tokens`. Checked against the Together docs and live calls on 2026-10-14:
+
+- Thinking cannot be turned off on GLM-5.3. `reasoning: { enabled: false }` (the switch for hybrid models such as GLM-5.2 and Kimi K3) is accepted and ignored.
+- `reasoning_effort: "low"` cuts thinking to almost nothing. Accepted values are `low`, `medium`, `high` and `max`.
+- Unknown effort values are accepted silently, so `chatStructured` types the option (`reasoningEffort`) and only sends it when set.
+- The thinking arrives in `reasoning_content`, separate from the JSON in `content`, so structured outputs are unaffected.
+- Every call now asks for usage (`stream_options: { include_usage: true }`), so token counts, including thinking tokens, are available to callers through `onUsage`.
+
+Applied to resume parsing only ([src/lib/resume/parse.ts](../src/lib/resume/parse.ts)), which the user waits on before an uploaded resume can be edited. Other `chatStructured` callers keep the model's default until their own evals say otherwise.
+
+First result, one synthetic resume, three runs each (`npm run eval:resume -- <folder> --effort default|low --runs 3`):
+
+| Effort | Median parse time | Output tokens (mean) | Thinking tokens (mean) | Bullets verbatim | Counts stable across runs |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Model default | 11.7 s | 1532 | 769 | 30/30 | No (technologies 11 vs 14) |
+| Low | 5.1 s | 672 | 1 | 30/30 | Yes |
+
+Still to do: repeat on 10 to 20 real resumes before treating this as settled. If low effort loses fields or verbatim bullets there, pass `{}` from `parseResume` to restore the default.
 
 ## Guiding principle
 
@@ -63,9 +85,9 @@ Prices are USD per 1M tokens, as listed in the source analysis (Together's prici
 
 | Model | Input | Cached input | Output | Notes |
 | --- | ---: | ---: | ---: | --- |
-| Qwen3.8 Flash | 0.09 | not listed | 0.282 | Cheapest option. Test against GLM-5.3 Flash for extraction. |
+| Qwen3.8 Flash (`Qwen/Qwen3.8-Flash`) | 0.15 | not listed | 0.47 | Together's catalog on 2026-10-14 (the source analysis said 0.09 and 0.282). Same input price as GLM-5.3 Flash, about 6% cheaper output. 1M context. Test against GLM-5.3 Flash for extraction. |
 | GLM-5.3 Flash | 0.15 | 0.03 | 0.50 | Current extraction model. Structured outputs. 1M context. |
-| GPT-OSS 120B (`openai/gpt-oss-120b`) | 0.15 | not listed | 0.60 | Cheap general structured-output model. Benchmark against GLM Flash. |
+| GPT-OSS 120B (`openai/gpt-oss-120b`) | 0.15 | not listed | 0.60 | Cheap general structured-output model. 131K context. Benchmark against GLM Flash. |
 | MiniMax M3 | 0.30 | 0.06 | 1.20 | Current writer. 524K context. |
 | DeepSeek V4.1 Flash | 0.30 | 0.006 | 1.20 | Same price as M3 but scores higher on the benchmarks below. |
 | MiMo-V2.6-Pro | 0.435 | not listed | 0.87 | 1M context. Intelligence index 46. About $0.13 per benchmark task. |
@@ -153,7 +175,7 @@ Replay the saved job-page fixtures and real resumes. Score each output on:
 - Resume parsing
 - Classification accuracy
 
-Decision rule: if Qwen wins or is indistinguishable, use Qwen. Qwen would cut input cost by about 40% and output cost by about 44% versus GLM-5.3 Flash. The existing `npm run eval:jobs` and `npm run eval:resume` scripts replay fixtures and real resumes against the configured model and are the natural starting point.
+Decision rule: if Qwen wins or is indistinguishable, use Qwen. At the 2026-10-14 catalog prices the saving is small (same input price, about 6% cheaper output), so compare thinking tokens too: GLM-5.3 Flash at low effort may cost less per task than a cheaper model that thinks more. The existing `npm run eval:jobs` and `npm run eval:resume` scripts replay fixtures and real resumes against the configured model and are the natural starting point.
 
 ## Config changes
 
@@ -212,7 +234,7 @@ How to read it:
 
 | # | Task (the rule) | Status | Env variable | Current model | Proposed model | What the task does, and how the model achieves it | Why this model now, and why change (or not) |
 | ---: | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Turn an uploaded resume into a structured profile | Implemented ([src/lib/resume/parse.ts](../src/lib/resume/parse.ts), `POST /api/resume/parse`) | `EXTRACTION_MODEL` (default, no model passed) | GLM-5.3 Flash | Keep GLM-5.3 Flash. Eval Qwen3.8 Flash as a cheaper swap. | Text pulled from a PDF or DOCX goes in with a strict prompt: extract only what is written, never infer or embellish, keep bullets verbatim, use empty values for anything missing, dates exactly as written. The model returns the profile JSON (experience, skills, projects, education, certifications, achievements). The result is a draft the user reviews and edits before it is saved as a profile version. | This is copying text into a schema, which needs reliable JSON and a long context window, not deep reasoning. GLM-5.3 Flash is $0.15 input and $0.50 output per 1M tokens, has a 1M context and supports structured outputs. A stronger model costs more and would not do this job better. Qwen3.8 Flash ($0.09 and $0.282) is only worth switching to if it matches GLM on the resume eval (`npm run eval:resume`). |
+| 1 | Turn an uploaded resume into a structured profile | Implemented ([src/lib/resume/parse.ts](../src/lib/resume/parse.ts), `POST /api/resume/parse`) | `EXTRACTION_MODEL` (default, no model passed) | GLM-5.3 Flash | Keep GLM-5.3 Flash, with low reasoning effort (applied). Eval Qwen3.8 Flash as a cheaper swap. | Text pulled from a PDF or DOCX goes in with a strict prompt: extract only what is written, never infer or embellish, keep bullets verbatim, use empty values for anything missing, dates exactly as written. The model returns the profile JSON (experience, skills, projects, education, certifications, achievements). The result is a draft the user reviews and edits before it is saved as a profile version. | This is copying text into a schema, which needs reliable JSON and a long context window, not deep reasoning. GLM-5.3 Flash is $0.15 input and $0.50 output per 1M tokens, has a 1M context and supports structured outputs. A stronger model costs more and would not do this job better. It runs with `reasoning_effort: "low"` because the model's default thinking roughly doubled the parse time without improving the result (see [Reasoning effort](#reasoning-effort)); the same parser also reads career sources. Qwen3.8 Flash ($0.15 and $0.47) is only worth switching to if it matches GLM on the resume eval (`npm run eval:resume`). |
 | 2 | Turn a job posting into a structured job record | Implemented ([src/lib/jobs/extract.ts](../src/lib/jobs/extract.ts), run by the pipeline and the background queue) | `EXTRACTION_MODEL` | GLM-5.3 Flash | Keep GLM-5.3 Flash. Eval Qwen3.8 Flash and GPT-OSS 120B as cheaper or equal swaps. | The posting text (from an ATS API, JSON-LD or the page body) plus any hints goes in. The model returns company, title, location, remote type, employment type, salary, posted date, responsibilities, requirements, technologies, application URL, what the posting says about the company, and additional details. Values that an ATS API or JSON-LD gives reliably override the model's (`mergeHints`), and the application URL is kept only if it is a real http(s) link. The model name is stored on the row. | Same reasoning as row 1, but with more volume: the queue runs two extractions at once and discovery will add many more, so price per task matters most here. The saved page fixtures (`npm run eval:jobs`) give an objective way to test a cheaper model before swapping. |
 | 3 | Fill "additional details" for jobs saved before that field existed | Implemented (`extractAdditionalDetails` in [src/lib/jobs/extract.ts](../src/lib/jobs/extract.ts), run from [src/lib/jobs/service.ts](../src/lib/jobs/service.ts)) | `EXTRACTION_MODEL` | GLM-5.3 Flash | Keep GLM-5.3 Flash | Re-reads the saved original posting text (kept even if the posting is taken down) and returns only the details that are not duties, requirements or the company description. It uses only what the posting says and ignores navigation, cookie notices and equal-opportunity or legal boilerplate. It is one call per job. | A narrow extraction on text we already have. Cheapest capable model is the right fit; nothing about it needs reasoning. |
 | 4 | Summarize a company from its web sources | Implemented ([src/lib/companies/research.ts](../src/lib/companies/research.ts), the company page's research action and the pipeline) | `EXTRACTION_MODEL` (default, no model passed) | GLM-5.3 Flash | Keep GLM-5.3 Flash | Code first gathers pages cheapest first: the posting's own text, the company's own site (About pages), then at most two paid Tavily searches. The model reads the numbered sources and returns what the company does, mission, values and culture, plus which sources it used. Code enforces that mission, values and culture can only come from company-owned sources, never from job boards or review sites. Tavily itself is a search API, not a model. | The model only condenses supplied text into fixed fields; the trust rules live in code, not in the model's judgment. That keeps this an extraction-grade task. |

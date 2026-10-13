@@ -1,10 +1,18 @@
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { chatCompletion } from "./chat";
+import { chatCompletion, type ChatParams, type Usage } from "./chat";
 
 export type StructuredOptions = {
   model?: string;
   maxTokens?: number;
+  /**
+   * How long the model thinks before answering. Left unset, nothing is sent and the model uses its own default.
+   * GLM-5.3 cannot turn thinking off (`reasoning: { enabled: false }` is ignored), but "low" cuts it to almost nothing.
+   * Together accepts unknown values silently, which is why this is typed.
+   */
+  reasoningEffort?: ChatParams["reasoning_effort"];
+  /** Called with the call's token counts, when the provider reports them. */
+  onUsage?: (usage: Usage) => void;
 };
 
 /**
@@ -25,9 +33,10 @@ export async function chatStructured<T extends z.ZodType>(
 Respond only with a JSON object that matches this JSON Schema:
 ${JSON.stringify(jsonSchema)}`;
 
-  const { content, finishReason } = await chatCompletion({
+  const { content, finishReason, usage } = await chatCompletion({
     model: opts.model ?? env().EXTRACTION_MODEL,
     max_tokens: opts.maxTokens ?? 16000,
+    ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
     messages: [
       { role: "system", content: system },
       { role: "user", content: input.user },
@@ -37,6 +46,7 @@ ${JSON.stringify(jsonSchema)}`;
       json_schema: { name: "output", schema: jsonSchema as Record<string, unknown> },
     },
   });
+  if (usage) opts.onUsage?.(usage);
 
   if (finishReason === "length") {
     throw new Error("Output was cut off (max_tokens); the input may be too long");

@@ -59,4 +59,44 @@ describe("chatStructured", () => {
     create.mockResolvedValue(reply('{"name":42}'));
     await expect(chatStructured(Schema, input)).rejects.toThrow(/schema/);
   });
+
+  it("sends no reasoning effort unless asked, so other callers keep the model's default", async () => {
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
+    await chatStructured(Schema, input);
+    expect(create.mock.calls[0][0]).not.toHaveProperty("reasoning_effort");
+
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
+    await chatStructured(Schema, input, { reasoningEffort: "low" });
+    expect(create.mock.calls[1][0].reasoning_effort).toBe("low");
+  });
+
+  it("asks for usage and reports it from the final chunk, which has no choices", async () => {
+    create.mockResolvedValue(
+      (async function* () {
+        yield { choices: [{ finish_reason: "stop", delta: { content: '{"name":"Ada"}' } }] };
+        yield { choices: [], usage: { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17, completion_tokens_details: { reasoning_tokens: 3 } } };
+      })(),
+    );
+    const onUsage = vi.fn();
+    await expect(chatStructured(Schema, input, { onUsage })).resolves.toEqual({ name: "Ada" });
+    expect(create.mock.calls[0][0].stream_options).toEqual({ include_usage: true });
+    expect(onUsage).toHaveBeenCalledWith({ promptTokens: 10, completionTokens: 7, reasoningTokens: 3 });
+  });
+
+  it("does not report usage when the provider sends none", async () => {
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
+    const onUsage = vi.fn();
+    await chatStructured(Schema, input, { onUsage });
+    expect(onUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseResume", () => {
+  it("parses with low reasoning effort by default", async () => {
+    const { parseResume } = await import("@/lib/resume/parse");
+    const { emptyProfile } = await import("@/lib/profile/schema");
+    create.mockResolvedValue(reply(JSON.stringify(emptyProfile())));
+    await expect(parseResume("Ada Lovelace, analyst")).resolves.toEqual(emptyProfile());
+    expect(create.mock.calls[0][0].reasoning_effort).toBe("low");
+  });
 });
