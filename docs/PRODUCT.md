@@ -177,7 +177,7 @@ Opened from a job's side panel ("Email a contact").
 
 Resumes, cover letters and emails, kept as text you can read and search, not as files.
 
-- Three tabs: **Resumes, Cover letters, Emails**. Each document shows what it is for (job and company), its date, where it
+- Four tabs: **Resumes, Cover letters, Emails, Career record** (see Career record, below). Each document shows what it is for (job and company), its date, where it
   came from, how many versions it has, and (for resumes) whether it is indexed for search.
 - **Add** a document three ways: upload a PDF or DOCX, paste text, or start blank (a resume can start as a copy of your base
   resume). Link it to a job, and add the role, date and the job description it was written for.
@@ -197,6 +197,47 @@ Resumes, cover letters and emails, kept as text you can read and search, not as 
 - Your earlier past resumes, base resume and sent emails were moved into the Library automatically.
 - Uploads are read into text and the file is not kept. A file is stored only when it leaves the app as an email attachment.
 
+### Career record
+
+One record of everything you have done, merged from your resumes, cover letters, the Profile and a LinkedIn profile saved
+as a PDF. It lives in the **Career record** tab of the Library. It has no length limit and is never sent anywhere. It is
+the base the writer will use to pick the right facts and wording for a job.
+
+- **Build from your library** queues every resume (the base first, then newest first), the Profile, a LinkedIn print
+  if you added one, and your cover letters last. Sources are prepared one at a time in the background, each compared
+  with the record as it stands after the one before. **Include Profile** and **Add LinkedIn PDF** add those two by hand
+  (save your LinkedIn page as a PDF from the browser's print dialog; only its text is kept, never the file). Once a record
+  exists, a saved Profile is offered for review on its own.
+- **Review before anything is added.** For each source you see every employer, role and bullet with a suggestion: new,
+  the same role, a new **framing** of a role you already have, the same fact worded differently, or already in your
+  record. You can include or leave out anything, move a role under another role or framing, say which fact a bullet
+  belongs to, and see in words what saving will add. Your choices are saved as you go. Saving makes a new record version.
+- **Framings.** The same employer and dates under a different title (Product Manager in one resume, Software Engineer in
+  another) is one role with two framings. Each framing keeps its own title, angle and the roles it was written for, and
+  facts are shared, so one fact can hold a PM wording and an engineering wording. A promotion that overlaps by a month
+  stays a separate role. Dates widen to cover every source; a disagreement becomes a note, never a block.
+- **Browse and edit.** Employers, then roles (with a filter by framing), then facts, then wordings, each with the
+  documents it came from (linking to the exact version). Search the whole record. Edit a wording, add a fact or
+  wording, move a wording to another fact, merge facts, edit dates and location, add or edit a framing, split a
+  framing off as its own role, merge roles, rename or delete an employer, and manage skills and achievements.
+- **Your edits win.** Anything you change is marked "Edited by you" and a later merge never overwrites it. Something you
+  delete is proposed as "left out" the next time it appears, with "You removed this before".
+- **Versions.** Every merge, edit and restore is a new version; restoring an old one saves it as a new version and marks
+  the merges since as undone, so you can review them again.
+- Employers are linked to the Companies directory when a company of that name exists. Nothing is created there.
+- **Reworded bullets.** A bullet that matches nothing exactly is put to the AI, which only chooses whether it repeats a
+  fact you already have (or another new bullet); it cannot write or change text. If you move a role under a different
+  role, "Compare bullets with this role" re-checks its bullets against it.
+- **Cover letters.** Each paragraph is labelled a story about a job (kept under that role and fact), a reason for
+  applying to the company (the company is the one the letter is linked to), a general reason, or filler that is skipped.
+  You can change any label, role or fact. Reasons are listed under "Reasons for applying".
+- A resume with no structure is read by the AI before it is compared. Merges never rewrite text: every wording is word
+  for word from its source.
+- **From the editor.** Once a record exists, a resume or cover letter you create or save a version of is offered to the
+  record (a resume waits until it has been read for search). A newer version replaces an older one still waiting. A source
+  that would add nothing (every bullet is already there, the dates and the role it was written for are noted) is left out
+  without asking, with a note, so saving a small edit does not leave a review to click through.
+
 ### Editor
 
 Open any document and write on it, like Notion on a real sheet of A4.
@@ -210,6 +251,11 @@ Open any document and write on it, like Notion on a real sheet of A4.
 - **Handle in the margin** beside whatever you point at (a bullet, a role, a whole section): drag it to reorder, click it
   for Duplicate, Move up, Move down, Delete, or press the plus to add below.
 - **Outline** (toolbar): the sections and entries, to jump around by.
+- **Record** (toolbar, resumes): a panel that shows your career record's wording for the role the cursor is in. It lists
+  the facts of that role with each wording (and cover letter stories), marks what is already on the page, and has an
+  **Insert** button that adds the wording as a bullet at the end of that role (Undo takes it back). By default it shows
+  only wordings that fit the title on the page (for example the engineering wording on an engineering resume); untick the
+  box to see the others too. If the record has nothing for the role, it says so.
 - **Saves as you type**, and a checkpoint is made when you choose **Save version**, export, attach to an email or apply.
   If the same document is changed in another tab, it tells you instead of overwriting it. Ctrl or Cmd with S saves now.
 - **Page settings:** font (Calibri, Arial or Times style), spacing, **margins (Narrow half inch by default, Normal, Wide)**,
@@ -301,7 +347,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
 | 2 | New Application: link or text to structured job, background queue | Done |
 | 3 | Jobs tracker and dashboard | Done |
 | 3b | Company directory and research | Done |
-| 4a | Library, editor and export, career record, fit score | **Library, editor and export done** (on `stage-4a`); career record and fit score not started |
+| 4a | Library, editor and export, career record, fit score | **Library, editor and export done**; **career record built** (resumes, Profile, LinkedIn and cover letters, review, grouping, browse and edit, editor panel); fit score not started |
 | 4 | Writing: resume, cover letter, cold email | **Not started** |
 | 5 | Learning from past resumes | **Started**: resume indexing built, not yet used for writing |
 | 6 | Match score and gap analysis | Not started |
@@ -317,14 +363,18 @@ Stages were not built in number order: outreach (7) came before writing (4) beca
 
 ## 8. Roadmap: what comes next
 
-### Stage 4a: Career library, editor, career record, fit score (library built, rest next)
+### Stage 4a: Career library, editor, career record, fit score (library and career record built, fit score next)
 
 Groundwork for writing. Plan and build notes: [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md). The **Library**, **editor**
 and **export** (first and last bullets) are built; the career record and fit score are next, in that order.
 
 - **Library (built):** every resume, cover letter and email stored as text, versioned, editable in the editor, exportable.
-- **Career record:** one "mega resume" of every employer, role, fact and wording across all your resumes, including
-  the same job framed differently (PM in one resume, engineer in another). Merges are proposed and reviewed, never silent.
+- **Career record (built):** one "mega resume" of every employer, role, fact and wording across all your resumes,
+  including the same job framed differently (PM in one resume, engineer in another). Merges are proposed and reviewed,
+  never silent. **Built:** the record and its versions, merging resumes, cover letters, the Profile and a LinkedIn print
+  with review, framings, AI grouping of reworded bullets, browsing and hand edits, documents saved in the editor offered
+  back to the record, and a panel in the editor to reuse its wording. **Not yet:** the Profile still reads its own
+  experience (it becomes "the default selection from the career record" once the record is trusted).
 - **Fit score:** how well a resume matches a job and its company, with missing keywords split into "you have it, this
   resume does not show it" and "real gap".
 - **Editor (built):** a Notion-like editor on a real A4 page, with one-page PDF, Word, Markdown and text export from the

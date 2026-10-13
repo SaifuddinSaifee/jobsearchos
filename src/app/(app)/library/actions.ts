@@ -68,7 +68,7 @@ export async function createFromTextAction(input: z.input<typeof FromText>) {
       subject,
       ...blank({ jobId: v.jobId, companyName: v.companyName, targetRole: v.targetRole, writtenOn: v.writtenOn, jdText: v.jdText, jdUrl: v.jdUrl }),
     });
-    if (v.kind === "resume") await enqueueAfterCreate(document.id);
+    await enqueueAfterCreate(document.id);
     return { id: document.id };
   });
 }
@@ -97,7 +97,7 @@ export async function createBlankAction(input: z.input<typeof Blank>) {
 export async function duplicateAction(id: string) {
   return run(async () => {
     const copy = await duplicateDocument(Id.parse(id));
-    if (copy.document.kind === "resume") await enqueueAfterCreate(copy.document.id);
+    await enqueueAfterCreate(copy.document.id);
     return { id: copy.document.id };
   });
 }

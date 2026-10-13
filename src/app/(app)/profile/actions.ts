@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { syncBaseFromProfile, type ImportedSource } from "@/lib/documents/base";
 import { ProfileSchema } from "@/lib/profile/schema";
+import { offerProfileToRecord } from "@/lib/career/queue";
+import { kickWorker } from "@/lib/queue/worker";
 import { restoreVersion, saveVersion } from "@/lib/profile/service";
 
 export type ActionResult = { ok: true; version: number } | { ok: false; error: string };
@@ -32,6 +34,7 @@ export async function saveProfileAction(
     const row = await saveVersion({ profile, changeNote: changeNote ?? "Profile updated" });
     // A failed library step must not undo a profile that was saved.
     await syncBaseFromProfile(ProfileSchema.parse(profile), imported).catch((err) => console.error("[profile] base resume sync failed:", err));
+    await offerToCareerRecord();
     return row;
   });
 }
@@ -48,4 +51,14 @@ export async function saveInstructionsAction(generationInstructions: unknown) {
 
 export async function restoreVersionAction(id: string) {
   return run(() => restoreVersion(id));
+}
+
+/** A failure here never undoes the save. */
+async function offerToCareerRecord() {
+  try {
+    const outcome = await offerProfileToRecord();
+    if (outcome?.status === "queued") kickWorker();
+  } catch (err) {
+    console.error("[profile] could not offer the profile to the career record:", err);
+  }
 }

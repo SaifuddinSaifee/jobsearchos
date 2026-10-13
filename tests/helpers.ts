@@ -13,6 +13,6 @@ export function testDb() {
 /** profile_versions and job_snapshots are immutable (triggers block DELETE), so TRUNCATE is the only reset. */
 export async function resetDb(db: ReturnType<typeof testDb>) {
   await db.execute(
-    sql`TRUNCATE resume_chunks, resume_indexes, document_drafts, document_versions, documents, contact_searches, outreach_emails, contacts, profile_versions, past_resumes, status_events, applications, job_keywords, job_snapshots, application_queue, jobs, company_aliases, companies, files, app_settings, email_accounts RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE career_proposals, career_sources, career_record_versions, resume_chunks, resume_indexes, document_drafts, document_versions, documents, contact_searches, outreach_emails, contacts, profile_versions, past_resumes, status_events, applications, job_keywords, job_snapshots, application_queue, jobs, company_aliases, companies, files, app_settings, email_accounts RESTART IDENTITY CASCADE`,
   );
 }

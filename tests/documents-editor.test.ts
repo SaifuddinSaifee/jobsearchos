@@ -532,3 +532,65 @@ describe("block actions", () => {
     valid(e);
   });
 });
+
+describe("insertBullet", () => {
+  /** The bullet texts of every role, in order. */
+  const bulletsOf = (editor: Editor, roleIndex: number) => {
+    const roles: string[][] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name !== "role") return true;
+      const out: string[] = [];
+      node.descendants((n) => {
+        if (n.type.name === "bullet") out.push(n.firstChild?.textContent ?? "");
+        return true;
+      });
+      roles.push(out);
+      return false;
+    });
+    return roles[roleIndex];
+  };
+  const rolePos = (editor: Editor, index: number) => {
+    const found: number[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "role") found.push(pos);
+      return true;
+    });
+    return found[index];
+  };
+
+  it("adds a bullet after the last one of a role", async () => {
+    const { insertBullet } = await import("@/components/documents/editor/commands");
+    const editor = make();
+    expect(insertBullet(editor, rolePos(editor, 0), "Third bullet")).toBe(true);
+    expect(bulletsOf(editor, 0)).toEqual(["First bullet", "Second bullet", "Third bullet"]);
+    expect(validateDoc(editor.getJSON()).ok).toBe(true);
+  });
+
+  it("starts the list for a role that has none, and gives the bullet an id", async () => {
+    const { insertBullet } = await import("@/components/documents/editor/commands");
+    const editor = make();
+    expect(insertBullet(editor, rolePos(editor, 1), "  Only   bullet  ")).toBe(true);
+    expect(bulletsOf(editor, 1)).toEqual(["Only bullet"]);
+    expect(bulletsOf(editor, 0)).toEqual(["First bullet", "Second bullet"]);
+    const json = JSON.stringify(editor.getJSON());
+    expect(json).toContain("Only bullet");
+    expect(validateDoc(editor.getJSON()).ok).toBe(true);
+  });
+
+  it("can be undone in one step", async () => {
+    const { insertBullet } = await import("@/components/documents/editor/commands");
+    const editor = make();
+    insertBullet(editor, rolePos(editor, 0), "Third bullet");
+    editor.commands.undo();
+    expect(bulletsOf(editor, 0)).toEqual(["First bullet", "Second bullet"]);
+  });
+
+  it("does nothing for a position that is not a role, or for empty text", async () => {
+    const { insertBullet } = await import("@/components/documents/editor/commands");
+    const editor = make();
+    const before = JSON.stringify(editor.getJSON());
+    expect(insertBullet(editor, 0, "x")).toBe(false);
+    expect(insertBullet(editor, rolePos(editor, 0), "   ")).toBe(false);
+    expect(JSON.stringify(editor.getJSON())).toBe(before);
+  });
+});

@@ -16,6 +16,8 @@ import {
   touchSearch,
 } from "@/lib/outreach/searches";
 import type { SearchSteps } from "@/lib/outreach/types";
+import { claimNextProposal, offerDocumentToRecord, processProposal, sweepStaleProposals, touchProposal } from "@/lib/career/queue";
+import { careerProposals, documentVersions } from "@/lib/db/schema";
 import { backfillDocuments } from "@/lib/documents/backfill";
 import { backfillResumeIndexes, claimNextIndexes, processResumeIndex, sweepStaleIndexes, touchIndex } from "@/lib/resume/indexing";
 import { isClean, reviewReason } from "./clean";
@@ -43,6 +45,8 @@ const SEARCH_CONCURRENCY = 2;
 const INDEX_CONCURRENCY = 1;
 /** Reading, structuring and embedding one resume. */
 const INDEX_TIMEOUT_MS = 5 * 60_000;
+/** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
+const CAREER_TIMEOUT_MS = 5 * 60_000;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -129,6 +133,20 @@ export async function processSearch(
   }
 }
 
+/** Offers the document an index was for to the career record, which waited for the index to finish. Never raises. */
+async function offerAfterIndex(indexId: string, db: Db): Promise<void> {
+  try {
+    const [row] = await db
+      .select({ documentId: documentVersions.documentId })
+      .from(resumeIndexes)
+      .innerJoin(documentVersions, eq(documentVersions.id, resumeIndexes.documentVersionId))
+      .where(eq(resumeIndexes.id, indexId));
+    if (row) await offerDocumentToRecord(row.documentId, db);
+  } catch (err) {
+    console.error("[queue] could not offer a resume to the career record:", err instanceof Error ? err.message : err);
+  }
+}
+
 /** Indexes one claimed resume version; failures are recorded on its row by `processResumeIndex`. */
 export async function processIndex(indexId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
@@ -139,6 +157,20 @@ export async function processIndex(indexId: string, deps: { db?: Db; run?: typeo
       .update(resumeIndexes)
       .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(resumeIndexes.id, indexId), eq(resumeIndexes.status, "running")));
+  }
+  await offerAfterIndex(indexId, db);
+}
+
+/** Prepares one claimed career proposal; failures are recorded on its row by `processProposal`. */
+export async function processCareer(id: string, deps: { db?: Db; run?: typeof processProposal; timeoutMs?: number } = {}): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  try {
+    await withTimeout((deps.run ?? processProposal)(id, { db }), deps.timeoutMs ?? CAREER_TIMEOUT_MS, "Timed out after 5 minutes");
+  } catch (err) {
+    await db
+      .update(careerProposals)
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not prepare this source").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(careerProposals.id, id), eq(careerProposals.status, "running")));
   }
 }
 
@@ -152,15 +184,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 
   });
 }
 
-type WorkerState = { running: Set<string>; searching: Set<string>; indexing: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
+type WorkerState = { running: Set<string>; searching: Set<string>; indexing: Set<string>; career: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
 const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), ticking: false, again: false, timer: null });
+  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Set(), ticking: false, again: false, timer: null });
   // A dev server that hot-reloaded from older code may hold a state without the search slots.
   s.searching ??= new Set();
   s.indexing ??= new Set();
+  s.career ??= new Set();
   return s;
 }
 
@@ -216,6 +249,23 @@ async function tick(): Promise<void> {
             s.indexing.delete(indexId);
             void tick();
           });
+      }
+
+      await sweepStaleProposals();
+      // One at a time: a proposal is only prepared once the one before it has been reviewed.
+      if (s.career.size === 0) {
+        const careerId = await claimNextProposal();
+        if (careerId) {
+          s.career.add(careerId);
+          const beat = setInterval(() => void touchProposal(careerId).catch(() => {}), HEARTBEAT_MS);
+          void processCareer(careerId)
+            .catch((err) => console.error("[queue] unexpected career failure", careerId, err))
+            .finally(() => {
+              clearInterval(beat);
+              s.career.delete(careerId);
+              void tick();
+            });
+        }
       }
     } while (s.again);
   } catch (err) {

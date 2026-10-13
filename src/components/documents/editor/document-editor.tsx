@@ -1,7 +1,7 @@
 "use client";
 
 import { EditorContent, useEditor } from "@tiptap/react";
-import { AlertTriangle, Check, CircleAlert, FileCheck2, ListTree, Loader2, RotateCw, Save } from "lucide-react";
+import { AlertTriangle, BookOpen, Check, CircleAlert, FileCheck2, ListTree, Loader2, RotateCw, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -23,6 +23,7 @@ import { editorExtensions } from "./extensions";
 import { Outline } from "./outline";
 import { SAVE_EVENT } from "./keymap";
 import { PageSettingsPanel } from "./page-settings-panel";
+import { RecordPanel } from "./record-panel";
 import { useEditorSession } from "./session";
 import { SelectionToolbar } from "./selection-toolbar";
 import { SlashCommand } from "./slash";
@@ -72,6 +73,7 @@ export function DocumentEditor({ documentId, kind, initialContent, initialSubjec
   const [versionOpen, setVersionOpen] = useState(false);
   const [versionNote, setVersionNote] = useState("");
   const [savingVersion, setSavingVersion] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
   const wrap = useRef<HTMLDivElement | null>(null);
   const subjectRef = useRef(initialSubject);
   const settingsTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -239,6 +241,11 @@ export function DocumentEditor({ documentId, kind, initialContent, initialSubjec
               </PopoverContent>
             </Popover>
           )}
+          {kind === "resume" && (
+            <Button variant={recordOpen ? "secondary" : "outline"} size="sm" aria-pressed={recordOpen} onClick={() => setRecordOpen((v) => !v)}>
+              <BookOpen aria-hidden /> Record
+            </Button>
+          )}
           <PageSettingsPanel settings={settings} onChange={(next) => changeSettings(next)} status={status} />
           <Button variant="outline" size="sm" onClick={() => setVersionOpen(true)}>
             <Save aria-hidden /> Save version
@@ -271,21 +278,24 @@ export function DocumentEditor({ documentId, kind, initialContent, initialSubjec
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl bg-muted/60 p-3 sm:p-6">
-        <div ref={wrap} className="relative mx-auto w-fit pl-14">
-          <div className="relative w-fit">
-            <EditorContent editor={editor} />
-            {settings.fitOnePage && (
-              <div aria-hidden className="pointer-events-none absolute right-0 left-0 transition-[top] duration-200 motion-reduce:transition-none" style={{ top: breakAt, bottom: over > 0 ? 0 : undefined }}>
-                <div className={cn("border-t border-dashed", over > 0 ? "border-amber-500/70 bg-amber-500/5" : "border-foreground/20")} style={over > 0 ? { height: "100%" } : undefined}>
-                  <span className="absolute -top-2.5 right-2 rounded bg-background px-1.5 text-[10px] text-muted-foreground">End of page 1</span>
+      <div>
+        <div className="overflow-x-auto rounded-xl bg-muted/60 p-3 sm:p-6">
+          <div ref={wrap} className="relative mx-auto w-fit pl-14">
+            <div className="relative w-fit">
+              <EditorContent editor={editor} />
+              {settings.fitOnePage && (
+                <div aria-hidden className="pointer-events-none absolute right-0 left-0 transition-[top] duration-200 motion-reduce:transition-none" style={{ top: breakAt, bottom: over > 0 ? 0 : undefined }}>
+                  <div className={cn("border-t border-dashed", over > 0 ? "border-amber-500/70 bg-amber-500/5" : "border-foreground/20")} style={over > 0 ? { height: "100%" } : undefined}>
+                    <span className="absolute -top-2.5 right-2 rounded bg-background px-1.5 text-[10px] text-muted-foreground">End of page 1</span>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+            <BlockHandle editor={editor} wrap={wrap} />
+            <SelectionToolbar editor={editor} />
           </div>
-          <BlockHandle editor={editor} wrap={wrap} />
-          <SelectionToolbar editor={editor} />
         </div>
+        {recordOpen && kind === "resume" && <RecordPanel editor={editor} documentId={documentId} onClose={() => setRecordOpen(false)} />}
       </div>
 
       <Dialog open={versionOpen} onOpenChange={(o) => !savingVersion && setVersionOpen(o)}>

@@ -1,6 +1,6 @@
 # Stage 4a: Career library, document editor, career record and fit score (plan)
 
-Status: **Phases 1 and 2 (Library, editor and export) built** on branch `stage-4a`. Phases 3 and 4 are planned. "Phase 1 as built" and "Phase 2 as built" below say where the build differs from the plan.
+Status: **Phases 1 and 2 (Library, editor and export) built** on branch `stage-4a`. **Phase 3 (career record) is built**, see "Phase 3 as built" below. Phase 4 is planned. "Phase 1 as built" and "Phase 2 as built" below say where the build differs from the plan.
 
 This is the groundwork for Stage 4 (writing). It replaces the "master resume" idea in
 [RESUME-LIBRARY.md](RESUME-LIBRARY.md) and pulls the resume half of Stage 6 (match score) forward.
@@ -156,6 +156,89 @@ What shipped, and where it differs from the plan below.
 - Tests: key behaviour, the slash menu and the block actions run against a real (headless) editor in jsdom; the PDF tests
   run Chromium and check page counts, text order and that bullets are indented; export, locking and attachments run against
   the database. Browser checks covered typing, reload, drag and drop, two tabs, exports and the phone layout.
+
+## Phase 3 as built
+
+Decisions made before building, which settle open questions 2 and 4 below:
+
+- **Different titles for the same employer and dates are one role with several framings.** Dates and location merge
+  into the role, and a date disagreement becomes a note, never a blocker. Each framing keeps its own title, angle and
+  target roles. Facts are shared, so one fact holds both a PM wording and an engineering wording. The review proposes
+  the framing; nothing is applied without review.
+- **Cover letters are included from the first build.** Their paragraphs are classified (a story about a role, a
+  reason for applying, or boilerplate) and kept word for word. The model only classifies and groups.
+- **Sources:** library resumes and cover letters, the Profile, and a LinkedIn profile printed to PDF (text only, the
+  file is not kept). No source takes precedence.
+- **Placement:** a fourth Library tab, "Career record" (`/library?tab=record`); `/library/record` redirects to it.
+
+Built so far:
+
+- **Step 1, foundation.** Migration `0017_career_record`: `career_record_versions` (immutable, one snapshot per
+  version, reusing `reject_mutation()`), `career_sources` (what was read, never deleted, with a check tying the kind
+  to its key column) and `career_proposals` (work queue and review state; a partial unique index allows only one
+  proposal running or ready at a time). The record is one Zod-checked jsonb snapshot (`src/lib/career/schema.ts`),
+  saved under an advisory lock with an expected version (`src/lib/career/service.ts`). Restoring saves the old record
+  as a new version and marks later merges `undone`. The Library has the Career record tab with an empty state and a
+  versions sheet.
+- **Step 2, the merge core** (`src/lib/career/`, pure, no model): `extract` (keeps block ids), `dates` (about 30
+  formats, fuzzy years, LinkedIn duration tails), `match` (employers by normalized name, company link or any spelling
+  seen; roles as same, framing or new), `dedupe` (known, same fact with a new wording, same editor block edited),
+  `proposal` (suggestions with stable keys, and a guard that every text is word for word from the source) and `apply`
+  (`resolveDecisions`, `applyProposal`, `checkRefs`). A merge never changes existing text, never overwrites what the
+  user edited, and notes date disagreements.
+- **Step 3, queue and review** (`queue.ts`, `review.ts`, `decisions.ts`, `/library/record/review`). "Build from your
+  library" queues every resume (base first, then newest first) and the Profile. The background worker prepares one
+  proposal at a time, and the next is not prepared until the one before it is saved or left out, so each is compared
+  with the newest record. The review shows each employer, role and bullet with a suggestion (new, same role, new
+  framing of a role, same fact, already in your record), lets the user include or leave out anything, move a role
+  under another role or framing, pick which fact a bullet belongs to, and shows a dry run of what saving adds. Choices
+  are saved as they are made. If the record changed meanwhile and what the proposal points at is gone, it is prepared
+  again with the choices kept. Employers are linked to the Companies directory with `findCompanyByName`, never by
+  creating rows. A resume with no structure is read with the model in the background (so its block ids are lost).
+  A source whose content is already in the record, or that was left out, is not queued again.
+- **Step 4, browse and edit** (`edit.ts`, `edit-schema.ts`, `framing.ts`, `record-browser.tsx`). The tab shows employers,
+  roles, facts and wordings with source chips that open the exact document version, a search box, and a filter by
+  framing. Every hand edit (`editRecord`) is one operation applied to the latest record and saved as a new version; a
+  stale edit is refused and the page reloads. Edited items carry the field names in `provenance.user`, and deleting
+  leaves a tombstone, so a later merge never overwrites an edit and proposes leaving a deleted item out. A wording fits a
+  framing when it was written for it or a source that told the role under that framing also used it (`framing.ts`),
+  which is what the writer will use to pick wordings.
+- **Step 5, model grouping** (`group.ts`, `regroup.ts`). Bullets that match nothing exactly, for a role joining one
+  already recorded, are put to the model one role at a time. It sees short aliases (`f1`, `b2`) for the facts and the new
+  bullets and answers with a choice among them, so the answer schema is made of enums only and the model cannot return
+  text. Unknown or missing answers become new facts, "same as" chains are followed, a loop is harmless, and a failed call
+  is retried once and then fails the proposal so it can be retried. A bullet can also be "the same new fact as another
+  bullet" (`withKey`). When the user moves a role under a different role, "Compare bullets with this role" settles its
+  bullets against the new target and forgets only the choices about those bullets. Checked against the real model on
+  synthetic bullets: reworded matches, a topic-only near miss left new, and two new bullets joined.
+- **Step 6, cover letters** (`cover.ts`, `ParagraphGroup`). Paragraphs (40 characters or more, so greetings and
+  sign-offs never reach the model) are labelled by the model as a story about a role (with the role chosen from a list),
+  a reason for applying to the company, a general reason, or boilerplate (skipped). Again the answer is enums only. The
+  company of a "why this company" paragraph is the company of the document (the directory's name when linked), never the
+  model's; with no company it becomes a general reason. Stories go through the same fact grouping as bullets and are
+  kept as `paragraph` wordings; reasons go to a Reasons for applying list. Unread paragraphs start out skipped.
+- **Step 7, LinkedIn and the Profile** (`linkedin.ts`, `/api/career/linkedin`). A LinkedIn profile saved as a PDF is read
+  to text, the print furniture is removed (navigation, buttons, counts, endorsements, the browser's header and footer,
+  lines LinkedIn prints twice), and only that text is kept as the source; the file is not stored. It is read with the
+  resume parser when its turn comes. The same text twice is refused with 409. The Profile can be included by hand, and
+  a saved Profile is offered as a source automatically once a record exists (content only: a note or preferences change
+  gives the same content and is skipped).
+- **Step 8, editor feed and side panel** (`offerDocumentToRecord`, `panel.ts`, `record-panel.tsx`). Once a record exists,
+  `enqueueAfterCreate` also offers a created or saved resume or cover letter to the record. A resume that is still being
+  indexed (and so maybe structured) waits, and the worker offers it when its index finishes; a document with nothing to
+  read is skipped; a newer version of a document supersedes the older proposal still pending for it. A proposal that
+  would add nothing (`nothing-new.ts`: every item known, dates and location unchanged, the role it was written for
+  already noted) is dismissed automatically with a note, but an empty one (nothing could be read) is still shown. The
+  editor's **Record** panel reads the role under the cursor, finds its role in the record (by the exact block a source
+  was read from, else by employer, title and dates), lists its facts and wordings (those that fit the title on the page
+  first), and inserts one as a bullet at the end of the role (`insertBullet`, one undo step). It floats at the right of
+  the page, because docking it next to an A4 sheet does not fit the page column.
+- **Decisions made while building:** a role with several framings keeps one set of facts; "which wordings fit a framing"
+  is derived (`framing.ts`) from the framing a wording was written for plus the sources that told the role under that
+  framing, so no extra field is stored. Employers are never created in the Companies directory, only linked.
+- **Still open for later:** pruning old record versions (each edit is a whole snapshot, a few hundred KB at most), using
+  the record as the Profile's experience, embeddings of wordings for search by job requirement (Phase 4), and the
+  Profile page showing which of its content is in the record.
 
 ## Phase 2: Editor and export (the plan)
 
@@ -350,11 +433,13 @@ shown as a change to accept or reject, and checked against the career record so 
 
 1. **Files:** option A, B or C above?
 2. **Roles that differ across resumes:** when two resumes give the same employer and dates different titles, treat them
-   as framings of one role (as above), or always ask?
+   as framings of one role (as above), or always ask? **Answered:** one role with several framings, proposed in the
+   review (never decided silently).
 3. **Template:** copy your existing resume template (send a sample), or start with one clean standard one-page
    layout? More templates can come later.
 4. **Cover letters and emails in the career record:** facts that appear only in a cover letter (a story, a reason for
-   applying) could go into the record too. Include them, or keep the record to resume content?
+   applying) could go into the record too. Include them, or keep the record to resume content? **Answered:** cover
+   letters are included (stories and reasons for applying); emails are not.
 5. **Score weights:** start with required skills 35, responsibilities 25, preferred skills 15, seniority 10, company
    fit 15, and tune later?
 6. **Paper size:** Letter, A4, or both with a per-document choice?

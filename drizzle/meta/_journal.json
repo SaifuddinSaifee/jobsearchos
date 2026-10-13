@@ -120,6 +120,13 @@
       "when": 1791835322053,
       "tag": "0016_resume_index_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791883554737,
+      "tag": "0017_career_record",
+      "breakpoints": true
     }
   ]
 }

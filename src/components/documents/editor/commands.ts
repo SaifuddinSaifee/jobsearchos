@@ -3,7 +3,7 @@ import { Fragment, type Node as PMNode, type ResolvedPos } from "@tiptap/pm/mode
 import { NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { Briefcase, FolderKanban, GraduationCap, Heading, List, Minus, Type, UserRound, Wrench, type LucideIcon } from "lucide-react";
 import { emptyEducation, emptyHeader, emptyParagraph, emptyProject, emptyRole, emptySection, emptySkillsLine, SECTION_TITLES } from "@/lib/documents/blocks";
-import { emptyBullets, type DocJSON } from "@/lib/documents/build";
+import { emptyBullets, newId, paragraph, type DocJSON } from "@/lib/documents/build";
 import type { SectionKind } from "@/lib/documents/nodes";
 import { focusFrom } from "./navigation";
 
@@ -267,4 +267,35 @@ export function beginBlockDrag(editor: Editor, pos: number, data: DataTransfer):
 
 export function endBlockDrag(editor: Editor): void {
   editor.view.dragging = null;
+}
+
+/**
+ * Adds a bullet with this text at the end of a role's bullets (starting the list when it has none). The cursor stays
+ * where it was. Returns false, and changes nothing, when `rolePos` is not a role or the result would not be allowed.
+ */
+export function insertBullet(editor: Editor, rolePos: number, text: string): boolean {
+  const { state } = editor;
+  const role = state.doc.nodeAt(rolePos);
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!role || role.type.name !== "role" || !clean) return false;
+
+  const bullet: DocJSON = { type: "bullet", attrs: { id: newId() }, content: [paragraph(clean)] };
+  let listAt = -1;
+  let list: PMNode | null = null;
+  role.forEach((child, offset) => {
+    if (child.type.name === "bulletList") {
+      list = child;
+      listAt = rolePos + 1 + offset;
+    }
+  });
+  const tr = state.tr;
+  if (list) tr.insert(listAt + (list as PMNode).nodeSize - 1, make(editor, bullet));
+  else tr.insert(rolePos + role.nodeSize - 1, make(editor, { type: "bulletList", content: [bullet] }));
+  try {
+    tr.doc.check();
+  } catch {
+    return false;
+  }
+  editor.view.dispatch(tr);
+  return true;
 }

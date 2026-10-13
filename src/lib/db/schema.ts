@@ -22,6 +22,12 @@ import type { DocJSON } from "@/lib/documents/build";
 import type { PageSettings } from "@/lib/documents/page-settings";
 import type { DocumentKind, DocumentOrigin, VersionReason } from "@/lib/documents/types";
 import type { IndexStatus } from "@/lib/resume/types";
+import type {
+  CareerRecord,
+  ProposalStatus,
+  RecordVersionReason,
+  SourceKind,
+} from "@/lib/career/schema";
 import type { ContactKind, ContactSource, EmailStatus, OutreachStatus, SearchStatus, SearchSteps } from "@/lib/outreach/types";
 import type {
   GenerationInstructions,
@@ -609,6 +615,108 @@ export const resumeChunks = pgTable(
     check("resume_chunks_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
   ],
 );
+
+/**
+ * The career record, one immutable snapshot per version (a trigger rejects UPDATE and DELETE, see
+ * drizzle/0017_career_record.sql). Restoring saves an old record as a new version.
+ */
+export const careerRecordVersions = pgTable("career_record_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  version: integer("version").notNull().unique(),
+  record: jsonb("record").$type<CareerRecord>().notNull(),
+  recordSchema: integer("record_schema").notNull().default(1),
+  reason: text("reason").$type<RecordVersionReason>().notNull(),
+  changeNote: text("change_note"),
+  /** The reviewed proposal this version came from (no foreign key: proposals are mutable, versions are not). */
+  proposalId: uuid("proposal_id"),
+  restoredFromVersionId: uuid("restored_from_version_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * What has been read into the career record: a library document version, a profile version, or a LinkedIn print
+ * (text only, the file is not kept). Never deleted, because wordings in the record point at these rows.
+ */
+export const careerSources = pgTable(
+  "career_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").$type<SourceKind>().notNull(),
+    documentId: uuid("document_id").references(() => documents.id),
+    documentVersionId: uuid("document_version_id").references(() => documentVersions.id),
+    profileVersionId: uuid("profile_version_id").references(() => profileVersions.id),
+    /** The cleaned text of a LinkedIn print. Null for every other kind. */
+    text: text("text"),
+    contentSha256: text("content_sha256").notNull(),
+    label: text("label").notNull(),
+    targetRole: text("target_role"),
+    companyId: uuid("company_id").references(() => companies.id),
+    companyName: text("company_name"),
+    writtenOn: date("written_on", { mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("career_sources_version_idx")
+      .on(t.documentVersionId)
+      .where(sql`${t.documentVersionId} is not null`),
+    uniqueIndex("career_sources_profile_idx")
+      .on(t.profileVersionId)
+      .where(sql`${t.profileVersionId} is not null`),
+    index("career_sources_sha_idx").on(t.kind, t.contentSha256),
+    index("career_sources_document_idx").on(t.documentId),
+    check(
+      "career_sources_key_matches_kind",
+      sql`(${t.kind} in ('resume', 'cover_letter')) = (${t.documentVersionId} is not null)
+        and (${t.kind} = 'profile') = (${t.profileVersionId} is not null)
+        and (${t.kind} = 'linkedin') = (${t.text} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * One proposed merge of a source into the record. Doubles as the work queue (worked off by the same background
+ * worker as the other queues) and as the review state: `decisions` holds what the user has chosen so far, so a
+ * reload loses nothing. Only one proposal may be running or ready at a time, so each is computed against the
+ * newest record.
+ */
+export const careerProposals = pgTable(
+  "career_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => careerSources.id),
+    status: text("status").$type<ProposalStatus>().notNull().default("queued"),
+    /** Lower runs first (base resume, other resumes, profile, LinkedIn, cover letters). */
+    priority: integer("priority").notNull().default(1),
+    /** The record version this proposal was computed against. */
+    baseVersion: integer("base_version"),
+    proposal: jsonb("proposal").$type<unknown>(),
+    decisions: jsonb("decisions").$type<Record<string, unknown>>().notNull().default({}),
+    appliedVersionId: uuid("applied_version_id"),
+    attempts: integer("attempts").notNull().default(0),
+    note: text("note"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while the proposal is being prepared. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("career_proposals_status_idx").on(t.status, t.priority, t.createdAt),
+    uniqueIndex("career_proposals_source_open_idx")
+      .on(t.sourceId)
+      .where(sql`${t.status} in ('queued', 'running', 'ready')`),
+    uniqueIndex("career_proposals_one_open_idx")
+      .on(sql`(1)`)
+      .where(sql`${t.status} in ('running', 'ready')`),
+  ],
+);
+
+export type CareerRecordVersionRow = typeof careerRecordVersions.$inferSelect;
+export type CareerSourceRow = typeof careerSources.$inferSelect;
+export type CareerProposalRow = typeof careerProposals.$inferSelect;
 
 export type ResumeIndexRow = typeof resumeIndexes.$inferSelect;
 export type ResumeChunkRow = typeof resumeChunks.$inferSelect;
