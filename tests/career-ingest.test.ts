@@ -16,6 +16,7 @@ import {
   enqueueDocumentSource,
   enqueueProfileSource,
   processProposal,
+  recoverInterruptedProposals,
   startBuild,
   sweepStaleProposals,
 } from "@/lib/career/queue";
@@ -24,14 +25,17 @@ import {
   dismissProposal,
   getCareerStatus,
   getOpenReview,
+  prepareSkipped,
   ProposalError,
   retryProposal,
   reviewAgain,
   saveDecisions,
+  skipProposal,
 } from "@/lib/career/review";
 import { currentRecord, restoreRecordVersion, saveRecordVersion } from "@/lib/career/service";
 import { emptyRecord } from "@/lib/career/schema";
 import { regroupRole } from "@/lib/career/review";
+import { currentAbortSignal } from "@/lib/llm/abort";
 import { processCareer } from "@/lib/queue/worker";
 import { counter, profileWith } from "./career-helpers";
 import { resetDb, testDb } from "./helpers";
@@ -136,6 +140,20 @@ describe("one proposal at a time", () => {
     expect((await db.select().from(careerProposals))[0]).toMatchObject({ status: "queued", error: null, attempts: 0 });
   });
 
+  it("puts back every running proposal at startup, however recent, and fails it after too many tries", async () => {
+    await resume("A", acmeEng);
+    await resume("B", acmePm);
+    await startBuild(db);
+    const id = (await claimNextProposal(db))!;
+    expect(await sweepStaleProposals(db)).toBe(0);
+    expect(await recoverInterruptedProposals(db)).toBe(1);
+    expect((await db.select().from(careerProposals).where(eq(careerProposals.id, id)))[0]).toMatchObject({ status: "queued", startedAt: null });
+
+    await db.execute(sql`UPDATE career_proposals SET status = 'running', attempts = 3 WHERE id = ${id}`);
+    await recoverInterruptedProposals(db);
+    expect((await db.select().from(careerProposals).where(eq(careerProposals.id, id)))[0]).toMatchObject({ status: "failed" });
+  });
+
   it("records a failure when the source cannot be read", async () => {
     const { document } = await resume("A", acmeEng);
     await startBuild(db);
@@ -173,6 +191,28 @@ describe("the worker", () => {
     await processCareer(second, { db, run: () => new Promise(() => {}), timeoutMs: 20 });
     [row] = await db.select().from(careerProposals).where(eq(careerProposals.id, second));
     expect(row).toMatchObject({ status: "failed", error: "Timed out after 5 minutes" });
+  });
+
+  it("stops at once when skipped, cancelling its model calls and recording nothing", async () => {
+    await resume("A", acmeEng);
+    await startBuild(db);
+    const id = (await claimNextProposal(db))!;
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const done = processCareer(id, {
+      db,
+      signal: controller.signal,
+      run: () => {
+        seen = currentAbortSignal();
+        return new Promise(() => {});
+      },
+    });
+    await skipProposal(id, db);
+    controller.abort();
+    await done;
+    expect(seen).toBe(controller.signal);
+    expect(seen!.aborted).toBe(true);
+    expect((await db.select().from(careerProposals))[0].status).toBe("skipped");
   });
 
   it("prepares a proposal for real when nothing goes wrong", async () => {
@@ -495,6 +535,63 @@ describe("a record that changed while reviewing", () => {
     await reviewAgain(id, db);
     await prepareNext();
     expect((await getOpenReview(db))!.proposal.employers[0].suggestion).toEqual({ to: "new" });
+  });
+});
+
+describe("skipping a source for now", () => {
+  it("sets the running one aside unreviewed, moves on, and prepares it again only when asked", async () => {
+    await resume("A", acmeEng, { isBase: true });
+    await resume("B", acmePm);
+    await startBuild(db);
+    const first = (await claimNextProposal(db))!;
+    expect(await skipProposal(first, db)).toEqual({ label: "A" });
+    await expect(skipProposal(first, db)).rejects.toThrow(ProposalError);
+
+    // The next one starts, and a finished run of the skipped one changes nothing.
+    const second = (await claimNextProposal(db))!;
+    expect(second).not.toBe(first);
+    await processProposal(first, { db, parse: never, grouper: noGroup });
+    expect((await db.select().from(careerProposals).where(eq(careerProposals.id, first)))[0].status).toBe("skipped");
+
+    const status = await getCareerStatus(db);
+    expect(status.skipped).toEqual([{ id: first, label: "A" }]);
+    expect(status).toMatchObject({ counts: { skipped: 1, running: 1 }, total: 2, done: 0 });
+
+    // Looking for new sources leaves it alone.
+    expect(await startBuild(db)).toEqual({ queued: 0, skipped: 0 });
+    await processProposal(second, { db, parse: never, grouper: noGroup });
+    await dismissProposal(second, db);
+    expect(await claimNextProposal(db)).toBeNull();
+
+    await prepareSkipped(first, db);
+    expect(await claimNextProposal(db)).toBe(first);
+    await expect(prepareSkipped(first, db)).rejects.toThrow(ProposalError);
+  });
+
+  it("frees the review slot of one waiting for review, keeping its choices", async () => {
+    await resume("A", acmeEng);
+    await resume("B", acmePm);
+    await startBuild(db);
+    const first = (await prepareNext())!;
+    await saveDecisions(first, { x: { action: "reject" } }, db);
+    await skipProposal(first, db);
+    const [row] = await db.select().from(careerProposals).where(eq(careerProposals.id, first));
+    expect(row).toMatchObject({ status: "skipped", proposal: null, decisions: { x: { action: "reject" } } });
+    expect(await claimNextProposal(db)).toBeTruthy();
+  });
+
+  it("replaces a skipped source when its document gets a new version", async () => {
+    const { document } = await resume("A", acmeEng);
+    await startBuild(db);
+    const first = (await claimNextProposal(db))!;
+    await skipProposal(first, db);
+    const [{ rev }] = await db.execute<{ rev: number }>(sql`SELECT revision AS rev FROM document_drafts WHERE document_id = ${document.id}`);
+    await saveDraft(document.id, { content: profileToDoc(profileWith(acmePm), counter("c")), revision: rev }, db);
+    await createVersion(document.id, { reason: "manual" }, db);
+    await enqueueDocumentSource(document.id, db);
+    const rows = await db.select().from(careerProposals);
+    expect(rows.find((r) => r.id === first)!.status).toBe("superseded");
+    expect(rows.filter((r) => r.status === "queued")).toHaveLength(1);
   });
 });
 

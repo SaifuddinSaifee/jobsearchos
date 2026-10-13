@@ -175,7 +175,7 @@ export async function renderDocx(content: DocJSON, settings: PageSettings, opts:
   const doc = new Document({
     title: opts.title,
     creator: "Job Search OS",
-    styles: { default: { document: { run: { font: FONT_STACKS[settings.font].docx, size: half(base) } } } },
+    styles: { default: { document: { paragraph: { alignment: AlignmentType.JUSTIFIED }, run: { font: FONT_STACKS[settings.font].docx, size: half(base) } } } },
     numbering: {
       config: [
         {

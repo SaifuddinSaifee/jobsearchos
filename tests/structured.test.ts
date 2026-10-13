@@ -6,6 +6,7 @@ vi.mock("@/lib/llm/client", () => ({ together: () => ({ chat: { completions: { c
 
 process.env.DATABASE_URL ??= "postgres://unused";
 const { chatStructured } = await import("@/lib/llm/structured");
+const { withAbortSignal } = await import("@/lib/llm/abort");
 
 const Schema = z.object({ name: z.string() });
 const input = { system: "s", user: "u" };
@@ -30,6 +31,13 @@ describe("chatStructured", () => {
     expect(args.response_format.type).toBe("json_schema");
     expect(args.response_format.json_schema.schema.properties.name).toBeDefined();
     expect(args.messages[0].content).toContain('"name"');
+  });
+
+  it("passes the running job's abort signal to the request, so stopping the job cancels it", async () => {
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
+    const controller = new AbortController();
+    await withAbortSignal(controller.signal, () => chatStructured(Schema, input));
+    expect(create.mock.calls[0][1]).toEqual({ signal: controller.signal });
   });
 
   it("accepts JSON wrapped in code fences", async () => {

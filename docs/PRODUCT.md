@@ -215,6 +215,17 @@ the base the writer will use to pick the right facts and wording for a job.
   with the record as it stands after the one before. **Include Profile** and **Add LinkedIn PDF** add those two by hand
   (save your LinkedIn page as a PDF from the browser's print dialog; only its text is kept, never the file). Once a record
   exists, a saved Profile is offered for review on its own.
+- **Progress in the sidebar.** While sources are being prepared, a card in the sidebar (on every page) shows which one
+  is being read and how many of the batch are done. When one is ready, the card says so (with how many wait after it)
+  and opens the review, and a toast with a **Review** button appears wherever you are. Only one source is prepared ahead
+  of your review, so the next starts after you save. Failures show on the card and as a toast too.
+- **Skip a source for now.** **Stop and skip** (on the sidebar card and the Career record tab) stops the source being
+  read, cancelling its model calls, and starts the next one. **Review later** does the same for one waiting for review,
+  keeping your choices so far. A skipped source is not reviewed and not in the record: it is listed under "Skipped, not
+  reviewed yet" with **Prepare** to queue it again, and looking for new sources leaves it alone. A new version of its
+  document replaces it as usual.
+- **After a restart.** A source that was being read when the server stopped is queued again as soon as the server
+  starts, so it never shows as in progress when nothing is working on it.
 - **When a source fails.** The record tab names the sources that could not be prepared, with **Try again** and
   **View details**. Details opens a dialog with each failure taken apart: the plain reason, when it failed, attempts, the
   step that failed and, for model errors, the HTTP status, error type, code, parameter and request id, plus the raw
@@ -270,7 +281,8 @@ Open any document and write on it, like Notion on a real sheet of A4.
 - **Saves as you type**, and a checkpoint is made when you choose **Save version**, export, attach to an email or apply.
   If the same document is changed in another tab, it tells you instead of overwriting it. Ctrl or Cmd with S saves now.
 - **Page settings:** font (Calibri, Arial or Times style), spacing, **margins (Narrow half inch by default, Normal, Wide)**,
-  accent colour, and fine tuning in exact numbers.
+  accent colour, and fine tuning in exact numbers. Body text is justified (the header stays centred, dates stay on the
+  right), in the editor and in the PDF and Word exports alike.
 - **Keep to one page** is a switch (on by default). On: a line shows where page one ends, the toolbar says "Fits on one
   page" or how many lines it runs over, and the spacing tightens as you write so it stays on one page. Your words are never
   cut, and if it still cannot fit it says which sections are longest. Off: no limit, no warnings.

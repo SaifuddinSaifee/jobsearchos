@@ -215,6 +215,8 @@ export const PROPOSAL_STATUSES = [
   "superseded",
   "failed",
   "undone",
+  /** Set aside by the user before it was reviewed. It waits until they ask for it to be prepared. */
+  "skipped",
 ] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 

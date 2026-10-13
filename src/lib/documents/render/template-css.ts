@@ -40,7 +40,7 @@ export function fontFaceCss(base = ""): string {
 
 /** The look of the page contents. Values come from CSS variables set by `styleVars`. */
 export const CONTENT_CSS = `
-.rs-page{font-family:var(--rs-font);font-size:var(--rs-font-size);line-height:var(--rs-line-height);color:#111;background:#fff;font-kerning:normal;text-rendering:geometricPrecision;-webkit-font-smoothing:antialiased}
+.rs-page{font-family:var(--rs-font);font-size:var(--rs-font-size);line-height:var(--rs-line-height);color:#111;background:#fff;text-align:justify;font-kerning:normal;text-rendering:geometricPrecision;-webkit-font-smoothing:antialiased}
 .rs-page *{box-sizing:border-box}
 :where(.rs-page) :where(h1,h2,p,ul,li){margin:0;padding:0}
 .rs-page a{color:inherit;text-decoration:underline}

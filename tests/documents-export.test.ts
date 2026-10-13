@@ -157,6 +157,8 @@ describe("renderDocx", () => {
     expect(numbering).toContain(String.fromCharCode(0x2022));
     const styles = await zip.file("word/styles.xml")!.async("string");
     expect(styles).toContain("Times New Roman");
+    // Body text is justified, like the editor and the PDF.
+    expect(styles).toMatch(/<w:pPrDefault>[\s\S]*<w:jc w:val="both"\/>[\s\S]*<\/w:pPrDefault>/);
     const xml = await zip.file("word/document.xml")!.async("string");
     expect(xml).toContain("<w:numPr>");
     // Half-inch margins by default (12.7 mm is 720 twips), whatever the spacing.

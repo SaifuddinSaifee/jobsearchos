@@ -1,13 +1,14 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, FileUp, Hammer, History, Library, Loader2, RotateCcw, UserRound } from "lucide-react";
+import { ClipboardCheck, FileUp, Hammer, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   includeProfileAction,
+  prepareSkippedAction,
   restoreRecordVersionAction,
   retryFailedAction,
   reviewAgainAction,
@@ -18,8 +19,9 @@ import type { CareerRecord } from "@/lib/career/schema";
 import type { SourceInfo } from "@/lib/career/service";
 import { FailureDialog } from "./failure-dialog";
 import { RecordBrowser } from "./record-browser";
+import { SkipButton } from "./skip-button";
 import { RecordEditProvider } from "./record-edit";
-import { CAREER_STATUS_KEY, useCareerStatus } from "./use-career-status";
+import { CAREER_STATUS_KEY, isPreparing, useCareerStatus } from "./use-career-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,8 +85,10 @@ function Progress({ initial }: { initial: CareerStatus }) {
   const status = data ?? initial;
   const [retrying, startRetry] = useTransition();
   const [again, startAgain] = useTransition();
+  const [, startPrepare] = useTransition();
+  const [preparingSkipped, setPreparingSkipped] = useState<string | null>(null);
 
-  const preparing = status.counts.queued + status.counts.running > 0 && status.counts.ready === 0;
+  const preparing = isPreparing(status);
   const refresh = () => client.invalidateQueries({ queryKey: CAREER_STATUS_KEY }).then(() => router.refresh());
   const retry = () =>
     startRetry(async () => {
@@ -100,18 +104,24 @@ function Progress({ initial }: { initial: CareerStatus }) {
           <p className="text-sm">
             <span className="font-medium">{status.current?.label ?? "A source"}</span> is ready to review ({status.done} of {status.total} done).
           </p>
-          <Button nativeButton={false} render={<Link href="/library/record/review" />}>
-            <ClipboardCheck aria-hidden />
-            Review
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {status.current && <SkipButton proposalId={status.current.id} ready />}
+            <Button nativeButton={false} render={<Link href="/library/record/review" />}>
+              <ClipboardCheck aria-hidden />
+              Review
+            </Button>
+          </div>
         </div>
       )}
 
       {preparing && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-          Preparing {status.current?.label ?? "the next source"} ({status.done} of {status.total} done)
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+            Preparing {status.current?.label ?? "the next source"} ({status.done} of {status.total} done)
+          </p>
+          {status.current?.status === "running" && <SkipButton proposalId={status.current.id} ready={false} />}
+        </div>
       )}
 
       {status.counts.failed > 0 && (
@@ -149,6 +159,38 @@ function Progress({ initial }: { initial: CareerStatus }) {
                   }
                 >
                   Review again
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {status.skipped.length > 0 && (
+        <div className="space-y-1 rounded-lg border px-4 py-3 text-sm animate-in fade-in duration-300 motion-reduce:animate-none">
+          <p className="font-medium">Skipped, not reviewed yet</p>
+          <ul className="space-y-1">
+            {status.skipped.map((u) => (
+              <li key={u.id} className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">{u.label}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={preparingSkipped === u.id}
+                  disabled={preparingSkipped !== null}
+                  onClick={() => {
+                    setPreparingSkipped(u.id);
+                    startPrepare(async () => {
+                      const res = await prepareSkippedAction(u.id);
+                      if (res.ok) toast.success(`${u.label} queued for review`);
+                      else toast.error(res.error);
+                      await refresh();
+                      setPreparingSkipped(null);
+                    });
+                  }}
+                >
+                  <Play aria-hidden />
+                  Prepare
                 </Button>
               </li>
             ))}

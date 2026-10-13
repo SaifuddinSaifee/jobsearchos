@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { parseFailure } from "@/lib/career/failure";
 import type { CareerStatus } from "@/lib/career/review";
 import { FailureDialog } from "./failure-dialog";
+import { SkipButton } from "./skip-button";
 import { CAREER_STATUS_KEY, useCareerStatus } from "./use-career-status";
 
 /** Shown when no source is waiting for review: the next one is being prepared, something failed, or everything is done. */
@@ -51,6 +52,7 @@ export function PreparingNext({ initial }: { initial: CareerStatus }) {
             <p className="mt-1 text-sm text-muted-foreground" aria-live="polite">
               {status.current ? `Reading ${status.current.label}` : "It will appear here as soon as it is ready."} ({status.done} of {status.total} done)
             </p>
+            {status.current?.status === "running" && <SkipButton className="mt-4" proposalId={status.current.id} ready={false} />}
           </>
         ) : status.counts.failed > 0 ? (
           <>

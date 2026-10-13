@@ -7,16 +7,18 @@ import { DecisionsSchema } from "@/lib/career/proposal-schema";
 import {
   applyReviewedProposal,
   dismissProposal,
+  prepareSkipped,
   ProposalError,
   regroupRole,
   retryFailedProposals,
   reviewAgain,
   saveDecisions,
+  skipProposal,
 } from "@/lib/career/review";
 import { EditError } from "@/lib/career/edit";
 import { EditOpSchema } from "@/lib/career/edit-schema";
 import { editRecord, RecordConflict, restoreRecordVersion } from "@/lib/career/service";
-import { kickWorker } from "@/lib/queue/worker";
+import { kickWorker, stopCareerProposal } from "@/lib/queue/worker";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; stale?: boolean };
 
@@ -83,6 +85,26 @@ export async function applyProposalAction(proposalId: string, decisions: unknown
 export async function dismissProposalAction(proposalId: string) {
   return run(async () => {
     await dismissProposal(Id.parse(proposalId));
+    kickWorker();
+    return {};
+  });
+}
+
+/** Sets a source aside unreviewed (stopping it if it is being prepared) and moves on to the next one. */
+export async function skipProposalAction(proposalId: string) {
+  return run(async () => {
+    const id = Id.parse(proposalId);
+    const { label } = await skipProposal(id);
+    stopCareerProposal(id);
+    kickWorker();
+    return { label };
+  });
+}
+
+/** Queues a skipped source to be prepared for review. */
+export async function prepareSkippedAction(proposalId: string) {
+  return run(async () => {
+    await prepareSkipped(Id.parse(proposalId));
     kickWorker();
     return {};
   });

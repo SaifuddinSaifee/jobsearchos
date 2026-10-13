@@ -60,7 +60,7 @@ export const profileIsEmpty = (p: Profile) =>
 /**
  * Registers a source (once per document version, profile version or content) and queues a proposal for it. A source
  * whose content is already in the record, or that the user chose to leave out, is skipped; a proposal that is
- * already open is left alone; one that failed is queued again; one that was undone or superseded starts a new one.
+ * already open, or that the user set aside to review later, is left alone; one that failed is queued again; one that was undone or superseded starts a new one.
  */
 export async function enqueueSource(source: NewSource, priority: number, db: DbOrTx, existingSourceId?: string): Promise<EnqueueOutcome> {
   const [done] = await db
@@ -105,7 +105,7 @@ export async function enqueueSource(source: NewSource, priority: number, db: DbO
     .where(eq(careerProposals.sourceId, row.id))
     .orderBy(desc(careerProposals.createdAt))
     .limit(1);
-  if (latest && ["queued", "running", "ready"].includes(latest.status)) {
+  if (latest && ["queued", "running", "ready", "skipped"].includes(latest.status)) {
     return { status: "open", proposalId: latest.id, sourceId: row.id };
   }
   if (latest?.status === "failed") {
@@ -135,7 +135,7 @@ export async function enqueueDocumentSource(documentId: string, db: DbOrTx = def
   await db.execute(sql`
     UPDATE career_proposals
        SET status = 'superseded', finished_at = now(), updated_at = now()
-     WHERE status IN ('queued', 'running', 'ready')
+     WHERE status IN ('queued', 'running', 'ready', 'skipped')
        AND source_id IN (SELECT id FROM career_sources WHERE document_id = ${documentId} AND document_version_id IS DISTINCT FROM ${version.id})`);
   return enqueueSource(
     {
@@ -260,6 +260,24 @@ export async function sweepStaleProposals(db: DbOrTx = defaultDb()): Promise<num
            finished_at = CASE WHEN attempts >= ${PROPOSAL_MAX_ATTEMPTS} THEN now() ELSE NULL END,
            updated_at = now()
      WHERE status = 'running' AND updated_at < now() - make_interval(secs => ${PROPOSAL_STALE_SECONDS})
+ RETURNING id`);
+  return rows.length;
+}
+
+/**
+ * Puts back every proposal left running when the server stopped, as soon as it starts again, instead of showing it
+ * as in progress until the sweeper's timeout. Only safe at startup, before this process has claimed anything: it
+ * assumes no other server is preparing proposals against the same database.
+ */
+export async function recoverInterruptedProposals(db: DbOrTx = defaultDb()): Promise<number> {
+  const rows = await db.execute<{ id: string }>(sql`
+    UPDATE career_proposals
+       SET status = CASE WHEN attempts >= ${PROPOSAL_MAX_ATTEMPTS} THEN 'failed' ELSE 'queued' END,
+           error = CASE WHEN attempts >= ${PROPOSAL_MAX_ATTEMPTS} THEN 'The server stopped while this was running, too many times in a row.' ELSE NULL END,
+           started_at = NULL,
+           finished_at = CASE WHEN attempts >= ${PROPOSAL_MAX_ATTEMPTS} THEN now() ELSE NULL END,
+           updated_at = now()
+     WHERE status = 'running'
  RETURNING id`);
   return rows.length;
 }

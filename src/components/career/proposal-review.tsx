@@ -22,6 +22,7 @@ import type { OpenReview } from "@/lib/career/review";
 import { EmployerCard } from "./review-employer";
 import { ParagraphGroup } from "./review-paragraphs";
 import { SimpleGroup } from "./review-simple";
+import { SkipButton } from "./skip-button";
 
 const KIND_LABEL = { resume: "Resume", cover_letter: "Cover letter", profile: "Profile", linkedin: "LinkedIn" } as const;
 
@@ -148,6 +149,7 @@ export function ProposalReview({
           {review.note && <p className="text-xs text-muted-foreground">{review.note}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
+          <SkipButton proposalId={review.proposalId} ready size="default" />
           <Button variant="outline" onClick={skip} loading={skipping} disabled={saving}>
             <SkipForward aria-hidden />
             Leave this source out

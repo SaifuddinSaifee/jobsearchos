@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
-import { careerProposals, careerSources } from "@/lib/db/schema";
+import { careerProposals, careerRecordVersions, careerSources } from "@/lib/db/schema";
 import type { DbOrTx } from "@/lib/documents/service";
 import { newId, type IdGen } from "@/lib/documents/build";
 import { applyProposal, checkRefs, resolveDecisions, type ApplySummary } from "./apply";
@@ -10,7 +10,7 @@ import { getProposalRow, getSourceRow, getSourceText } from "./queue";
 import { groupRoleBullets } from "./regroup";
 import { DecisionsSchema, ProposalSchema, RoleSuggestionSchema, type Decisions, type Proposal, type RoleSuggestion } from "./proposal-schema";
 import { RecordConflict, currentRecord, saveRecordVersion } from "./service";
-import type { ProposalStatus, SourceKind } from "./schema";
+import { PROPOSAL_STATUSES, type ProposalStatus, type SourceKind } from "./schema";
 
 export class ProposalError extends Error {
   constructor(
@@ -90,6 +90,32 @@ export async function dismissProposal(proposalId: string, db: DbOrTx = defaultDb
     .where(and(eq(careerProposals.id, proposalId), inArray(careerProposals.status, ["ready", "queued", "failed"])))
     .returning({ id: careerProposals.id });
   if (rows.length === 0) throw new ProposalError("This source can no longer be left out.");
+}
+
+/**
+ * Sets a source aside without reviewing it, so the next one is prepared: one being prepared is stopped (the worker
+ * is told separately), and one waiting for review gives up its slot. It stays unreviewed, with the user's choices
+ * kept, until they ask for it to be prepared again.
+ */
+export async function skipProposal(proposalId: string, db: DbOrTx = defaultDb()): Promise<{ label: string }> {
+  const rows = await db
+    .update(careerProposals)
+    .set({ status: "skipped", proposal: null, baseVersion: null, error: null, note: null, finishedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(careerProposals.id, proposalId), inArray(careerProposals.status, ["queued", "running", "ready"])))
+    .returning({ sourceId: careerProposals.sourceId });
+  if (rows.length === 0) throw new ProposalError("This source is no longer being prepared.");
+  const source = await getSourceRow(rows[0].sourceId, db);
+  return { label: source?.label ?? "This source" };
+}
+
+/** Queues a skipped source again, in its usual place in the order. */
+export async function prepareSkipped(proposalId: string, db: DbOrTx = defaultDb()): Promise<void> {
+  const rows = await db
+    .update(careerProposals)
+    .set({ status: "queued", attempts: 0, startedAt: null, finishedAt: null, updatedAt: new Date() })
+    .where(and(eq(careerProposals.id, proposalId), eq(careerProposals.status, "skipped")))
+    .returning({ id: careerProposals.id });
+  if (rows.length === 0) throw new ProposalError("This source was not skipped.");
 }
 
 /** Tries a failed proposal again. */
@@ -237,13 +263,13 @@ export type CareerStatus = {
   failed: FailedSource[];
   /** Merges that were undone by a restore and can be reviewed again. */
   undone: { id: string; label: string }[];
+  /** Sources the user set aside before reviewing them. */
+  skipped: { id: string; label: string }[];
   recordVersion: number;
 };
 
 export async function getCareerStatus(db: DbOrTx = defaultDb()): Promise<CareerStatus> {
-  const counts = Object.fromEntries(
-    (["queued", "running", "ready", "applied", "dismissed", "superseded", "failed", "undone"] as const).map((s) => [s, 0]),
-  ) as Record<ProposalStatus, number>;
+  const counts = Object.fromEntries(PROPOSAL_STATUSES.map((s) => [s, 0])) as Record<ProposalStatus, number>;
   const grouped = await db
     .select({ status: careerProposals.status, n: sql<number>`count(*)::int` })
     .from(careerProposals)
@@ -261,13 +287,19 @@ export async function getCareerStatus(db: DbOrTx = defaultDb()): Promise<CareerS
   const [open] = await withSource(["running", "ready"]);
   const failed = await withSource(["failed"]);
   const undone = await withSource(["undone"]);
-  const latest = await currentRecord(db);
+  const skipped = await withSource(["skipped"]);
+  // Only the number: this is polled from every page (the sidebar), so the record itself is not loaded.
+  const [latest] = await db
+    .select({ version: careerRecordVersions.version })
+    .from(careerRecordVersions)
+    .orderBy(desc(careerRecordVersions.version))
+    .limit(1);
 
   const done = counts.applied + counts.dismissed;
   return {
     counts,
     done,
-    total: done + counts.queued + counts.running + counts.ready + counts.failed,
+    total: done + counts.queued + counts.running + counts.ready + counts.failed + counts.skipped,
     current: open ? { id: open.proposal.id, status: open.proposal.status, label: open.source.label, kind: open.source.kind } : null,
     failed: failed.map((f) => ({
       id: f.proposal.id,
@@ -278,7 +310,8 @@ export async function getCareerStatus(db: DbOrTx = defaultDb()): Promise<CareerS
       failedAt: (f.proposal.finishedAt ?? f.proposal.updatedAt).toISOString(),
     })),
     undone: undone.map((u) => ({ id: u.proposal.id, label: u.source.label })),
-    recordVersion: latest.version,
+    skipped: skipped.map((u) => ({ id: u.proposal.id, label: u.source.label })),
+    recordVersion: latest?.version ?? 0,
   };
 }
 
