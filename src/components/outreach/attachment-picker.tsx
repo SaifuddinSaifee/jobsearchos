@@ -9,7 +9,7 @@ import { IndexBadge } from "@/components/resume/index-badge";
 import { RESUME_INDEXES_KEY } from "@/components/resume/use-resume-indexes";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
-import { BIG_ATTACHMENT_BYTES, formatBytes, type AttachmentDTO, type ResumeOption } from "@/lib/outreach/types";
+import { BIG_ATTACHMENT_BYTES, formatBytes, type DraftAttachmentDTO, type ResumeOption } from "@/lib/outreach/types";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Record<ResumeOption["kind"], string> = { base: "Default", job: "For this job", past: "Library" };
@@ -27,9 +27,9 @@ export function AttachmentPicker({
 }: {
   jobId: string;
   resumes: ResumeOption[];
-  /** The attached file, or null for none. */
-  selected: AttachmentDTO | null;
-  onSelect: (fileId: string | null) => void;
+  /** The attached resume, or null for none. */
+  selected: DraftAttachmentDTO | null;
+  onSelect: (documentId: string | null) => void;
   onUploaded: (resume: ResumeOption) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -60,15 +60,17 @@ export function AttachmentPicker({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         {selected ? (
-          <span key={selected.fileId} className="inline-flex min-w-0 items-center gap-2 rounded-lg border bg-muted/40 py-1 pr-1 pl-2 animate-in fade-in duration-200 motion-reduce:animate-none">
+          <span key={selected.documentId} className="inline-flex min-w-0 items-center gap-2 rounded-lg border bg-muted/40 py-1 pr-1 pl-2 animate-in fade-in duration-200 motion-reduce:animate-none">
             <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <span className="truncate font-medium">{selected.name}</span>
-            <span className={cn("shrink-0 text-xs text-muted-foreground", selected.size > BIG_ATTACHMENT_BYTES && "font-medium text-amber-700 dark:text-amber-400")}>{formatBytes(selected.size)}</span>
+            <span className={cn("shrink-0 text-xs text-muted-foreground", selected.size !== null && selected.size > BIG_ATTACHMENT_BYTES && "font-medium text-amber-700 dark:text-amber-400")}>
+              {selected.size !== null ? formatBytes(selected.size) : "PDF made when sent"}
+            </span>
             <a
-              href={`/api/files/${selected.fileId}`}
+              href={selected.fileId ? `/api/files/${selected.fileId}` : `/library/${selected.documentId}`}
               target="_blank"
               rel="noreferrer"
-              aria-label={`Open ${selected.name}`}
+              aria-label={selected.fileId ? `Open ${selected.name}` : `Open ${selected.label} in your library`}
               className="inline-flex size-6 items-center justify-center rounded text-muted-foreground outline-none transition-[background-color,color,scale] hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.92]"
             >
               <ExternalLink className="size-3.5" aria-hidden />
@@ -89,15 +91,15 @@ export function AttachmentPicker({
         <div className="space-y-3 pt-1 pb-2">
           <div role="radiogroup" aria-label="Resume to attach" className="max-h-56 divide-y overflow-y-auto rounded-lg border">
             {resumes.map((r) => {
-              const on = selected?.fileId === r.fileId;
+              const on = selected?.documentId === r.documentId;
               return (
                 <button
-                  key={r.fileId}
+                  key={r.documentId}
                   type="button"
                   role="radio"
                   aria-checked={on}
                   onClick={() => {
-                    onSelect(r.fileId);
+                    onSelect(r.documentId);
                     setOpen(false);
                   }}
                   className={cn(
@@ -111,12 +113,12 @@ export function AttachmentPicker({
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-x-2">
                       <span className="truncate font-medium">{r.name}</span>
-                      <span className="text-xs text-muted-foreground">{formatBytes(r.size)}</span>
+                      <span className="text-xs text-muted-foreground">{r.size !== null ? formatBytes(r.size) : "PDF made when sent"}</span>
                       <span className="rounded-full bg-muted px-1.5 text-[11px] text-muted-foreground">{KIND_LABEL[r.kind]}</span>
                     </span>
                     <span className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
                       <span className="truncate">{r.label}</span>
-                      <IndexBadge fileId={r.fileId} />
+                      <IndexBadge documentId={r.documentId} />
                     </span>
                   </span>
                 </button>

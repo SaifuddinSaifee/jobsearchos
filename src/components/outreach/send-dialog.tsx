@@ -1,10 +1,10 @@
 "use client";
 
-import { AlertTriangle, FileText, Send } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { SendWarning } from "@/lib/outreach/checks";
-import { formatBytes, type AttachmentDTO, type ContactDTO } from "@/lib/outreach/types";
+import { formatBytes, type ContactDTO, type DraftAttachmentDTO } from "@/lib/outreach/types";
 import { EmailStatusBadge } from "./badges";
 
 /** The last look before an email goes out: exactly who gets what, from which address, and anything worth a second thought. */
@@ -15,6 +15,7 @@ export function SendDialog({
   subject,
   body,
   attachment,
+  preparing,
   warnings,
   sentToday,
   dailyCap,
@@ -28,7 +29,9 @@ export function SendDialog({
   from: string;
   subject: string;
   body: string;
-  attachment: AttachmentDTO | null;
+  attachment: DraftAttachmentDTO | null;
+  /** The PDF is being made. */
+  preparing: boolean;
   warnings: SendWarning[];
   sentToday: number;
   dailyCap: number;
@@ -58,12 +61,20 @@ export function SendDialog({
           <dd className="font-medium">{subject}</dd>
           <dt className="text-muted-foreground">Attached</dt>
           <dd className="flex min-w-0 items-center gap-2">
-            {attachment ? (
-              <>
+            {preparing ? (
+              <span className="inline-flex items-center gap-2 text-muted-foreground" aria-live="polite">
+                <Loader2 className="size-4 animate-spin" aria-hidden /> Getting the resume ready...
+              </span>
+            ) : attachment ? (
+              <span className="flex min-w-0 items-center gap-2 animate-in fade-in duration-200 motion-reduce:animate-none">
                 <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="truncate font-medium">{attachment.name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(attachment.size)}</span>
-              </>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {[attachment.source === "pdf" && attachment.size !== null ? "made from your resume" : null, formatBytes(attachment.size), attachment.pages ? `${attachment.pages} ${attachment.pages === 1 ? "page" : "pages"}` : null]
+                    .filter(Boolean)
+                    .join(", ")}
+                </span>
+              </span>
             ) : (
               <span className="text-muted-foreground">Nothing attached</span>
             )}
@@ -97,7 +108,7 @@ export function SendDialog({
             <Button variant="outline" onClick={onClose} disabled={busy}>
               Back to editing
             </Button>
-            <Button onClick={onConfirm} loading={busy}>
+            <Button onClick={onConfirm} loading={busy} disabled={preparing}>
               <Send /> {warnings.length > 0 ? "Send anyway" : "Send email"}
             </Button>
           </div>

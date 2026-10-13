@@ -1,13 +1,9 @@
 "use server";
 
-import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
-import { db } from "@/lib/db";
-import { pastResumes } from "@/lib/db/schema";
+import { syncBaseFromProfile, type ImportedSource } from "@/lib/documents/base";
+import { ProfileSchema } from "@/lib/profile/schema";
 import { restoreVersion, saveVersion } from "@/lib/profile/service";
-import { kickWorker } from "@/lib/queue/worker";
-import { enqueueResumeIndex } from "@/lib/resume/indexing";
 
 export type ActionResult = { ok: true; version: number } | { ok: false; error: string };
 
@@ -15,34 +11,29 @@ async function run(fn: () => Promise<{ version: number }>): Promise<ActionResult
   try {
     const row = await fn();
     revalidatePath("/profile");
+    revalidatePath("/library");
     return { ok: true, version: row.version };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Save failed" };
   }
 }
 
+/**
+ * Saves the profile as a new version. `imported` is set when it came from importing a resume file: that makes a
+ * new base resume in the library from the reviewed profile. Editing a profile that was already saved leaves the base
+ * resume document alone (open it in the library to change it).
+ */
 export async function saveProfileAction(
   profile: unknown,
-  baseResumeFileId?: string | null,
+  imported?: ImportedSource | null,
   changeNote?: string,
 ) {
   return run(async () => {
-    const row = await saveVersion({ profile, baseResumeFileId, changeNote: changeNote ?? "Profile updated" });
-    // The base resume is searchable material too. A failed queue attempt must not fail the save.
-    if (row.baseResumeFileId) await enqueueResumeIndex(row.baseResumeFileId).then(() => kickWorker()).catch(() => {});
+    const row = await saveVersion({ profile, changeNote: changeNote ?? "Profile updated" });
+    // A failed library step must not undo a profile that was saved.
+    await syncBaseFromProfile(ProfileSchema.parse(profile), imported).catch((err) => console.error("[profile] base resume sync failed:", err));
     return row;
   });
-}
-
-/** Starts (or retries) the search index for one resume file. */
-export async function indexResumeAction(fileId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    await enqueueResumeIndex(z.uuid().parse(fileId));
-    kickWorker();
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Could not start indexing" };
-  }
 }
 
 export async function savePreferencesAction(preferences: unknown) {
@@ -57,9 +48,4 @@ export async function saveInstructionsAction(generationInstructions: unknown) {
 
 export async function restoreVersionAction(id: string) {
   return run(() => restoreVersion(id));
-}
-
-export async function deletePastResumeAction(id: string) {
-  await db().delete(pastResumes).where(eq(pastResumes.id, id));
-  revalidatePath("/profile");
 }

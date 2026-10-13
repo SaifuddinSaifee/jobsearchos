@@ -1,15 +1,16 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { enqueueSearch } from "@/lib/outreach/searches";
 import { kickWorker } from "@/lib/queue/worker";
-import { ensureResumeIndex } from "@/lib/resume/indexing";
 import type { SendWarning } from "@/lib/outreach/checks";
 import {
   addContact,
   markVerified,
   revealContactEmail,
   OutreachError,
+  prepareAttachment,
   removeContact,
   reuseAsDraft,
   saveDraft,
@@ -92,19 +93,32 @@ const optionalId = (v: string | null | undefined) => (v === undefined || v === n
 
 export async function saveDraftAction(
   jobId: string,
-  input: { subject: string; body: string; contactId?: string | null; attachmentFileId?: string | null },
+  input: { subject: string; body: string; contactId?: string | null; attachmentDocumentId?: string | null },
 ) {
   return run(async (): Promise<{ draft: DraftDTO }> => {
-    const draft = await saveDraft(Id.parse(jobId), { ...input, contactId: optionalId(input.contactId), attachmentFileId: optionalId(input.attachmentFileId) });
-    // Whatever gets attached is also kept in the resume library, so make sure it is being indexed.
-    if (draft.attachment && (await ensureResumeIndex(draft.attachment.fileId).catch(() => false))) kickWorker();
+    const draft = await saveDraft(Id.parse(jobId), { ...input, contactId: optionalId(input.contactId), attachmentDocumentId: optionalId(input.attachmentDocumentId) });
     return { draft };
+  });
+}
+
+/**
+ * Gets the attachment ready (the original file, or a PDF made from the resume as it is now) so the confirmation can
+ * show its real name, size and page count. Sending prepares it again, so this is only for showing.
+ */
+export async function prepareSendAction(jobId: string) {
+  return run(async () => {
+    const prepared = await prepareAttachment(Id.parse(jobId));
+    if (prepared?.versionCreated) kickWorker();
+    return { prepared };
   });
 }
 
 export async function sendAction(jobId: string, acknowledge: string[]) {
   return run(async (): Promise<{ sentEmail: SentDTO } & Snapshot> => {
     const sentEmail = await sendDraft(Id.parse(jobId), { acknowledge: z.array(z.string()).max(10).parse(acknowledge) });
+    // The email is now in the library, and its resume version may be new.
+    revalidatePath("/library");
+    kickWorker();
     return { sentEmail, ...(await snapshot(jobId)) };
   });
 }

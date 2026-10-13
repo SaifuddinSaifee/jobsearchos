@@ -5,7 +5,7 @@ code, no schema. For how each piece is built, follow the links to the stage docs
 
 Keep this file current. When a feature ships, move it from "Roadmap" to "What it does today" and add its user stories.
 
-Last updated: 2026-10-12 (branch `stage-emails`).
+Last updated: 2026-10-13 (branch `stage-4a`).
 
 ---
 
@@ -89,7 +89,7 @@ Nothing is ever submitted or sent without an explicit click from you.
 
 ## 5. What it does today
 
-The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Discover, Profile, Settings.**
+The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Library, Discover, Profile, Settings.**
 
 ### Profile
 
@@ -99,7 +99,8 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Dis
   preferred technologies, excluded roles and companies.
 - **Generation instructions:** your style rules, tone and per-section length limits, ready for when the app writes for
   you.
-- **Past resumes:** import older resumes so the app can learn from them later.
+- **Base resume:** importing a resume file here also makes your base resume in the Library, from the profile you reviewed.
+  Past resumes now live in the Library.
 - **Version history:** every save is kept; you can look back and restore an older version.
 
 ### Adding jobs (New Application)
@@ -158,11 +159,62 @@ Opened from a job's side panel ("Email a contact").
 - Add or edit people by hand. Mark someone **Do not contact**.
 - **Write the email:** an editor laid out like a real message, with Write/Preview, a word count and live advice
   (length, template phrases, too many links, long subject). The draft saves itself.
-- **Attach a resume:** your base resume by default, or any resume from your library, or upload a new one for this job.
+- **Attach a resume:** your base resume by default, or any resume in your Library, or upload a new one for this job (it
+  is filed in the Library under the job). An uploaded resume nobody has edited goes out as that exact file, so your own
+  formatting is untouched. Anything else goes out as a PDF made from the resume at the moment you send. The confirmation
+  shows the real file name, size and page count.
 - **Send from your Gmail** after a confirmation showing exactly who gets what. Sending is blocked by hard problems
   (no address, a Do not contact person, an unfilled placeholder, the daily limit) and warns on softer ones (an
   unverified address, a repeat email, outside your usual sending hours).
-- **Sent history** per job, with the exact resume that went out, and "Use as a new draft" to adapt one.
+- **Sent history** per job, with the exact resume that went out (and a link to that version in the Library), and "Use as
+  a new draft" to adapt one.
+
+### Library
+
+Resumes, cover letters and emails, kept as text you can read and search, not as files.
+
+- Three tabs: **Resumes, Cover letters, Emails**. Each document shows what it is for (job and company), its date, where it
+  came from, how many versions it has, and (for resumes) whether it is indexed for search.
+- **Add** a document three ways: upload a PDF or DOCX, paste text, or start blank (a resume can start as a copy of your base
+  resume). Link it to a job, and add the role, date and the job description it was written for.
+- An uploaded resume is read into headings, bullets and sections, then the AI structures it in the background (roles with
+  title, company and dates) and saves that as a new version. Text the AI has no place for (Publications, Languages) is kept.
+  If you edit it before that finishes, your version is left alone. Uploading the same file twice is caught.
+- A **document page** is where you read and write it (see Editor, below), with its version history (view any version,
+  restore one as a new version), its details (editable) and **Copy Markdown**.
+- **Export** any document as **PDF, Word (DOCX), Markdown or plain text** (emails: Markdown or text). Files are named
+  "Name - Company - Role". A PDF or Word export is first saved as a version, so you can always find exactly what you sent.
+- **Base resume:** the one marked Base is attached to emails by default. Make any resume the base from its menu.
+- **Emails you send** appear in the Emails tab on their own, locked, so they cannot be changed or deleted afterwards.
+- Anything sent or used in an application is **locked**: marking a job **Applied** locks the resume and cover letter
+  written for it (unsaved edits are saved as a version first), and a sent email locks the resume version it carried.
+  Locking is never undone, not even by undoing the status. You can still edit; the edit becomes a new version.
+  Deleting hides a document from the library and search, and is refused for anything locked.
+- Your earlier past resumes, base resume and sent emails were moved into the Library automatically.
+- Uploads are read into text and the file is not kept. A file is stored only when it leaves the app as an email attachment.
+
+### Editor
+
+Open any document and write on it, like Notion on a real sheet of A4.
+
+- **Type anywhere.** Enter moves through a role (title, dates, company, location) and into its bullets; Enter on an empty
+  last bullet starts the next role; Tab indents a bullet (two levels) and moves between fields. Backspace never merges or
+  deletes text by accident. `- ` starts a bullet list and `## ` starts a section.
+- **Slash menu:** type `/` on an empty line to add a role, project, education entry, skills line, bullet list, text, a new
+  section or a divider. It is narrowed as you type, and it does not open for a slash in the middle of a sentence ("AI/ML").
+- **Selection toolbar** over selected text: bold, italic, underline, link. Ctrl or Cmd with B, I, U also work.
+- **Handle in the margin** beside whatever you point at (a bullet, a role, a whole section): drag it to reorder, click it
+  for Duplicate, Move up, Move down, Delete, or press the plus to add below.
+- **Outline** (toolbar): the sections and entries, to jump around by.
+- **Saves as you type**, and a checkpoint is made when you choose **Save version**, export, attach to an email or apply.
+  If the same document is changed in another tab, it tells you instead of overwriting it. Ctrl or Cmd with S saves now.
+- **Page settings:** font (Calibri, Arial or Times style), spacing, **margins (Narrow half inch by default, Normal, Wide)**,
+  accent colour, and fine tuning in exact numbers.
+- **Keep to one page** is a switch (on by default). On: a line shows where page one ends, the toolbar says "Fits on one
+  page" or how many lines it runs over, and the spacing tightens as you write so it stays on one page. Your words are never
+  cut, and if it still cannot fit it says which sections are longest. Off: no limit, no warnings.
+- Editing is for screens at least tablet wide; on a phone you can read and export.
+- Not built yet: dragging in the outline, turning a block into another kind, a zoom control.
 
 ### Quick links
 
@@ -175,11 +227,11 @@ Opened from a job's side panel ("Email a contact").
 - **Email:** connect Gmail, set sending rules (daily limit, days and hours), writing defaults and extra banned phrases,
   turn the automatic email lookup on or off, and check the contact-finder keys.
 
-### Behind the scenes (in progress on this branch)
+### Behind the scenes
 
-- Every resume that enters the app (base, uploaded for a job, past) is indexed for search in the background, so future
-  writing can reuse your real wording for similar jobs. Nothing uses this yet from a user's point of view, except the
-  index status shown on the Profile page and the attach panel.
+- Every library resume is indexed for search in the background (split into sections, one search vector each), so future
+  writing can reuse your real wording for similar jobs. Nothing uses this yet from a user's point of view, except the index
+  status shown in the Library, on the Profile page and in the attach panel.
 
 ## 6. User stories (built)
 
@@ -224,6 +276,13 @@ Opened from a job's side panel ("Email a contact").
 - I can send from my own Gmail, only after seeing exactly what will go out.
 - I can see every email sent for a job, with the resume that went with it.
 
+**Library**
+
+- I can keep every resume, cover letter and email as readable text, and find them again by job and date.
+- I can upload a resume and get it split into roles and bullets without retyping it.
+- I can see older versions of a document and bring one back.
+- I can tell which documents went out, because they are locked.
+
 **Utilities**
 
 - I can keep my job-search bookmarks in one place and see which I have checked today.
@@ -238,6 +297,7 @@ Opened from a job's side panel ("Email a contact").
 | 2 | New Application: link or text to structured job, background queue | Done |
 | 3 | Jobs tracker and dashboard | Done |
 | 3b | Company directory and research | Done |
+| 4a | Library, editor and export, career record, fit score | **Library, editor and export done** (on `stage-4a`); career record and fit score not started |
 | 4 | Writing: resume, cover letter, cold email | **Not started** |
 | 5 | Learning from past resumes | **Started**: resume indexing built, not yet used for writing |
 | 6 | Match score and gap analysis | Not started |
@@ -252,6 +312,19 @@ Opened from a job's side panel ("Email a contact").
 Stages were not built in number order: outreach (7) came before writing (4) because sending was the immediate need.
 
 ## 8. Roadmap: what comes next
+
+### Stage 4a: Career library, editor, career record, fit score (library built, rest next)
+
+Groundwork for writing. Plan and build notes: [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md). The **Library**, **editor**
+and **export** (first and last bullets) are built; the career record and fit score are next, in that order.
+
+- **Library (built):** every resume, cover letter and email stored as text, versioned, editable in the editor, exportable.
+- **Career record:** one "mega resume" of every employer, role, fact and wording across all your resumes, including
+  the same job framed differently (PM in one resume, engineer in another). Merges are proposed and reviewed, never silent.
+- **Fit score:** how well a resume matches a job and its company, with missing keywords split into "you have it, this
+  resume does not show it" and "real gap".
+- **Editor (built):** a Notion-like editor on a real A4 page, with one-page PDF, Word, Markdown and text export from the
+  same layout.
 
 ### Stage 4: Writing (the biggest gap)
 
@@ -359,7 +432,8 @@ In order:
 | [STAGE-2-PLAN.md](STAGE-2-PLAN.md), [STAGE-2B-QUEUE.md](STAGE-2B-QUEUE.md) | Adding jobs and the background queue |
 | [STAGE-3-PLAN.md](STAGE-3-PLAN.md), [STAGE-3B-COMPANIES.md](STAGE-3B-COMPANIES.md) | Jobs tracker, companies |
 | [STAGE-7A-EMAIL-SETTINGS.md](STAGE-7A-EMAIL-SETTINGS.md), [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md) | Gmail, outreach |
-| [RESUME-LIBRARY.md](RESUME-LIBRARY.md) | Resumes page and master resume (planned) |
+| [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md) | Library, editor and export (built), career record, fit score (planned) |
+| [RESUME-LIBRARY.md](RESUME-LIBRARY.md) | Earlier note on the Resumes page and master resume (replaced by Stage 4a) |
 | [cold-email.md](cold-email.md) | How cold emails should be written and sent |
 | [ai-models-for-jso.md](ai-models-for-jso.md) | Choice of AI models |
 | [prospeo.md](prospeo.md) | Prospeo API reference |

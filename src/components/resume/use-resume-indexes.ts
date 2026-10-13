@@ -11,13 +11,13 @@ async function fetchIndexes(): Promise<IndexInfo[]> {
   return (await res.json()).indexes;
 }
 
-/** Where every resume is in the search-index pipeline. Polls quickly while one is working and not at all otherwise. */
+/** Where every library resume is in the search-index pipeline, by document id. Polls quickly while one is working and not at all otherwise. */
 export function useResumeIndexes() {
   const q = useQuery({
     queryKey: RESUME_INDEXES_KEY,
     queryFn: fetchIndexes,
     refetchInterval: (query) => (query.state.data?.some((i) => isIndexActive(i.status)) ? 2000 : false),
   });
-  const byId = new Map((q.data ?? []).map((i) => [i.fileId, i]));
-  return { byId, isSuccess: q.isSuccess };
+  const byDocument = new Map((q.data ?? []).map((i) => [i.documentId, i]));
+  return { byDocument, isSuccess: q.isSuccess };
 }

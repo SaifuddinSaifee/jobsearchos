@@ -54,16 +54,40 @@ export type ContactDTO = {
 
 export type OutreachStatus = "draft" | "sending" | "sent" | "failed";
 
-/** A file attached to an email. Files never change once stored, so this is exactly what was (or will be) sent. */
+/** A file that was attached to a sent email. Files never change once stored, so this is exactly what was sent. */
 export type AttachmentDTO = { fileId: string; name: string; size: number; mime: string };
 
-/** A resume that can be attached: the base resume, one uploaded for this job, or one from the library. */
-export type ResumeOption = AttachmentDTO & { kind: "base" | "job" | "past"; label: string };
+/**
+ * A library resume that can go with an email. `source` says what actually gets attached: the original file of an
+ * upload nobody has edited since ("file"), or a PDF made from the resume's text when the email is sent ("pdf").
+ * `size` and `fileId` are only known once the file exists (always for "file", after preparing for "pdf").
+ */
+export type ResumeOption = {
+  documentId: string;
+  /** Why it is offered: the base resume, written for this job, or elsewhere in the library. */
+  kind: "base" | "job" | "past";
+  label: string;
+  source: "file" | "pdf";
+  /** The name the attachment goes out with (a good guess until the PDF is made). */
+  name: string;
+  size: number | null;
+  mime: string;
+  fileId: string | null;
+  /** Pages in the PDF, once it has been made. */
+  pages?: number | null;
+};
+
+/** The attachment chosen for a draft is one of the options. */
+export type DraftAttachmentDTO = ResumeOption;
+
+/** An attached file as sent, with the library version it was made from. */
+export type SentAttachmentDTO = AttachmentDTO & { documentId: string | null; versionId: string | null; version: number | null };
 
 /** Above this a resume is probably an unoptimised export, and big attachments are more likely to be filtered. */
 export const BIG_ATTACHMENT_BYTES = 1024 * 1024;
 
-export function formatBytes(n: number): string {
+export function formatBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "";
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -74,7 +98,7 @@ export type DraftDTO = {
   contactId: string | null;
   subject: string;
   body: string;
-  attachment: AttachmentDTO | null;
+  attachment: DraftAttachmentDTO | null;
   updatedAt: string;
 };
 
@@ -86,7 +110,7 @@ export type SentDTO = {
   subject: string;
   body: string;
   threadId: string | null;
-  attachment: AttachmentDTO | null;
+  attachment: SentAttachmentDTO | null;
   sentAt: string;
 };
 

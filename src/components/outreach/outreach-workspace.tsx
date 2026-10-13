@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useStatusTransitions } from "@/components/queue/use-queue";
-import { refreshAction, reuseAction, saveDraftAction, sendAction, startSearchAction } from "@/app/(app)/jobs/[id]/outreach/actions";
+import { prepareSendAction, refreshAction, reuseAction, saveDraftAction, sendAction, startSearchAction } from "@/app/(app)/jobs/[id]/outreach/actions";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { sendWarnings } from "@/lib/outreach/checks";
@@ -18,7 +18,7 @@ import { ContactsPanel } from "./contacts-panel";
 import { SEARCHES_KEY, useSearches } from "./use-searches";
 import { SendDialog } from "./send-dialog";
 import { SentHistory } from "./sent-history";
-import type { AttachmentDTO, ContactDTO, ResumeOption, SearchItem, SentDTO } from "@/lib/outreach/types";
+import type { ContactDTO, DraftAttachmentDTO, ResumeOption, SearchItem, SentDTO } from "@/lib/outreach/types";
 
 type JobHead = { id: string; title: string; company: string; location: string; postingUrl: string | null; status: ApplicationStatus };
 
@@ -41,25 +41,31 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
   const [reuseId, setReuseId] = useState<string | null>(null);
   const [resumes, setResumes] = useState<ResumeOption[]>(initial.resumes);
   // A saved draft keeps what it had (including "nothing"); a new one starts with the base resume attached.
-  const [attachmentId, setAttachmentId] = useState<string | null>(initial.draft ? (initial.draft.attachment?.fileId ?? null) : initial.defaultAttachmentId);
-  const [draftAttachment, setDraftAttachment] = useState<AttachmentDTO | null>(initial.draft?.attachment ?? null);
+  const [attachmentId, setAttachmentId] = useState<string | null>(initial.draft ? (initial.draft.attachment?.documentId ?? null) : initial.defaultAttachmentId);
+  const [draftAttachment, setDraftAttachment] = useState<DraftAttachmentDTO | null>(initial.draft?.attachment ?? null);
+  // The attachment as it will really go out, made when the send dialog opens (a PDF has no size until it exists).
+  const [prepared, setPrepared] = useState<DraftAttachmentDTO | null>(null);
+  const [preparing, setPreparing] = useState(false);
 
   const { settings, account } = initial;
   const contact = useMemo(() => contacts.find((c) => c.id === selectedId && !c.doNotContact) ?? null, [contacts, selectedId]);
-  const attachment: AttachmentDTO | null = useMemo(
-    () => resumes.find((r) => r.fileId === attachmentId) ?? (draftAttachment?.fileId === attachmentId ? draftAttachment : null),
+  const attachment: DraftAttachmentDTO | null = useMemo(
+    () => resumes.find((r) => r.documentId === attachmentId) ?? (draftAttachment?.documentId === attachmentId ? draftAttachment : null),
     [resumes, attachmentId, draftAttachment],
   );
 
   // ---- autosave: edits are written to the draft shortly after typing stops, one request at a time
-  const latest = useRef({ subject, body, contactId: selectedId, attachmentFileId: attachmentId });
+  const latest = useRef({ subject, body, contactId: selectedId, attachmentDocumentId: attachmentId });
   /** Every edit goes through here so the saver always sees the newest text, even before React re-renders. */
-  const edit = useCallback((patch: Partial<{ subject: string; body: string; contactId: string | null; attachmentFileId: string | null }>) => {
+  const edit = useCallback((patch: Partial<{ subject: string; body: string; contactId: string | null; attachmentDocumentId: string | null }>) => {
     latest.current = { ...latest.current, ...patch };
     if (patch.subject !== undefined) setSubject(patch.subject);
     if (patch.body !== undefined) setBody(patch.body);
     if (patch.contactId !== undefined) setSelectedId(patch.contactId);
-    if (patch.attachmentFileId !== undefined) setAttachmentId(patch.attachmentFileId);
+    if (patch.attachmentDocumentId !== undefined) {
+      setAttachmentId(patch.attachmentDocumentId);
+      setPrepared(null);
+    }
   }, []);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const queue = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -69,8 +75,8 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
     const run = async () => {
       pending.current += 1;
       setSaveState("saving");
-      const { subject, body, contactId, attachmentFileId } = latest.current;
-      const res = await saveDraftAction(job.id, { subject, body, contactId, attachmentFileId });
+      const { subject, body, contactId, attachmentDocumentId } = latest.current;
+      const res = await saveDraftAction(job.id, { subject, body, contactId, attachmentDocumentId });
       pending.current -= 1;
       if (!res.ok) {
         setSaveState("error");
@@ -112,8 +118,8 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
     () => () => {
       if (timer.current) {
         clearTimeout(timer.current);
-        const { subject, body, contactId, attachmentFileId } = latest.current;
-        void saveDraftAction(job.id, { subject, body, contactId, attachmentFileId });
+        const { subject, body, contactId, attachmentDocumentId } = latest.current;
+        void saveDraftAction(job.id, { subject, body, contactId, attachmentDocumentId });
       }
     },
     [job.id],
@@ -138,12 +144,24 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
   function openSend() {
     setSendNow(new Date());
     setSendError(null);
+    setPrepared(null);
     setSendOpen(true);
+    if (!attachmentId) return;
+    // Make the attachment now, so the confirmation shows the file that will really go (and how big and how long it is).
+    setPreparing(true);
+    void (async () => {
+      const saved = await flush();
+      const res = saved ? await prepareSendAction(job.id) : null;
+      setPreparing(false);
+      if (!res) return setSendError("The draft could not be saved, so nothing was sent.");
+      if (!res.ok) return setSendError(res.error);
+      if (res.prepared) setPrepared({ documentId: res.prepared.documentId, kind: attachment?.kind ?? "past", label: attachment?.label ?? res.prepared.name, source: res.prepared.source, name: res.prepared.name, size: res.prepared.size, mime: res.prepared.mime, fileId: res.prepared.fileId, pages: res.prepared.pages });
+    })();
   }
 
   const warnings = useMemo(
-    () => (contact ? sendWarnings({ name: contact.name, emailStatus: contact.emailStatus, sentCount: contact.sentCount, attachmentSize: attachment?.size }, settings, sendNow) : []),
-    [contact, settings, sendNow, attachment],
+    () => (contact ? sendWarnings({ name: contact.name, emailStatus: contact.emailStatus, sentCount: contact.sentCount, attachmentSize: (prepared ?? attachment)?.size }, settings, sendNow) : []),
+    [contact, settings, sendNow, attachment, prepared],
   );
 
   async function confirmSend() {
@@ -158,7 +176,7 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
     setSending(false);
     if (!res.ok) return setSendError(res.error);
     applyLists(res);
-    edit({ subject: "", body: "", contactId: null, attachmentFileId: initial.defaultAttachmentId });
+    edit({ subject: "", body: "", contactId: null, attachmentDocumentId: initial.defaultAttachmentId });
     setSaveState("idle");
     setSendOpen(false);
     setMode("write");
@@ -170,7 +188,7 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
     const res = await reuseAction(job.id, sentId);
     setReuseId(null);
     if (!res.ok) return toast.error(res.error);
-    edit({ subject: res.draft.subject, body: res.draft.body, contactId: null, attachmentFileId: res.draft.attachment?.fileId ?? null });
+    edit({ subject: res.draft.subject, body: res.draft.body, contactId: null, attachmentDocumentId: res.draft.attachment?.documentId ?? null });
     setDraftAttachment(res.draft.attachment);
     setSaveState("saved");
     setMode("write");
@@ -268,13 +286,13 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
           contact={contact}
           resumes={resumes}
           attachment={attachment}
-          onAttachment={(fileId) => {
-            edit({ attachmentFileId: fileId });
+          onAttachment={(documentId) => {
+            edit({ attachmentDocumentId: documentId });
             touch(true);
           }}
           onResumeUploaded={(resume) => {
-            setResumes((old) => [resume, ...old.filter((r) => r.fileId !== resume.fileId)]);
-            edit({ attachmentFileId: resume.fileId });
+            setResumes((old) => [resume, ...old.filter((r) => r.documentId !== resume.documentId)]);
+            edit({ attachmentDocumentId: resume.documentId });
             touch(true);
           }}
           subject={subject}
@@ -308,7 +326,8 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
         from={account?.email ?? ""}
         subject={subject}
         body={body}
-        attachment={attachment}
+        attachment={prepared ?? attachment}
+        preparing={preparing}
         warnings={warnings}
         sentToday={sentToday}
         dailyCap={settings.dailyCap}

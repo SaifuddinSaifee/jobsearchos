@@ -73,7 +73,9 @@ This starts Postgres (with pgvector) in Docker, creates the `jobtracker` and `jo
 npm run browsers:install
 ```
 
-Downloads headless Chromium (~115 MB) for Playwright. It is only used when a career page renders its content with JavaScript; ATS pages (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable) use their public APIs and never need it.
+Downloads headless Chromium (~115 MB) for Playwright. It is used to make **PDF exports** of your resumes (including the PDF attached to an email) and when a career page renders its content with JavaScript; ATS pages (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable) use their public APIs and never need it. Word, Markdown and text exports do not need it.
+
+The resume fonts (Carlito, Arimo, Tinos, SIL Open Font License) are bundled in `public/fonts`, so the editor and the PDF use identical fonts.
 
 ### 6. Run the app
 

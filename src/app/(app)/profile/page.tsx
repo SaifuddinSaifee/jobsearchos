@@ -1,7 +1,8 @@
 import { desc } from "drizzle-orm";
 import { ProfileTabs } from "@/components/profile/profile-tabs";
 import { db } from "@/lib/db";
-import { pastResumes, profileVersions } from "@/lib/db/schema";
+import { profileVersions } from "@/lib/db/schema";
+import { getBaseDocument } from "@/lib/documents/service";
 import {
   emptyInstructions,
   emptyPreferences,
@@ -12,9 +13,9 @@ export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
   const database = db();
-  const [versions, resumes] = await Promise.all([
+  const [versions, base] = await Promise.all([
     database.select().from(profileVersions).orderBy(desc(profileVersions.version)),
-    database.select().from(pastResumes).orderBy(desc(pastResumes.createdAt)),
+    getBaseDocument(database),
   ]);
   const latest = versions[0];
 
@@ -30,7 +31,7 @@ export default async function ProfilePage() {
         preferences={latest?.preferences ?? emptyPreferences()}
         instructions={latest?.generationInstructions ?? emptyInstructions()}
         hasProfile={Boolean(latest)}
-        baseResumeFileId={latest?.baseResumeFileId ?? null}
+        baseDocument={base ? { id: base.id, title: base.title } : null}
         latestVersion={latest?.version ?? 0}
         versions={versions.map((v) => ({
           id: v.id,
@@ -46,16 +47,6 @@ export default async function ProfilePage() {
             null,
             2,
           ),
-        }))}
-        pastResumes={resumes.map((r) => ({
-          id: r.id,
-          fileId: r.fileId,
-          title: r.title,
-          company: r.company,
-          role: r.role,
-          appliedAt: r.appliedAt?.toISOString() ?? null,
-          hasJd: Boolean(r.jdText),
-          chars: r.extractedText.length,
         }))}
       />
     </div>

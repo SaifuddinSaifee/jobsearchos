@@ -16,6 +16,7 @@ import {
   touchSearch,
 } from "@/lib/outreach/searches";
 import type { SearchSteps } from "@/lib/outreach/types";
+import { backfillDocuments } from "@/lib/documents/backfill";
 import { backfillResumeIndexes, claimNextIndexes, processResumeIndex, sweepStaleIndexes, touchIndex } from "@/lib/resume/indexing";
 import { isClean, reviewReason } from "./clean";
 import {
@@ -128,16 +129,16 @@ export async function processSearch(
   }
 }
 
-/** Indexes one claimed resume file; failures are recorded on its row by `processResumeIndex`. */
-export async function processIndex(fileId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
+/** Indexes one claimed resume version; failures are recorded on its row by `processResumeIndex`. */
+export async function processIndex(indexId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
   try {
-    await withTimeout((deps.run ?? processResumeIndex)(fileId, { db }), deps.timeoutMs ?? INDEX_TIMEOUT_MS, "Timed out after 5 minutes");
+    await withTimeout((deps.run ?? processResumeIndex)(indexId, { db }), deps.timeoutMs ?? INDEX_TIMEOUT_MS, "Timed out after 5 minutes");
   } catch (err) {
     await db
       .update(resumeIndexes)
       .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(resumeIndexes.fileId, fileId), eq(resumeIndexes.status, "running")));
+      .where(and(eq(resumeIndexes.id, indexId), eq(resumeIndexes.status, "running")));
   }
 }
 
@@ -205,14 +206,14 @@ async function tick(): Promise<void> {
       }
 
       await sweepStaleIndexes();
-      for (const fileId of await claimNextIndexes(INDEX_CONCURRENCY - s.indexing.size)) {
-        s.indexing.add(fileId);
-        const beat = setInterval(() => void touchIndex(fileId).catch(() => {}), HEARTBEAT_MS);
-        void processIndex(fileId)
-          .catch((err) => console.error("[queue] unexpected index failure", fileId, err))
+      for (const indexId of await claimNextIndexes(INDEX_CONCURRENCY - s.indexing.size)) {
+        s.indexing.add(indexId);
+        const beat = setInterval(() => void touchIndex(indexId).catch(() => {}), HEARTBEAT_MS);
+        void processIndex(indexId)
+          .catch((err) => console.error("[queue] unexpected index failure", indexId, err))
           .finally(() => {
             clearInterval(beat);
-            s.indexing.delete(fileId);
+            s.indexing.delete(indexId);
             void tick();
           });
       }
@@ -230,8 +231,10 @@ export function startQueueWorker(): void {
   if (s.timer) return;
   s.timer = setInterval(() => void tick(), TICK_MS);
   s.timer.unref?.();
-  // Resumes stored before indexing existed (or while the worker was off) get indexed now.
-  void backfillResumeIndexes().catch((err) => console.error("[queue] resume backfill failed", err instanceof Error ? err.message : err));
+  // Library resumes that have no index yet (added while the worker was off) get indexed now.
+  void backfillDocuments()
+    .then(() => backfillResumeIndexes())
+    .catch((err) => console.error("[queue] library backfill failed", err instanceof Error ? err.message : err));
   void tick();
 }
 

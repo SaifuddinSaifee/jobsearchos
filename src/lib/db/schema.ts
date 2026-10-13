@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   boolean,
+  check,
   date,
   index,
   integer,
@@ -17,6 +18,9 @@ import {
 import { sql } from "drizzle-orm";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
+import type { DocJSON } from "@/lib/documents/build";
+import type { PageSettings } from "@/lib/documents/page-settings";
+import type { DocumentKind, DocumentOrigin, VersionReason } from "@/lib/documents/types";
 import type { IndexStatus } from "@/lib/resume/types";
 import type { ContactKind, ContactSource, EmailStatus, OutreachStatus, SearchStatus, SearchSteps } from "@/lib/outreach/types";
 import type {
@@ -394,6 +398,9 @@ export const outreachEmails = pgTable(
     /** The resume attached to this email. Files are content-addressed and never changed, so this is exactly what was sent. */
     attachmentFileId: uuid("attachment_file_id").references(() => files.id),
     attachmentName: text("attachment_name"),
+    /** The library document and version the attachment was made from, when it was exported at send time. */
+    attachmentDocumentId: uuid("attachment_document_id").references((): AnyPgColumn => documents.id),
+    attachmentVersionId: uuid("attachment_version_id").references((): AnyPgColumn => documentVersions.id),
     error: text("error"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -441,18 +448,116 @@ export const contactSearches = pgTable(
 );
 
 /**
- * Where each resume file is in the search-index pipeline (extract text, structure it, split it into sections, embed
- * them). Keyed by file, so the base resume and every uploaded one go through the same steps, and identical bytes are
- * only processed once. Worked off by the same background worker as the job queue.
+ * Everything the user writes: resumes, cover letters and emails, stored as content (an editor document), not as files.
+ * The base resume is the one with `is_base`. Deleting is soft (`deleted_at`). `legacy_past_resume_id` and
+ * `outreach_email_id` tie a row to what it was made from, so the backfill can run again without duplicating.
+ */
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").$type<DocumentKind>().notNull(),
+    origin: text("origin").$type<DocumentOrigin>().notNull(),
+    title: text("title").notNull(),
+    jobId: uuid("job_id").references(() => jobs.id),
+    companyId: uuid("company_id").references(() => companies.id),
+    /** Free-text company, for documents that are not linked to a company in the directory. */
+    companyName: text("company_name"),
+    targetRole: text("target_role"),
+    writtenOn: date("written_on", { mode: "string" }),
+    jdText: text("jd_text"),
+    jdUrl: text("jd_url"),
+    isBase: boolean("is_base").notNull().default(false),
+    /** The uploaded file's name, type and hash (to spot the same upload twice). The bytes are not kept. */
+    sourceName: text("source_name"),
+    sourceMime: text("source_mime"),
+    sourceSha256: text("source_sha256"),
+    /** Set only when the file is kept anyway: imported past resumes and resumes uploaded in the email composer. */
+    sourceFileId: uuid("source_file_id").references(() => files.id),
+    pageSettings: jsonb("page_settings").$type<Partial<PageSettings>>().notNull().default({}),
+    legacyPastResumeId: uuid("legacy_past_resume_id")
+      .unique()
+      .references(() => pastResumes.id),
+    outreachEmailId: uuid("outreach_email_id")
+      .unique()
+      .references((): AnyPgColumn => outreachEmails.id),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("documents_one_base_idx")
+      .on(t.isBase)
+      .where(sql`${t.isBase} and ${t.deletedAt} is null`),
+    index("documents_kind_idx").on(t.kind, t.updatedAt),
+    index("documents_job_idx").on(t.jobId),
+    index("documents_source_sha_idx").on(t.sourceSha256),
+    check("documents_base_is_resume", sql`not ${t.isBase} or ${t.kind} = 'resume'`),
+  ],
+);
+
+/** The working copy the editor autosaves into. Overwritten freely; `revision` lets a stale tab be refused. */
+export const documentDrafts = pgTable("document_drafts", {
+  documentId: uuid("document_id")
+    .primaryKey()
+    .references(() => documents.id),
+  content: jsonb("content").$type<DocJSON>().notNull(),
+  subject: text("subject").notNull().default(""),
+  revision: integer("revision").notNull().default(1),
+  /** The version this draft started from. */
+  baseVersionId: uuid("base_version_id"),
+  contentSha256: text("content_sha256").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Immutable checkpoints of a document. A DB trigger rejects DELETE and every UPDATE except locking (setting
+ * `locked_at` and `locked_job_id` once); see drizzle/0015_documents.sql. `search_vector` is a generated column
+ * added in that migration.
+ */
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id),
+    version: integer("version").notNull(),
+    content: jsonb("content").$type<DocJSON>().notNull(),
+    contentSchema: integer("content_schema").notNull().default(1),
+    subject: text("subject").notNull().default(""),
+    markdown: text("markdown").notNull(),
+    plainText: text("plain_text").notNull(),
+    contentSha256: text("content_sha256").notNull(),
+    /** The page settings this version was made with. The PDF depends on them, so they are part of the snapshot. */
+    pageSettings: jsonb("page_settings").$type<Partial<PageSettings>>().notNull().default({}),
+    reason: text("reason").$type<VersionReason>().notNull(),
+    note: text("note"),
+    restoredFromVersionId: uuid("restored_from_version_id"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedJobId: uuid("locked_job_id").references(() => jobs.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("document_versions_doc_version_idx").on(t.documentId, t.version)],
+);
+
+export type DocumentRow = typeof documents.$inferSelect;
+export type DocumentDraftRow = typeof documentDrafts.$inferSelect;
+export type DocumentVersionRow = typeof documentVersions.$inferSelect;
+
+/**
+ * Where each resume (a version of a library document) is in the search-index pipeline: split it into sections,
+ * embed them. One row per document version, worked off by the same background worker as the job queue. Rows keyed
+ * by `file_id` are from before the library existed; they are kept as they were and no longer used.
  */
 export const resumeIndexes = pgTable(
   "resume_indexes",
   {
-    fileId: uuid("file_id")
-      .primaryKey()
-      .references(() => files.id),
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id").references(() => files.id),
+    documentVersionId: uuid("document_version_id").references(() => documentVersions.id),
     status: text("status").$type<IndexStatus>().notNull().default("queued"),
-    /** The resume as structured data, when the model could read it. */
+    /** The resume as structured data (read back from the document, no model call). */
     parsed: jsonb("parsed").$type<Profile>(),
     /** Something worth telling the user even though indexing succeeded. */
     note: text("note"),
@@ -466,7 +571,16 @@ export const resumeIndexes = pgTable(
     /** Doubles as the worker's heartbeat while indexing is running. */
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("resume_indexes_status_idx").on(t.status, t.createdAt)],
+  (t) => [
+    index("resume_indexes_status_idx").on(t.status, t.createdAt),
+    uniqueIndex("resume_indexes_file_idx")
+      .on(t.fileId)
+      .where(sql`${t.fileId} is not null`),
+    uniqueIndex("resume_indexes_version_idx")
+      .on(t.documentVersionId)
+      .where(sql`${t.documentVersionId} is not null`),
+    check("resume_indexes_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
+  ],
 );
 
 /** One searchable piece of a resume (a job, a project, the skills list...) with its embedding. */
@@ -474,9 +588,8 @@ export const resumeChunks = pgTable(
   "resume_chunks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    fileId: uuid("file_id")
-      .notNull()
-      .references(() => files.id),
+    fileId: uuid("file_id").references(() => files.id),
+    documentVersionId: uuid("document_version_id").references(() => documentVersions.id),
     ordinal: integer("ordinal").notNull(),
     section: text("section").notNull(),
     label: text("label").notNull(),
@@ -486,8 +599,14 @@ export const resumeChunks = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("resume_chunks_file_ordinal_idx").on(t.fileId, t.ordinal),
+    uniqueIndex("resume_chunks_file_ordinal_idx")
+      .on(t.fileId, t.ordinal)
+      .where(sql`${t.fileId} is not null`),
+    uniqueIndex("resume_chunks_version_ordinal_idx")
+      .on(t.documentVersionId, t.ordinal)
+      .where(sql`${t.documentVersionId} is not null`),
     index("resume_chunks_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+    check("resume_chunks_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
   ],
 );
 

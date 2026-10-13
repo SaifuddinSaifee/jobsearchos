@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import { checkEmail, wordCount } from "@/lib/outreach/checks";
-import { KIND_LABEL, type AttachmentDTO, type ContactDTO, MAX_BODY, MAX_SUBJECT, type ResumeOption } from "@/lib/outreach/types";
+import { KIND_LABEL, type DraftAttachmentDTO, type ContactDTO, MAX_BODY, MAX_SUBJECT, type ResumeOption } from "@/lib/outreach/types";
 import { cn } from "@/lib/utils";
 import { AttachmentPicker } from "./attachment-picker";
 import { EmailStatusBadge, initials } from "./badges";
@@ -70,8 +70,8 @@ export function Composer({
   contact: ContactDTO | null;
   resumes: ResumeOption[];
   /** The attached resume, or null for none. */
-  attachment: AttachmentDTO | null;
-  onAttachment: (fileId: string | null) => void;
+  attachment: DraftAttachmentDTO | null;
+  onAttachment: (documentId: string | null) => void;
   onResumeUploaded: (resume: ResumeOption) => void;
   subject: string;
   body: string;
