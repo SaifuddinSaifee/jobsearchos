@@ -16,6 +16,7 @@ import {
 import type { CareerStatus } from "@/lib/career/review";
 import type { CareerRecord } from "@/lib/career/schema";
 import type { SourceInfo } from "@/lib/career/service";
+import { FailureDialog } from "./failure-dialog";
 import { RecordBrowser } from "./record-browser";
 import { RecordEditProvider } from "./record-edit";
 import { CAREER_STATUS_KEY, useCareerStatus } from "./use-career-status";
@@ -85,6 +86,12 @@ function Progress({ initial }: { initial: CareerStatus }) {
 
   const preparing = status.counts.queued + status.counts.running > 0 && status.counts.ready === 0;
   const refresh = () => client.invalidateQueries({ queryKey: CAREER_STATUS_KEY }).then(() => router.refresh());
+  const retry = () =>
+    startRetry(async () => {
+      const res = await retryFailedAction();
+      if (!res.ok) toast.error(res.error);
+      await refresh();
+    });
 
   return (
     <div className="space-y-2">
@@ -112,20 +119,13 @@ function Progress({ initial }: { initial: CareerStatus }) {
           <p>
             {status.counts.failed} could not be prepared: {status.failed.map((f) => f.label).join(", ")}.
           </p>
-          <Button
-            variant="outline"
-            loading={retrying}
-            onClick={() =>
-              startRetry(async () => {
-                const res = await retryFailedAction();
-                if (!res.ok) toast.error(res.error);
-                await refresh();
-              })
-            }
-          >
-            <RotateCcw aria-hidden />
-            Try again
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <FailureDialog failures={status.failed} retrying={retrying} onRetry={retry} />
+            <Button variant="outline" loading={retrying} onClick={retry}>
+              <RotateCcw aria-hidden />
+              Try again
+            </Button>
+          </div>
         </div>
       )}
 

@@ -4,6 +4,7 @@ import { careerProposals, careerSources } from "@/lib/db/schema";
 import type { DbOrTx } from "@/lib/documents/service";
 import { newId, type IdGen } from "@/lib/documents/build";
 import { applyProposal, checkRefs, resolveDecisions, type ApplySummary } from "./apply";
+import type { FailedSource } from "./failure";
 import { modelGrouper, type Grouper } from "./group";
 import { getProposalRow, getSourceRow, getSourceText } from "./queue";
 import { groupRoleBullets } from "./regroup";
@@ -233,7 +234,7 @@ export type CareerStatus = {
   total: number;
   done: number;
   current: { id: string; status: ProposalStatus; label: string; kind: SourceKind } | null;
-  failed: { id: string; label: string; error: string | null }[];
+  failed: FailedSource[];
   /** Merges that were undone by a restore and can be reviewed again. */
   undone: { id: string; label: string }[];
   recordVersion: number;
@@ -268,7 +269,14 @@ export async function getCareerStatus(db: DbOrTx = defaultDb()): Promise<CareerS
     done,
     total: done + counts.queued + counts.running + counts.ready + counts.failed,
     current: open ? { id: open.proposal.id, status: open.proposal.status, label: open.source.label, kind: open.source.kind } : null,
-    failed: failed.map((f) => ({ id: f.proposal.id, label: f.source.label, error: f.proposal.error })),
+    failed: failed.map((f) => ({
+      id: f.proposal.id,
+      label: f.source.label,
+      kind: f.source.kind,
+      error: f.proposal.error,
+      attempts: f.proposal.attempts,
+      failedAt: (f.proposal.finishedAt ?? f.proposal.updatedAt).toISOString(),
+    })),
     undone: undone.map((u) => ({ id: u.proposal.id, label: u.source.label })),
     recordVersion: latest.version,
   };

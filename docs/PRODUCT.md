@@ -215,6 +215,10 @@ the base the writer will use to pick the right facts and wording for a job.
   with the record as it stands after the one before. **Include Profile** and **Add LinkedIn PDF** add those two by hand
   (save your LinkedIn page as a PDF from the browser's print dialog; only its text is kept, never the file). Once a record
   exists, a saved Profile is offered for review on its own.
+- **When a source fails.** The record tab names the sources that could not be prepared, with **Try again** and
+  **View details**. Details opens a dialog with each failure taken apart: the plain reason, when it failed, attempts, the
+  step that failed and, for model errors, the HTTP status, error type, code, parameter and request id, plus the raw
+  error. Copy one failure or **Copy all** as plain text to share or debug.
 - **Review before anything is added.** For each source you see every employer, role and bullet with a suggestion: new,
   the same role, a new **framing** of a role you already have, the same fact worded differently, or already in your
   record. You can include or leave out anything, move a role under another role or framing, say which fact a bullet

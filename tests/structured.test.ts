@@ -9,9 +9,13 @@ const { chatStructured } = await import("@/lib/llm/structured");
 
 const Schema = z.object({ name: z.string() });
 const input = { system: "s", user: "u" };
-const reply = (content: string, finish_reason = "stop") => ({
-  choices: [{ finish_reason, message: { content } }],
-});
+// A streamed reply, split in two chunks so joining them is tested too.
+const reply = (content: string, finish_reason = "stop") =>
+  (async function* () {
+    const mid = Math.floor(content.length / 2);
+    yield { choices: [{ finish_reason: null, delta: { content: content.slice(0, mid) } }] };
+    yield { choices: [{ finish_reason, delta: { content: content.slice(mid) } }] };
+  })();
 
 beforeEach(() => create.mockReset());
 
@@ -21,6 +25,7 @@ describe("chatStructured", () => {
     await expect(chatStructured(Schema, input)).resolves.toEqual({ name: "Ada" });
 
     const args = create.mock.calls[0][0];
+    expect(args.stream).toBe(true);
     expect(args.model).toBe(process.env.EXTRACTION_MODEL ?? "zai-org/GLM-5.3-Flash");
     expect(args.response_format.type).toBe("json_schema");
     expect(args.response_format.json_schema.schema.properties.name).toBeDefined();

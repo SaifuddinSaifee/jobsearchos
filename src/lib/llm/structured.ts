@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { together } from "./client";
+import { chatCompletion } from "./chat";
 
 export type StructuredOptions = {
   model?: string;
@@ -25,7 +25,7 @@ export async function chatStructured<T extends z.ZodType>(
 Respond only with a JSON object that matches this JSON Schema:
 ${JSON.stringify(jsonSchema)}`;
 
-  const response = await together().chat.completions.create({
+  const { content, finishReason } = await chatCompletion({
     model: opts.model ?? env().EXTRACTION_MODEL,
     max_tokens: opts.maxTokens ?? 16000,
     messages: [
@@ -38,14 +38,13 @@ ${JSON.stringify(jsonSchema)}`;
     },
   });
 
-  const choice = response.choices[0];
-  if (choice?.finish_reason === "length") {
+  if (finishReason === "length") {
     throw new Error("Output was cut off (max_tokens); the input may be too long");
   }
 
   let json: unknown;
   try {
-    json = JSON.parse(stripFences(choice?.message?.content ?? ""));
+    json = JSON.parse(stripFences(content));
   } catch {
     throw new Error("The model's output was not valid JSON");
   }

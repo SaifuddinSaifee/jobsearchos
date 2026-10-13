@@ -8,7 +8,9 @@ import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
 import { retryFailedAction } from "@/app/(app)/library/record/actions";
 import { Button } from "@/components/ui/button";
+import { parseFailure } from "@/lib/career/failure";
 import type { CareerStatus } from "@/lib/career/review";
+import { FailureDialog } from "./failure-dialog";
 import { CAREER_STATUS_KEY, useCareerStatus } from "./use-career-status";
 
 /** Shown when no source is waiting for review: the next one is being prepared, something failed, or everything is done. */
@@ -20,6 +22,13 @@ export function PreparingNext({ initial }: { initial: CareerStatus }) {
   const [retrying, startRetry] = useTransition();
 
   const busy = status.counts.queued + status.counts.running > 0;
+  const retry = () =>
+    startRetry(async () => {
+      const res = await retryFailedAction();
+      if (!res.ok) toast.error(res.error);
+      await client.invalidateQueries({ queryKey: CAREER_STATUS_KEY });
+      router.refresh();
+    });
   useEffect(() => {
     if (status.counts.ready > 0) router.refresh();
   }, [status.counts.ready, router]);
@@ -49,25 +58,17 @@ export function PreparingNext({ initial }: { initial: CareerStatus }) {
             <ul className="mx-auto mt-2 max-w-md space-y-1 text-sm text-muted-foreground">
               {status.failed.map((f) => (
                 <li key={f.id}>
-                  {f.label}: {f.error ?? "Unknown error"}
+                  {f.label}: {parseFailure(f.error).message}
                 </li>
               ))}
             </ul>
-            <Button
-              className="mt-4"
-              loading={retrying}
-              onClick={() =>
-                startRetry(async () => {
-                  const res = await retryFailedAction();
-                  if (!res.ok) toast.error(res.error);
-                  await client.invalidateQueries({ queryKey: CAREER_STATUS_KEY });
-                  router.refresh();
-                })
-              }
-            >
-              <RotateCcw aria-hidden />
-              Try again
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <FailureDialog failures={status.failed} retrying={retrying} onRetry={retry} />
+              <Button loading={retrying} onClick={retry}>
+                <RotateCcw aria-hidden />
+                Try again
+              </Button>
+            </div>
           </>
         ) : (
           <>

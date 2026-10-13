@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { copyText } from "@/lib/clipboard";
 import { formatDate } from "@/lib/jobs/format";
 import { KIND_LABELS, REASON_LABELS, type DocumentKind, type DocumentOrigin, type VersionReason } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
@@ -41,22 +42,6 @@ type Doc = {
 };
 
 type VersionItem = { id: string; version: number; reason: VersionReason; note: string | null; createdAt: string; locked: boolean; lockedAt: string | null; latest: boolean };
-
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    if (!ok) throw new Error("Could not copy to the clipboard");
-  }
-}
 
 /** A document page: the sheet (passed in as children, rendered on the server), its details and its version history. */
 export function DocumentView({

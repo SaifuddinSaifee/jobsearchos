@@ -4,6 +4,7 @@ import { Check, Copy, Download } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { copyText } from "@/lib/clipboard";
 import { detailToMarkdownJob, jobToMarkdown, markdownFilename } from "@/lib/jobs/markdown";
 import type { MarkdownJob } from "@/lib/jobs/markdown";
 import type { JobDetail } from "@/lib/jobs/types";
@@ -22,20 +23,7 @@ export async function loadJobMarkdown(jobId: string): Promise<MarkdownFile> {
 }
 
 export async function copyMarkdown(markdown: string) {
-  try {
-    await navigator.clipboard.writeText(markdown);
-  } catch {
-    // Clipboard API unavailable (insecure context or denied): fall back to a hidden textarea.
-    const ta = document.createElement("textarea");
-    ta.value = markdown;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    if (!ok) throw new Error("Could not copy to the clipboard");
-  }
+  await copyText(markdown);
   toast.success("Copied job as Markdown");
 }
 
