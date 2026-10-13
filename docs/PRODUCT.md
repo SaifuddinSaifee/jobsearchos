@@ -110,8 +110,12 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
 - Works with the common applicant tracking systems (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable) and
   ordinary career pages, including ones that need a browser to render.
 - For sites that block automated reading (LinkedIn, Indeed), paste the job text instead.
+- Y Combinator's Work at a Startup pages are read from the data behind the page, which includes parts the page hides
+  when you are logged out: the company's tech stack, the full skills list, the application questions and the founders.
 - The app pulls out company, title, location, remote type, employment type, salary, posted date, responsibilities,
   requirements, technologies, keywords, and extra details such as benefits and the interview process.
+- Keywords aim to be the full list a resume should match (usually 25-60): every technology, the posting's named focus
+  areas, domains, practices, role type and stage, and the working traits it asks for.
 - Clean results save automatically. Doubtful ones wait for your review.
 - Duplicates are detected, so the same job is not saved twice.
 

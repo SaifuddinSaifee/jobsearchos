@@ -13,18 +13,19 @@ const ADDITIONAL_RULE = `- additionalDetails: everything else in the posting wor
 const SYSTEM = `You convert a job posting into structured JSON.
 Rules:
 - Use only what the posting says. Never infer or invent; use "" or null when something is not stated.
-- company: the hiring company (not the job board or staffing site). title: the job title as written.
+- Read the whole posting: skill tags, tech stack, focus areas and sections after the main description count as much as the description itself.
+- company: the hiring company (not the job board or staffing site). title: the job title as written in the posting's heading, not a description of the role taken from the body.
 - location: as written (e.g. "Austin, TX" or "Remote, US"). remoteType: remote, hybrid, onsite, or unknown if unclear.
 - employmentType: e.g. "Full-time", "Contract", "Internship"; "" if not stated.
 - Salary: numbers only, no symbols (120000, not "$120k"). salaryCurrency as an ISO code (USD, EUR); salaryPeriod one of year, month, hour, or "". Use null when no pay is stated.
 - postedAt: ISO date (YYYY-MM-DD) if stated, else "".
 - applicationUrl: only if the posting gives an explicit apply link, else "".
 - aboutCompany: the paragraph(s) in the posting that describe the employer itself (what the company does, its mission, values, culture). Copy them as written with light trimming. Leave out the role's duties, perks lists and equal-opportunity statements. "" if the posting says nothing about the company.
-- responsibilities: what the person will do, one item per bullet, concise and in the posting's words.
+- responsibilities: what the person will do, one item per bullet, concise and in the posting's words. When the posting groups the work under named areas (e.g. "Agents. Build agents, tools..."), start each bullet with the area name and a colon ("Agents: Build agents, tools...").
 - requirements.required: must-have qualifications; requirements.preferred: nice-to-haves, bonus points, "preferred".
 ${ADDITIONAL_RULE}
-- technologies: a flat list of every tool, language, framework, platform and cloud service named.
-- keywords: 10-25 terms an ATS or recruiter would search on for this role (skills, domains, methodologies, tools), as short phrases.
+- technologies: a flat list of every tool, language, framework, library, platform, service, model type and cloud service named anywhere in the posting, including skill tags and tech stack lists (e.g. "Supabase", "Image models", "Vector databases"). Use the name only, without notes in parentheses ("Autumn", not "Autumn (payments)").
+- keywords: every term a resume should contain to match this posting, as short phrases (usually 25-60). Cover all of: every technology from the list above; the posting's named focus areas (e.g. "Multimodal data", "AI quality"); domains and problem areas (e.g. "search and retrieval", "data ingestion"); practices and methodologies (e.g. "evaluations", "API design"); the role type and stage (e.g. "founding engineer", "early-stage startup"); and the working traits the posting asks for, phrased as resume terms (e.g. "customer communication", "ownership"). No near-duplicates.
 - Ignore navigation, cookie notices and equal-opportunity or legal boilerplate.`;
 
 /** Values from an ATS API or JSON-LD are more reliable than the model's, so they win. */

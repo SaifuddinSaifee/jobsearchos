@@ -67,7 +67,7 @@ function cleanKeywords(list: string[]): string[] {
       out.push(t);
     }
   }
-  return out.slice(0, 40);
+  return out.slice(0, 100);
 }
 
 /**
