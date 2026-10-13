@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { contacts, documents, emailAccounts, files, outreachEmails, resumeIndexes } from "@/lib/db/schema";
+import { contacts, documents, emailAccounts, files, outreachAttachments, outreachEmails, resumeIndexes } from "@/lib/db/schema";
 import { textToDoc } from "@/lib/documents/convert/text-to-doc";
 import { createDocument, createVersion, latestVersion, listDocuments, saveDraft as saveDocumentDraft } from "@/lib/documents/service";
 import { isKnownResumeFile } from "@/lib/resume/files";
@@ -18,7 +18,7 @@ import {
   addContact,
   findContacts,
   getDraft,
-  prepareAttachment,
+  prepareAttachments,
   getOutreachData,
   listContacts,
   listSent,
@@ -26,16 +26,18 @@ import {
   OutreachError,
   removeContact,
   revealContactEmail,
-  resumeOptions,
+  attachmentOptions,
   reuseAsDraft,
   saveDraft,
   sendDraft,
+  uploadAttachmentForJob,
   uploadResumeForJob,
   sentToday,
   setDoNotContact,
   setJobCompanyWebsite,
   type FindDeps,
 } from "@/lib/outreach/service";
+import type { AttachmentRef } from "@/lib/outreach/types";
 import { resetDb, testDb } from "./helpers";
 
 process.env.DATABASE_URL ??= "postgres://unused";
@@ -659,6 +661,51 @@ describe("sendDraft", () => {
     expect(draft).toMatchObject({ subject: "your onboarding, timed", body: GOOD_BODY, contactId: null });
     expect(await listSent(jobId, db)).toHaveLength(1);
   });
+
+  const PROPOSAL = "https://github.com/someone/project/blob/main/PROPOSALS.md";
+  /** GOOD_BODY, a blank line, then "My proposal (GitHub)" linked and bolded, the way the editor sends it. */
+  const formattedDoc = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: GOOD_BODY }] },
+      { type: "paragraph" },
+      { type: "paragraph", content: [{ type: "text", text: "My proposal (GitHub)", marks: [{ type: "bold" }, { type: "link", attrs: { href: PROPOSAL, target: "_blank", rel: "noopener noreferrer", class: null } }] }] },
+      { type: "paragraph" },
+    ],
+  };
+
+  it("stores a formatted body, with its plain text made from it", async () => {
+    const { jobId, contactId } = await ready();
+    const draft = await saveDraft(jobId, { subject: "s", body: "ignored when a formatted body is given", bodyDoc: formattedDoc, contactId }, db);
+    expect(draft.body).toBe(`${GOOD_BODY}\n\nMy proposal (GitHub) <${PROPOSAL}>\n`);
+    expect(draft.bodyDoc?.content[2].content?.[0].marks).toEqual([{ type: "link", attrs: { href: PROPOSAL } }, { type: "bold" }]);
+    // Saving plain text again drops the formatting.
+    expect((await saveDraft(jobId, { subject: "s", body: "plain" }, db)).bodyDoc).toBeNull();
+  });
+
+  it("sends a formatted email with an HTML version, and files it in the library with its formatting", async () => {
+    const { jobId, contactId } = await ready();
+    await saveDraft(jobId, { subject: "your onboarding, timed", body: "", bodyDoc: formattedDoc, contactId }, db);
+    const sent = await go(jobId);
+    const message = (send.mock.calls[0] as unknown[])[0] as { body: string; html?: string };
+    expect(message.body).toBe(`${GOOD_BODY}\n\nMy proposal (GitHub) <${PROPOSAL}>`);
+    // The trailing blank line is trimmed, as the plain text is.
+    expect(message.html).toBe(`<div dir="ltr"><div>${GOOD_BODY}</div><div><br></div><div><a href="${PROPOSAL}"><b>My proposal (GitHub)</b></a></div></div>`);
+    expect(sent.bodyDoc).not.toBeNull();
+    expect((await listSent(jobId, db))[0].bodyDoc).toEqual(sent.bodyDoc);
+
+    const [doc] = await db.select().from(documents).where(eq(documents.outreachEmailId, sent.id));
+    const version = await latestVersion(doc.id, db);
+    expect(JSON.stringify(version?.content)).toContain(PROPOSAL);
+    expect(version?.plainText).toContain("My proposal (GitHub)");
+    expect((await reuseAsDraft(jobId, sent.id, db)).bodyDoc).toEqual(sent.bodyDoc);
+  });
+
+  it("sends a plain email without an HTML version", async () => {
+    const { jobId } = await ready();
+    await go(jobId);
+    expect(((send.mock.calls[0] as unknown[])[0] as { html?: string }).html).toBeUndefined();
+  });
 });
 
 describe("getOutreachData", () => {
@@ -672,7 +719,7 @@ describe("getOutreachData", () => {
 });
 
 
-describe("resume attachments", () => {
+describe("attachments", () => {
   let dir: string;
   const send = vi.fn(async (...args: unknown[]) => (void args, { messageId: "msg-1", threadId: "thr-1" }));
   let pdfCount = 0;
@@ -713,12 +760,12 @@ describe("resume attachments", () => {
     return createDocument({ kind: "resume", origin: "blank", title, content: textToDoc(text), isBase: base }, db);
   }
 
-  async function ready(attachmentDocumentId?: string | null) {
+  async function ready(attachments?: AttachmentRef[]) {
     const jobId = await seedJob();
     await connectGmail();
     const c = await addContact(jobId, { name: "Jane Doe", email: "jane@acme1.com", kind: "recruiter" }, db);
     await markVerified(c.id, db);
-    await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, contactId: c.id, attachmentDocumentId }, db);
+    await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, contactId: c.id, attachments }, db);
     return { jobId, contactId: c.id };
   }
   const go = (jobId: string, ack: string[] = [], over: object = {}) => sendDraft(jobId, { acknowledge: ack }, { send, now: TUE_MORNING, pdf: fakePdf, storageDir: dir, ...over }, db);
@@ -728,19 +775,20 @@ describe("resume attachments", () => {
     const base = await baseResume();
     const jobId = await seedJob();
     const first = await saveDraft(jobId, { subject: "s", body: "b" }, db);
-    expect(first.attachment).toMatchObject({ documentId: base.document.id, source: "file", fileId: base.file.id, name: "base-resume.docx", mime });
+    expect(first.attachments).toHaveLength(1);
+    expect(first.attachments[0]).toMatchObject({ documentId: base.document.id, docKind: "resume", source: "file", fileId: base.file.id, name: "base-resume.docx", mime });
 
-    const none = await saveDraft(jobId, { subject: "s2", body: "b2", attachmentDocumentId: null }, db);
-    expect(none.attachment).toBeNull();
+    const none = await saveDraft(jobId, { subject: "s2", body: "b2", attachments: [] }, db);
+    expect(none.attachments).toEqual([]);
     const kept = await saveDraft(jobId, { subject: "s3", body: "b3" }, db);
-    expect(kept.attachment).toBeNull();
+    expect(kept.attachments).toEqual([]);
   });
 
   it("offers a resume made in the app as a PDF to be made when the email is sent", async () => {
     const base = await libraryResume("My resume");
     const draft = await saveDraft(await seedJob(), { subject: "s", body: "b" }, db);
     // The name is the one the export will give it: the person at the top of the resume.
-    expect(draft.attachment).toMatchObject({ documentId: base.document.id, source: "pdf", fileId: null, size: null, mime: "application/pdf", name: "Jane Doe.pdf" });
+    expect(draft.attachments[0]).toMatchObject({ documentId: base.document.id, source: "pdf", fileId: null, size: null, mime: "application/pdf", name: "Jane Doe.pdf" });
   });
 
   it("lists the base resume first, then this job's uploads, then the rest of the library", async () => {
@@ -751,7 +799,7 @@ describe("resume attachments", () => {
     const forB = await uploadResumeForJob(jobB, { bytes: await makeDocx(["Resume tuned for B"]), name: "for-b.docx", mime }, db);
     await libraryResume("Written in the app", "text only", false);
 
-    const options = await resumeOptions(jobA, db);
+    const options = await attachmentOptions(jobA, db);
     expect(options.map((o) => [o.kind, o.name])).toEqual([
       ["base", "base-resume.docx"],
       ["job", "for-a.docx"],
@@ -766,17 +814,17 @@ describe("resume attachments", () => {
   it("offers the PDF, not the original file, once an upload has been edited", async () => {
     const r = await uploaded("tuned.docx", "Original text");
     const jobId = await seedJob();
-    expect((await resumeOptions(jobId, db))[0]).toMatchObject({ source: "file", fileId: r.file.id });
+    expect((await attachmentOptions(jobId, db))[0]).toMatchObject({ source: "file", fileId: r.file.id });
     await saveDocumentDraft(r.document.id, { content: textToDoc("Edited text"), revision: 1 }, db);
     await createVersion(r.document.id, { reason: "manual" }, db);
-    expect((await resumeOptions(jobId, db))[0]).toMatchObject({ source: "pdf", fileId: null, name: "Edited text.pdf" });
+    expect((await attachmentOptions(jobId, db))[0]).toMatchObject({ source: "pdf", fileId: null, name: "Edited text.pdf" });
   });
 
   it("files an uploaded resume in the library with the job it was written for, and queues its index", async () => {
     const jobId = await seedJob();
     const up = await uploadResumeForJob(jobId, { bytes: await makeDocx(["Tailored resume text"]), name: "tailored.docx", mime }, db);
     expect(up).toMatchObject({ source: "file", kind: "job" });
-    const [doc] = await db.select().from(documents).where(eq(documents.id, up.documentId));
+    const [doc] = await db.select().from(documents).where(eq(documents.id, up.documentId!));
     expect(doc).toMatchObject({ kind: "resume", origin: "uploaded", sourceFileId: up.fileId, jobId, companyName: "Acme1", targetRole: "Data Engineer 1", title: "Resume for Acme1", sourceName: "tailored.docx" });
     expect(doc.jdText).toContain("recruiter");
     const version = await latestVersion(doc.id, db);
@@ -800,11 +848,14 @@ describe("resume attachments", () => {
     await expect(uploadResumeForJob(jobId, { bytes: Buffer.alloc(6 * 1024 * 1024), name: "huge.pdf", mime: "application/pdf" }, db)).rejects.toThrow();
   });
 
-  it("will only attach a resume that is in the library", async () => {
+  it("will only attach a resume or cover letter that is in the library, or a stored attachable file", async () => {
     const jobId = await seedJob();
     const mail = await createDocument({ kind: "email", origin: "blank", title: "E", content: textToDoc("Hi", { mode: "letter" }) }, db);
-    await expect(saveDraft(jobId, { subject: "s", body: "b", attachmentDocumentId: mail.document.id }, db)).rejects.toMatchObject({ code: "invalid" });
-    await expect(saveDraft(jobId, { subject: "s", body: "b", attachmentDocumentId: "00000000-0000-4000-8000-000000000000" }, db)).rejects.toMatchObject({ code: "invalid" });
+    await expect(saveDraft(jobId, { subject: "s", body: "b", attachments: [{ documentId: mail.document.id }] }, db)).rejects.toMatchObject({ code: "invalid" });
+    await expect(saveDraft(jobId, { subject: "s", body: "b", attachments: [{ documentId: "00000000-0000-4000-8000-000000000000" }] }, db)).rejects.toMatchObject({ code: "invalid" });
+    await expect(saveDraft(jobId, { subject: "s", body: "b", attachments: [{ fileId: "00000000-0000-4000-8000-000000000000" }] }, db)).rejects.toMatchObject({ code: "invalid" });
+    const html = await putFile(Buffer.from("<script>x</script>"), { mime: "text/html", originalName: "x.html" }, { dir, db });
+    await expect(saveDraft(jobId, { subject: "s", body: "b", attachments: [{ fileId: html.id }] }, db)).rejects.toMatchObject({ code: "invalid" });
   });
 
   it("sends an unedited upload as its original file, and locks that version", async () => {
@@ -817,10 +868,10 @@ describe("resume attachments", () => {
     expect(message.attachments).toHaveLength(1);
     expect(message.attachments![0]).toMatchObject({ filename: "base-resume.docx", mime });
     expect(message.attachments![0].content.length).toBe(base.file.size);
-    expect(sent.attachment).toMatchObject({ fileId: base.file.id, name: "base-resume.docx", documentId: base.document.id, version: 1 });
+    expect(sent.attachments).toEqual([expect.objectContaining({ fileId: base.file.id, name: "base-resume.docx", documentId: base.document.id, version: 1 })]);
 
     const [listed] = await listSent(jobId, db);
-    expect(listed.attachment).toMatchObject({ fileId: base.file.id, name: "base-resume.docx", size: base.file.size, version: 1 });
+    expect(listed.attachments[0]).toMatchObject({ fileId: base.file.id, name: "base-resume.docx", size: base.file.size, version: 1 });
     expect((await latestVersion(base.document.id, db))?.lockedAt).not.toBeNull();
     expect((await listDocuments({ kind: "resume" }, db))[0].locked).toBe(true);
   });
@@ -835,10 +886,10 @@ describe("resume attachments", () => {
     expect(sentMessage().attachments![0]).toMatchObject({ filename: "Jane Doe.pdf", mime: "application/pdf" });
     expect(sentMessage().attachments![0].content.toString()).toBe("%PDF-1.7 fake 1");
     const version = await latestVersion(r.document.id, db);
-    expect(sent.attachment).toMatchObject({ name: "Jane Doe.pdf", documentId: r.document.id, versionId: version!.id });
+    expect(sent.attachments[0]).toMatchObject({ name: "Jane Doe.pdf", documentId: r.document.id, versionId: version!.id });
     // What went out is stored, so the history can always show it, and the version it came from is locked.
-    expect((await db.select().from(files).where(eq(files.id, sent.attachment!.fileId)))[0].size).toBe(sentMessage().attachments![0].content.length);
-    expect(await isKnownResumeFile(sent.attachment!.fileId, db)).toBe(true);
+    expect((await db.select().from(files).where(eq(files.id, sent.attachments[0].fileId)))[0].size).toBe(sentMessage().attachments![0].content.length);
+    expect(await isKnownResumeFile(sent.attachments[0].fileId, db)).toBe(true);
     expect(version?.lockedAt).not.toBeNull();
   });
 
@@ -853,34 +904,34 @@ describe("resume attachments", () => {
     const version = await latestVersion(r.document.id, db);
     expect(version).toMatchObject({ reason: "attach" });
     expect(version?.plainText).toContain("Edited wording");
-    expect(sent.attachment).toMatchObject({ versionId: version!.id, version: 2 });
+    expect(sent.attachments[0]).toMatchObject({ versionId: version!.id, version: 2 });
   });
 
   it("makes the PDF once while nothing changes, and again after an edit, keeping the old file", async () => {
     const r = await libraryResume();
     const { jobId } = await ready();
-    const first = await prepareAttachment(jobId, { pdf: fakePdf, storageDir: dir }, db);
-    const again = await prepareAttachment(jobId, { pdf: fakePdf, storageDir: dir }, db);
+    const [first] = await prepareAttachments(jobId, { pdf: fakePdf, storageDir: dir }, db);
+    const [again] = await prepareAttachments(jobId, { pdf: fakePdf, storageDir: dir }, db);
     expect(fakePdf).toHaveBeenCalledOnce();
-    expect(again).toMatchObject({ fileId: first!.fileId, source: "pdf", versionCreated: false });
+    expect(again).toMatchObject({ fileId: first.fileId, source: "pdf", versionCreated: false });
     expect(first).toMatchObject({ size: expect.any(Number), name: "Jane Doe.pdf", pages: 1, versionCreated: false });
 
     await saveDocumentDraft(r.document.id, { content: textToDoc("Changed since"), revision: 1 }, db);
-    const third = await prepareAttachment(jobId, { pdf: fakePdf, storageDir: dir }, db);
+    const [third] = await prepareAttachments(jobId, { pdf: fakePdf, storageDir: dir }, db);
     expect(fakePdf).toHaveBeenCalledTimes(2);
-    expect(third!.fileId).not.toBe(first!.fileId);
-    expect(third!.versionCreated).toBe(true);
-    expect((await db.select().from(files).where(eq(files.id, first!.fileId))).length).toBe(1);
+    expect(third.fileId).not.toBe(first.fileId);
+    expect(third.versionCreated).toBe(true);
+    expect((await db.select().from(files).where(eq(files.id, first.fileId))).length).toBe(1);
   });
 
   it("shows the prepared PDF on the draft until the resume changes", async () => {
     const r = await libraryResume();
     const { jobId } = await ready();
-    expect((await getDraft(jobId, db))?.attachment).toMatchObject({ source: "pdf", fileId: null, size: null });
-    const prepared = await prepareAttachment(jobId, { pdf: fakePdf, storageDir: dir }, db);
-    expect((await getDraft(jobId, db))?.attachment).toMatchObject({ fileId: prepared!.fileId, size: prepared!.size });
+    expect((await getDraft(jobId, db))?.attachments[0]).toMatchObject({ source: "pdf", fileId: null, size: null });
+    const [prepared] = await prepareAttachments(jobId, { pdf: fakePdf, storageDir: dir }, db);
+    expect((await getDraft(jobId, db))?.attachments[0]).toMatchObject({ fileId: prepared.fileId, size: prepared.size });
     await saveDocumentDraft(r.document.id, { content: textToDoc("Changed since"), revision: 1 }, db);
-    expect((await getDraft(jobId, db))?.attachment).toMatchObject({ fileId: null, size: null });
+    expect((await getDraft(jobId, db))?.attachments[0]).toMatchObject({ fileId: null, size: null });
   });
 
   it("files the sent email in the library, locked", async () => {
@@ -909,15 +960,15 @@ describe("resume attachments", () => {
     await go(jobId);
     await baseResume("v2.docx", "second version");
     const [listed] = await listSent(jobId, db);
-    expect(listed.attachment).toMatchObject({ fileId: first.file.id, name: "v1.docx" });
+    expect(listed.attachments[0]).toMatchObject({ fileId: first.file.id, name: "v1.docx" });
   });
 
   it("sends nothing attached when the user chose no attachment", async () => {
     await baseResume();
-    const { jobId } = await ready(null);
+    const { jobId } = await ready([]);
     const sent = await go(jobId);
     expect(sentMessage().attachments).toBeUndefined();
-    expect(sent.attachment).toBeNull();
+    expect(sent.attachments).toEqual([]);
     expect(fakePdf).not.toHaveBeenCalled();
   });
 
@@ -926,7 +977,7 @@ describe("resume attachments", () => {
     const { jobId } = await ready();
     const sent = await go(jobId);
     const draft = await reuseAsDraft(jobId, sent.id, db);
-    expect(draft.attachment?.documentId).toBe(base.document.id);
+    expect(draft.attachments.map((a) => a.documentId)).toEqual([base.document.id]);
   });
 
   it("asks for confirmation when the resume is large", async () => {
@@ -965,7 +1016,7 @@ describe("resume attachments", () => {
     const unreadable = async (): Promise<Buffer> => {
       throw new Error("ENOENT");
     };
-    await expect(go(jobId, [], { readFile: unreadable })).rejects.toMatchObject({ code: "send_failed", message: expect.stringMatching(/Could not read the attached resume/) });
+    await expect(go(jobId, [], { readFile: unreadable })).rejects.toMatchObject({ code: "send_failed", message: expect.stringMatching(/Could not read the attached file "base-resume.docx"/) });
     expect(send).not.toHaveBeenCalled();
     expect(await getDraft(jobId, db)).not.toBeNull();
   });
@@ -975,6 +1026,118 @@ describe("resume attachments", () => {
     const jobId = await seedJob();
     const data = await getOutreachData(jobId, db);
     expect(data.defaultAttachmentId).toBe(base.document.id);
-    expect(data.resumes.map((r) => r.kind)).toEqual(["base"]);
+    expect(data.options.map((r) => r.kind)).toEqual(["base"]);
+  });
+
+  /** A cover letter written in the app, for job `jobId`. */
+  const coverLetter = (jobId?: string, text = "Jane Doe\n\nDear team, here is why I fit.") =>
+    createDocument({ kind: "cover_letter", origin: "blank", title: "Cover letter", content: textToDoc(text), jobId, companyName: "Acme1", targetRole: "Data Engineer 1" }, db);
+  const proposalBytes = Buffer.from("%PDF-1.4 my proposal");
+
+  it("sends several attachments in the order chosen: a resume, a cover letter and an uploaded file", async () => {
+    const base = await baseResume();
+    const { jobId } = await ready();
+    const letter = await coverLetter(jobId);
+    const proposal = await uploadAttachmentForJob(jobId, { bytes: proposalBytes, name: "Proposal.pdf" }, db);
+    expect(proposal).toMatchObject({ documentId: null, docKind: null, kind: "upload", source: "file", name: "Proposal.pdf", mime: "application/pdf", size: proposalBytes.length });
+
+    const draft = await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, attachments: [{ documentId: base.document.id }, { documentId: letter.document.id }, { fileId: proposal.fileId! }] }, db);
+    expect(draft.attachments.map((a) => [a.docKind, a.source])).toEqual([["resume", "file"], ["cover_letter", "pdf"], [null, "file"]]);
+
+    const sent = await go(jobId);
+    const files = sentMessage().attachments!;
+    expect(files.map((f) => f.filename)).toEqual(["base-resume.docx", "Jane Doe - Acme1 - Data Engineer 1 - Cover letter.pdf", "Proposal.pdf"]);
+    expect(files[2].content.equals(proposalBytes)).toBe(true);
+    expect(sent.attachments.map((a) => a.name)).toEqual(files.map((f) => f.filename));
+    expect((await listSent(jobId, db))[0].attachments.map((a) => a.documentId)).toEqual([base.document.id, letter.document.id, null]);
+
+    // Every library version that went out is locked; the uploaded file can be opened from the history.
+    expect((await latestVersion(base.document.id, db))?.lockedAt).not.toBeNull();
+    expect((await latestVersion(letter.document.id, db))?.lockedAt).not.toBeNull();
+    expect(await isKnownResumeFile(proposal.fileId!, db)).toBe(true);
+    // The uploaded file belongs to the email, not the library.
+    expect(await db.select().from(documents).where(eq(documents.kind, "resume"))).toHaveLength(1);
+  });
+
+  it("offers cover letters after resumes, this job's first", async () => {
+    await baseResume();
+    const jobA = await seedJob(1);
+    const jobB = await seedJob(2);
+    await coverLetter(jobB);
+    await coverLetter(jobA);
+    await libraryResume("Other resume", "text only", false);
+    const options = await attachmentOptions(jobA, db);
+    expect(options.map((o) => [o.kind, o.docKind])).toEqual([
+      ["base", "resume"],
+      ["job", "cover_letter"],
+      ["past", "resume"],
+      ["past", "cover_letter"],
+    ]);
+  });
+
+  it("keeps the order, drops repeats, and keeps a prepared PDF when other attachments change", async () => {
+    await baseResume();
+    const { jobId } = await ready();
+    const letter = await coverLetter(jobId);
+    const base = (await getDraft(jobId, db))!.attachments[0];
+    await saveDraft(jobId, { subject: "s", body: "b", attachments: [{ documentId: letter.document.id }, { documentId: base.documentId! }, { documentId: letter.document.id }] }, db);
+    const prepared = await prepareAttachments(jobId, { pdf: fakePdf, storageDir: dir }, db);
+    expect(prepared.map((p) => p.documentId)).toEqual([letter.document.id, base.documentId]);
+
+    const proposal = await uploadAttachmentForJob(jobId, { bytes: proposalBytes, name: "Proposal.pdf" }, db);
+    const draft = await saveDraft(jobId, { subject: "s", body: "b", attachments: [{ fileId: proposal.fileId! }, { documentId: letter.document.id }] }, db);
+    expect(draft.attachments.map((a) => a.name)).toEqual(["Proposal.pdf", "Jane Doe - Acme1 - Data Engineer 1 - Cover letter.pdf"]);
+    // The cover letter's PDF was kept: the draft still shows its real size.
+    expect(draft.attachments[1]).toMatchObject({ fileId: prepared[0].fileId, size: prepared[0].size });
+    await prepareAttachments(jobId, { pdf: fakePdf, storageDir: dir }, db);
+    expect(fakePdf).toHaveBeenCalledOnce();
+    expect(await db.select().from(outreachAttachments)).toHaveLength(2);
+  });
+
+  it("copies every attachment when a sent email is reused", async () => {
+    const base = await baseResume();
+    const { jobId } = await ready();
+    const proposal = await uploadAttachmentForJob(jobId, { bytes: proposalBytes, name: "Proposal.pdf" }, db);
+    await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, attachments: [{ documentId: base.document.id }, { fileId: proposal.fileId! }] }, db);
+    const sent = await go(jobId);
+    const draft = await reuseAsDraft(jobId, sent.id, db);
+    expect(draft.attachments.map((a) => a.documentId ?? a.fileId)).toEqual([base.document.id, proposal.fileId]);
+  });
+
+  it("refuses attachments that add up to more than 5 MB, and warns about each big one", async () => {
+    const { jobId } = await ready([]);
+    const big = (n: number) => uploadAttachmentForJob(jobId, { bytes: Buffer.concat([Buffer.from("%PDF-1.4 "), Buffer.alloc(n, n % 7)]), name: `big-${n}.pdf` }, db);
+    const a = await big(3 * 1024 * 1024);
+    const b = await big(2_900_000);
+    await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, attachments: [{ fileId: a.fileId! }, { fileId: b.fileId! }] }, db);
+    await expect(go(jobId)).rejects.toMatchObject({ code: "invalid", message: expect.stringMatching(/add up to 5\.[0-9] MB/) });
+
+    await saveDraft(jobId, { subject: "your onboarding, timed", body: GOOD_BODY, attachments: [{ fileId: a.fileId! }] }, db);
+    const err = await go(jobId).then(() => null, (e: OutreachError) => e);
+    expect(err?.needs?.find((w) => w.code === "big_attachment")?.message).toMatch(/"big-3145728\.pdf" \(3\.0 MB\) is over 1 MB/);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("accepts common document and image files for upload, and refuses anything else", async () => {
+    const jobId = await seedJob();
+    const up = (name: string, bytes: Buffer) => uploadAttachmentForJob(jobId, { bytes, name }, db);
+    expect((await up("notes.txt", Buffer.from("Plain notes"))).mime).toBe("text/plain");
+    expect((await up("Proposal.md", Buffer.from("# Proposal"))).mime).toBe("text/markdown");
+    expect((await up("shot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]))).mime).toBe("image/png");
+    expect((await up("deck.docx", await makeDocx(["Deck"]))).mime).toBe(DOCX_MIME);
+    await expect(up("page.html", Buffer.from("<html></html>"))).rejects.toThrow(/cannot be attached/);
+    await expect(up("tool.exe", Buffer.from("MZ"))).rejects.toThrow(/cannot be attached/);
+    await expect(up("fake.pdf", Buffer.from("not a pdf"))).rejects.toThrow(/does not look like a \.pdf/);
+    await expect(up("binary.txt", Buffer.from([0x00, 0x01]))).rejects.toThrow(/does not look like a \.txt/);
+    await expect(up("empty.pdf", Buffer.alloc(0))).rejects.toThrow(/empty/);
+    await expect(up("huge.pdf", Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(6 * 1024 * 1024)]))).rejects.toThrow(/larger than 5 MB/);
+    await expect(uploadAttachmentForJob("00000000-0000-4000-8000-000000000000", { bytes: proposalBytes, name: "p.pdf" }, db)).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("caps the number of attachments", async () => {
+    const jobId = await seedJob();
+    const refs: AttachmentRef[] = [];
+    for (let i = 0; i < 11; i++) refs.push({ fileId: (await uploadAttachmentForJob(jobId, { bytes: Buffer.from(`note ${i}`), name: `n${i}.txt` }, db)).fileId! });
+    await expect(saveDraft(jobId, { subject: "s", body: "b", attachments: refs }, db)).rejects.toThrow(/at most 10/);
   });
 });

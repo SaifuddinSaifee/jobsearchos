@@ -1,0 +1,1 @@
+ALTER TABLE "outreach_emails" ADD COLUMN "body_doc" jsonb;

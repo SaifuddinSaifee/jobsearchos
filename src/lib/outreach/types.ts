@@ -1,5 +1,7 @@
 // Client-safe: no database imports, so components can use these.
 
+import type { EmailDoc } from "./body";
+
 export const CONTACT_KINDS = ["founder", "hiring_manager", "team_lead", "engineer", "technical_recruiter", "recruiter", "other"] as const;
 export type ContactKind = (typeof CONTACT_KINDS)[number];
 
@@ -58,14 +60,18 @@ export type OutreachStatus = "draft" | "sending" | "sent" | "failed";
 export type AttachmentDTO = { fileId: string; name: string; size: number; mime: string };
 
 /**
- * A library resume that can go with an email. `source` says what actually gets attached: the original file of an
- * upload nobody has edited since ("file"), or a PDF made from the resume's text when the email is sent ("pdf").
- * `size` and `fileId` are only known once the file exists (always for "file", after preparing for "pdf").
+ * Something that can go with an email: a library resume or cover letter, or a file uploaded only for this email (a
+ * proposal, a writing sample...). `source` says what actually gets attached: the original file ("file": an upload
+ * nobody has edited since, or a plain uploaded file), or a PDF made from the document's text when the email is sent
+ * ("pdf"). `size` and `fileId` are only known once the file exists (always for "file", after preparing for "pdf").
  */
-export type ResumeOption = {
-  documentId: string;
-  /** Why it is offered: the base resume, written for this job, or elsewhere in the library. */
-  kind: "base" | "job" | "past";
+export type AttachmentOption = {
+  /** The library document, or null for a file uploaded only for this email. */
+  documentId: string | null;
+  /** What the library document is; null for a plain uploaded file. */
+  docKind: "resume" | "cover_letter" | null;
+  /** Why it is offered: the base resume, written for this job, elsewhere in the library, or uploaded for this email. */
+  kind: "base" | "job" | "past" | "upload";
   label: string;
   source: "file" | "pdf";
   /** The name the attachment goes out with (a good guess until the PDF is made). */
@@ -77,14 +83,44 @@ export type ResumeOption = {
   pages?: number | null;
 };
 
-/** The attachment chosen for a draft is one of the options. */
-export type DraftAttachmentDTO = ResumeOption;
+/** The attachments chosen for a draft are options. */
+export type DraftAttachmentDTO = AttachmentOption;
+
+/** How a draft names one attachment when it is saved: a library document, or a file uploaded for the email. */
+export type AttachmentRef = { documentId: string } | { fileId: string };
+
+export const refOf = (o: Pick<AttachmentOption, "documentId" | "fileId">): AttachmentRef => (o.documentId ? { documentId: o.documentId } : { fileId: o.fileId! });
+
+/** One identity per attachment, for lists and for spotting the same one twice. */
+export const attachmentKey = (o: Pick<AttachmentOption, "documentId" | "fileId">): string => o.documentId ?? `file:${o.fileId}`;
 
 /** An attached file as sent, with the library version it was made from. */
 export type SentAttachmentDTO = AttachmentDTO & { documentId: string | null; versionId: string | null; version: number | null };
 
-/** Above this a resume is probably an unoptimised export, and big attachments are more likely to be filtered. */
+/** Above this a file is probably an unoptimised export, and big attachments are more likely to be filtered. */
 export const BIG_ATTACHMENT_BYTES = 1024 * 1024;
+
+/** Gmail's JSON send endpoint is documented for small messages, so all attachments together stay under this. */
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+export const MAX_ATTACHMENTS = 10;
+
+/** Files that can be uploaded to go with an email as they are, by extension. Nothing a browser would run. */
+export const ATTACHABLE_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  odt: "application/vnd.oasis.opendocument.text",
+  rtf: "application/rtf",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+};
 
 export function formatBytes(n: number | null | undefined): string {
   if (n === null || n === undefined) return "";
@@ -98,7 +134,10 @@ export type DraftDTO = {
   contactId: string | null;
   subject: string;
   body: string;
-  attachment: DraftAttachmentDTO | null;
+  /** The body with its formatting; null for an email written before the editor had any. */
+  bodyDoc: EmailDoc | null;
+  /** In the order they were added; empty for none. */
+  attachments: DraftAttachmentDTO[];
   updatedAt: string;
 };
 
@@ -109,8 +148,9 @@ export type SentDTO = {
   toEmail: string;
   subject: string;
   body: string;
+  bodyDoc: EmailDoc | null;
   threadId: string | null;
-  attachment: SentAttachmentDTO | null;
+  attachments: SentAttachmentDTO[];
   sentAt: string;
 };
 

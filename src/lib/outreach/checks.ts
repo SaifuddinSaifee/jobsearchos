@@ -110,7 +110,7 @@ export type SendWarning = { code: "unverified" | "duplicate" | "timing" | "big_a
  * confirm dialog; the server checks that each one was acknowledged, so a stale or hand-made request cannot skip them.
  */
 export function sendWarnings(
-  to: { name: string; emailStatus: EmailStatus; sentCount: number; attachmentSize?: number | null },
+  to: { name: string; emailStatus: EmailStatus; sentCount: number; attachments?: { name: string; size: number | null }[] },
   s: ColdEmailSettings,
   now: Date,
 ): SendWarning[] {
@@ -125,8 +125,13 @@ export function sendWarnings(
   }
   const timing = sendTimingWarning(s, now);
   if (timing) out.push({ code: "timing", message: timing });
-  if (to.attachmentSize && to.attachmentSize > BIG_ATTACHMENT_BYTES) {
-    out.push({ code: "big_attachment", message: `The attached resume is ${formatBytes(to.attachmentSize)}. A resume should be well under 1 MB; large files are more likely to be filtered or ignored.` });
+  const big = (to.attachments ?? []).filter((a) => a.size !== null && a.size > BIG_ATTACHMENT_BYTES);
+  if (big.length > 0) {
+    const list = big.map((a) => `"${a.name}" (${formatBytes(a.size)})`).join(", ");
+    out.push({
+      code: "big_attachment",
+      message: `${big.length === 1 ? `${list} is` : `${list} are`} over 1 MB. Attachments should be well under 1 MB; large files are more likely to be filtered or ignored.`,
+    });
   }
   return out;
 }

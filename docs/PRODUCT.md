@@ -163,15 +163,22 @@ Opened from a job's side panel ("Email a contact").
 - Add or edit people by hand. Mark someone **Do not contact**.
 - **Write the email:** an editor laid out like a real message, with Write/Preview, a word count and live advice
   (length, template phrases, too many links, long subject). The draft saves itself.
-- **Attach a resume:** your base resume by default, or any resume in your Library, or upload a new one for this job (it
-  is filed in the Library under the job). An uploaded resume nobody has edited goes out as that exact file, so your own
-  formatting is untouched. Anything else goes out as a PDF made from the resume at the moment you send. The confirmation
-  shows the real file name, size and page count.
+- **Format it:** select text for a small toolbar with bold, italic, underline and link; the link button opens a field to
+  paste the address, so "My proposal (GitHub)" can link to the page. Web addresses you type or paste become links on
+  their own. A formatted email goes out with an HTML version and a plain-text copy (a link reads "text <address>" there);
+  an email with no formatting goes as plain text.
+- **Attach files:** as many as the email needs (up to 10, 5 MB in total). Your base resume is attached by default; add
+  any resume or cover letter from your Library, upload a new resume for this job (it is filed in the Library under the
+  job), or upload other files for this email alone, such as a proposal or a writing sample (PDF, Word, text, Markdown,
+  slides, spreadsheets or images; they go exactly as uploaded and are not added to the Library). An uploaded resume
+  nobody has edited goes out as that exact file, so your own formatting is untouched. Anything else from the Library goes
+  out as a PDF made at the moment you send (a cover letter's file name ends in "Cover letter"). Attachments go in the
+  order you added them, and the confirmation shows each file's real name, size and page count.
 - **Send from your Gmail** after a confirmation showing exactly who gets what. Sending is blocked by hard problems
   (no address, a Do not contact person, an unfilled placeholder, the daily limit) and warns on softer ones (an
   unverified address, a repeat email, outside your usual sending hours).
-- **Sent history** per job, with the exact resume that went out (and a link to that version in the Library), and "Use as
-  a new draft" to adapt one.
+- **Sent history** per job, with every file that went out (and a link to each Library version), and "Use as a new draft"
+  to adapt one (it keeps the same attachments).
 
 ### Library
 
@@ -191,7 +198,7 @@ Resumes, cover letters and emails, kept as text you can read and search, not as 
 - **Base resume:** the one marked Base is attached to emails by default. Make any resume the base from its menu.
 - **Emails you send** appear in the Emails tab on their own, locked, so they cannot be changed or deleted afterwards.
 - Anything sent or used in an application is **locked**: marking a job **Applied** locks the resume and cover letter
-  written for it (unsaved edits are saved as a version first), and a sent email locks the resume version it carried.
+  written for it (unsaved edits are saved as a version first), and a sent email locks every resume and cover letter version it carried.
   Locking is never undone, not even by undoing the status. You can still edit; the edit becomes a new version.
   Deleting hides a document from the library and search, and is refused for anything locked.
 - Your earlier past resumes, base resume and sent emails were moved into the Library automatically.
@@ -323,6 +330,8 @@ Open any document and write on it, like Notion on a real sheet of A4.
 - I can add a contact myself and mark people I must not contact.
 - I can write an email with live advice, and my draft is still there when I come back.
 - I can attach the right resume for this job, or upload a new one.
+- I can attach several files to one email, such as my resume, a cover letter and a proposal the posting asks for.
+- I can make words bold, italic or underlined, and turn a phrase into a link, by selecting it.
 - I can send from my own Gmail, only after seeing exactly what will go out.
 - I can see every email sent for a job, with the resume that went with it.
 

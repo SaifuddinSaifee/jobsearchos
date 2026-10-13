@@ -10,13 +10,27 @@ export function ResumeDropzone({
   label = "Drop your resume here, or click to choose a file",
   compact = false,
   busyLabel = "Reading and structuring your resume…",
+  accept = ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  hint = "PDF or DOCX, up to 10 MB",
+  multiple = false,
 }: {
+  /** Called once per file; several times for a multi-file drop or pick when `multiple` is on. */
   onFile: (file: File) => void;
   busy?: boolean;
   label?: string;
   compact?: boolean;
   busyLabel?: string;
+  /** The file input's accept list. */
+  accept?: string;
+  /** The small line under the label saying what is accepted. */
+  hint?: string;
+  multiple?: boolean;
 }) {
+  const take = (list: FileList | null | undefined) => {
+    const picked = Array.from(list ?? []);
+    for (const file of multiple ? picked : picked.slice(0, 1)) onFile(file);
+  };
+
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
 
@@ -35,8 +49,7 @@ export function ResumeDropzone({
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        const file = e.dataTransfer.files[0];
-        if (file && !busy) onFile(file);
+        if (!busy) take(e.dataTransfer.files);
       }}
       className={cn(
         "group/drop flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-sm text-muted-foreground outline-none transition-[background-color,border-color,color,scale] duration-200 hover:border-foreground/25 hover:bg-muted/50 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50",
@@ -54,15 +67,15 @@ export function ResumeDropzone({
         />
       )}
       <span>{busy ? busyLabel : label}</span>
-      <span className="text-xs">PDF or DOCX, up to 10 MB</span>
+      <span className="text-xs">{hint}</span>
       <input
         ref={input}
         type="file"
-        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept={accept}
+        multiple={multiple}
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onFile(file);
+          take(e.target.files);
           e.target.value = "";
         }}
       />

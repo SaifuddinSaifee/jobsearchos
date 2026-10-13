@@ -29,6 +29,7 @@ import type {
   SourceKind,
 } from "@/lib/career/schema";
 import type { ContactKind, ContactSource, EmailStatus, OutreachStatus, SearchStatus, SearchSteps } from "@/lib/outreach/types";
+import type { EmailDoc } from "@/lib/outreach/body";
 import type {
   GenerationInstructions,
   Preferences,
@@ -397,16 +398,13 @@ export const outreachEmails = pgTable(
     contactId: uuid("contact_id").references(() => contacts.id),
     toEmail: text("to_email"),
     subject: text("subject").notNull().default(""),
+    /** The plain-text version: what the checks read and what plain-text mail clients show. */
     body: text("body").notNull().default(""),
+    /** The body with its formatting (bold, italic, underline, links), when it was written in the composer's editor. */
+    bodyDoc: jsonb("body_doc").$type<EmailDoc>(),
     status: text("status").$type<OutreachStatus>().notNull().default("draft"),
     gmailMessageId: text("gmail_message_id"),
     gmailThreadId: text("gmail_thread_id"),
-    /** The resume attached to this email. Files are content-addressed and never changed, so this is exactly what was sent. */
-    attachmentFileId: uuid("attachment_file_id").references(() => files.id),
-    attachmentName: text("attachment_name"),
-    /** The library document and version the attachment was made from, when it was exported at send time. */
-    attachmentDocumentId: uuid("attachment_document_id").references((): AnyPgColumn => documents.id),
-    attachmentVersionId: uuid("attachment_version_id").references((): AnyPgColumn => documentVersions.id),
     error: text("error"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -420,6 +418,42 @@ export const outreachEmails = pgTable(
     index("outreach_emails_sent_idx").on(t.sentAt),
   ],
 );
+
+/**
+ * What goes with an email, in the order chosen. Either a library document (a resume or cover letter, sent as its
+ * original upload or as a PDF made at send time) or a file uploaded only for this email. `file_id` is what was, or will
+ * be, sent: files are content-addressed and never changed, so on a sent email it is exactly what went out.
+ */
+export const outreachAttachments = pgTable(
+  "outreach_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    emailId: uuid("email_id")
+      .notNull()
+      .references(() => outreachEmails.id),
+    position: integer("position").notNull(),
+    documentId: uuid("document_id").references((): AnyPgColumn => documents.id),
+    fileId: uuid("file_id").references(() => files.id),
+    /** The library version a document attachment was made from, once prepared. */
+    versionId: uuid("version_id").references((): AnyPgColumn => documentVersions.id),
+    /** The name a PDF made at send time goes out with. Null means the file's own name. */
+    name: text("name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("outreach_attachments_email_idx").on(t.emailId, t.position),
+    index("outreach_attachments_file_idx").on(t.fileId),
+    uniqueIndex("outreach_attachments_email_document_idx")
+      .on(t.emailId, t.documentId)
+      .where(sql`${t.documentId} is not null`),
+    uniqueIndex("outreach_attachments_email_file_idx")
+      .on(t.emailId, t.fileId)
+      .where(sql`${t.documentId} is null`),
+    check("outreach_attachments_has_source", sql`${t.documentId} is not null or ${t.fileId} is not null`),
+  ],
+);
+
+export type OutreachAttachmentRow = typeof outreachAttachments.$inferSelect;
 
 /**
  * "Find people" runs waiting for, or being handled by, the background worker (the same one that processes the job

@@ -10,7 +10,7 @@ import {
   markVerified,
   revealContactEmail,
   OutreachError,
-  prepareAttachment,
+  prepareAttachments,
   removeContact,
   reuseAsDraft,
   saveDraft,
@@ -21,7 +21,8 @@ import {
   updateContact,
   type ContactInput,
 } from "@/lib/outreach/service";
-import type { DraftDTO, SentDTO } from "@/lib/outreach/types";
+import type { EmailDoc } from "@/lib/outreach/body";
+import { MAX_ATTACHMENTS, type AttachmentRef, type DraftDTO, type SentDTO } from "@/lib/outreach/types";
 
 const Id = z.uuid();
 
@@ -91,24 +92,28 @@ export async function setWebsiteAction(jobId: string, website: string) {
 
 const optionalId = (v: string | null | undefined) => (v === undefined || v === null ? v : Id.parse(v));
 
+const Refs = z.array(z.union([z.strictObject({ documentId: Id }), z.strictObject({ fileId: Id })])).max(MAX_ATTACHMENTS, `An email can carry at most ${MAX_ATTACHMENTS} attachments.`);
+
 export async function saveDraftAction(
   jobId: string,
-  input: { subject: string; body: string; contactId?: string | null; attachmentDocumentId?: string | null },
+  input: { subject: string; body: string; bodyDoc?: EmailDoc | null; contactId?: string | null; attachments?: AttachmentRef[] },
 ) {
   return run(async (): Promise<{ draft: DraftDTO }> => {
-    const draft = await saveDraft(Id.parse(jobId), { ...input, contactId: optionalId(input.contactId), attachmentDocumentId: optionalId(input.attachmentDocumentId) });
+    const attachments = input.attachments === undefined ? undefined : Refs.parse(input.attachments);
+    // The service reduces bodyDoc to what an email can hold, so it is passed on as it came.
+    const draft = await saveDraft(Id.parse(jobId), { subject: input.subject, body: input.body, bodyDoc: input.bodyDoc, contactId: optionalId(input.contactId), attachments });
     return { draft };
   });
 }
 
 /**
- * Gets the attachment ready (the original file, or a PDF made from the resume as it is now) so the confirmation can
- * show its real name, size and page count. Sending prepares it again, so this is only for showing.
+ * Gets the attachments ready (each original file, or a PDF made from the document as it is now) so the confirmation can
+ * show their real names, sizes and page counts. Sending prepares them again, so this is only for showing.
  */
 export async function prepareSendAction(jobId: string) {
   return run(async () => {
-    const prepared = await prepareAttachment(Id.parse(jobId));
-    if (prepared?.versionCreated) kickWorker();
+    const prepared = await prepareAttachments(Id.parse(jobId));
+    if (prepared.some((p) => p.versionCreated)) kickWorker();
     return { prepared };
   });
 }
@@ -116,7 +121,7 @@ export async function prepareSendAction(jobId: string) {
 export async function sendAction(jobId: string, acknowledge: string[]) {
   return run(async (): Promise<{ sentEmail: SentDTO } & Snapshot> => {
     const sentEmail = await sendDraft(Id.parse(jobId), { acknowledge: z.array(z.string()).max(10).parse(acknowledge) });
-    // The email is now in the library, and its resume version may be new.
+    // The email is now in the library, and the versions it carried may be new.
     revalidatePath("/library");
     kickWorker();
     return { sentEmail, ...(await snapshot(jobId)) };

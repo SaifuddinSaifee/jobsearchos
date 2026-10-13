@@ -127,6 +127,20 @@
       "when": 1791883554737,
       "tag": "0017_career_record",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791909214158,
+      "tag": "0018_outreach_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791910347745,
+      "tag": "0019_outreach_body_doc",
+      "breakpoints": true
     }
   ]
 }

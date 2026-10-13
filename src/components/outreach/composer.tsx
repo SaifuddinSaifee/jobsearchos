@@ -6,12 +6,14 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
+import type { EmailDoc } from "@/lib/outreach/body";
 import { checkEmail, wordCount } from "@/lib/outreach/checks";
-import { KIND_LABEL, type DraftAttachmentDTO, type ContactDTO, MAX_BODY, MAX_SUBJECT, type ResumeOption } from "@/lib/outreach/types";
+import { KIND_LABEL, type AttachmentOption, type DraftAttachmentDTO, type ContactDTO, MAX_BODY, MAX_SUBJECT } from "@/lib/outreach/types";
 import { cn } from "@/lib/utils";
 import { AttachmentPicker } from "./attachment-picker";
+import { EmailBodyView } from "./email-body-view";
+import { EmailEditor } from "./email-editor";
 import { EmailStatusBadge, initials } from "./badges";
 
 export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -49,12 +51,14 @@ export function Composer({
   jobId,
   account,
   contact,
-  resumes,
-  attachment,
-  onAttachment,
+  options,
+  attachments,
+  onAddAttachment,
+  onRemoveAttachment,
   onResumeUploaded,
   subject,
   body,
+  bodyDoc,
   mode,
   saveState,
   settings,
@@ -68,19 +72,23 @@ export function Composer({
   jobId: string;
   account: { email: string; needsReconnect: boolean } | null;
   contact: ContactDTO | null;
-  resumes: ResumeOption[];
-  /** The attached resume, or null for none. */
-  attachment: DraftAttachmentDTO | null;
-  onAttachment: (documentId: string | null) => void;
-  onResumeUploaded: (resume: ResumeOption) => void;
+  /** Library resumes and cover letters that can be attached. */
+  options: AttachmentOption[];
+  /** What is attached, in order. */
+  attachments: DraftAttachmentDTO[];
+  onAddAttachment: (a: AttachmentOption) => void;
+  onRemoveAttachment: (a: AttachmentOption) => void;
+  onResumeUploaded: (resume: AttachmentOption) => void;
   subject: string;
+  /** The body as plain text (what the checks read), made from `bodyDoc`. */
   body: string;
+  bodyDoc: EmailDoc;
   mode: "write" | "preview";
   saveState: SaveState;
   settings: ColdEmailSettings;
   sentToday: number;
   onSubject: (v: string) => void;
-  onBody: (v: string) => void;
+  onBody: (doc: EmailDoc) => void;
   /** Called when a whole email with a "Subject:" line is pasted into an empty composer. */
   onPasteEmail: (subject: string, body: string) => void;
   onMode: (m: "write" | "preview") => void;
@@ -140,7 +148,7 @@ export function Composer({
             )}
           </Row>
           <Row label="Attach" className="items-start">
-            <AttachmentPicker jobId={jobId} resumes={resumes} selected={attachment} onSelect={onAttachment} onUploaded={onResumeUploaded} />
+            <AttachmentPicker jobId={jobId} options={options} selected={attachments} onAdd={onAddAttachment} onRemove={onRemoveAttachment} onResumeUploaded={onResumeUploaded} />
           </Row>
           <Row label="Subject" className="border-b-0 py-1.5">
             {mode === "write" ? (
@@ -160,26 +168,17 @@ export function Composer({
 
         <div className="p-4">
           {mode === "write" ? (
-            <Textarea
-              value={body}
-              maxLength={MAX_BODY}
-              onChange={(e) => onBody(e.target.value)}
-              onPaste={(e) => {
-                const text = e.clipboardData.getData("text");
-                const m = /^\s*subject:[ \t]*(.+)\r?\n+([\s\S]*)$/i.exec(text);
-                if (m && empty) {
-                  e.preventDefault();
-                  onPasteEmail(m[1].trim(), m[2].trim());
-                }
-              }}
-              placeholder={"Paste the email from your workflow here.\nA first line starting with \"Subject:\" fills the subject for you."}
-              aria-label="Email body"
-              className="min-h-72 resize-y text-sm leading-relaxed"
+            <EmailEditor
+              value={bodyDoc}
+              onChange={onBody}
+              onPasteEmail={onPasteEmail}
+              canTakeSubject={empty}
+              placeholder={'Paste the email from your workflow here. A first line starting with "Subject:" fills the subject. Select text to make it bold or add a link.'}
             />
+          ) : body.trim() ? (
+            <EmailBodyView doc={bodyDoc} text={body} className="min-h-72 rounded-lg bg-muted/40 p-4 text-sm leading-relaxed animate-in fade-in duration-200 motion-reduce:animate-none" />
           ) : (
-            <div className="min-h-72 rounded-lg bg-muted/40 p-4 text-sm leading-relaxed whitespace-pre-wrap">
-              {body.trim() ? body : <span className="text-muted-foreground">Nothing written yet.</span>}
-            </div>
+            <div className="min-h-72 rounded-lg bg-muted/40 p-4 text-sm text-muted-foreground">Nothing written yet.</div>
           )}
         </div>
 
@@ -188,6 +187,7 @@ export function Composer({
             {words} {words === 1 ? "word" : "words"}
             <span className="text-muted-foreground"> (aim for {settings.minWords} to {settings.maxWords})</span>
           </span>
+          {body.length > MAX_BODY && <span className="font-medium text-destructive">Too long to save. Shorten it below {MAX_BODY.toLocaleString()} characters.</span>}
           <span aria-live="polite" className="ml-auto flex items-center gap-1.5">
             {saveState === "saving" && (
               <>
