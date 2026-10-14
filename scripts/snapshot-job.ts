@@ -2,6 +2,8 @@ import "dotenv/config";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { extractJob } from "@/lib/jobs/extract";
+import { withLlmContext } from "@/lib/llm/context";
+import { runLlmScript } from "@/lib/llm/script";
 import { renderPage } from "@/lib/jobs/fetch/browser";
 import { defaultFetcher } from "@/lib/jobs/fetch/fetcher";
 import { fetchJob } from "@/lib/jobs/fetch";
@@ -58,16 +60,10 @@ async function main() {
 
 async function writeDraft(dir: string, text: string, hints: Parameters<typeof extractJob>[1]) {
   const file = path.join(dir, "expected.json");
-  const { extraction } = await extractJob(text, hints);
+  const { extraction } = await withLlmContext("snapshot-job", {}, () => extractJob(text, hints));
   // Only the fields the eval scores. Review and correct by hand: this is the answer key.
   const { company, title, location, remoteType, salaryMin, salaryMax, salaryCurrency, postedAt, technologies, keywords } = extraction;
   await writeFile(file, JSON.stringify({ company, title, location, remoteType, salaryMin, salaryMax, salaryCurrency, postedAt, technologies, keywords }, null, 2) + "\n");
 }
 
-main().then(
-  () => process.exit(process.exitCode ?? 0),
-  (err) => {
-    console.error(err instanceof Error ? err.message : err);
-    process.exit(1);
-  },
-);
+void runLlmScript(main);

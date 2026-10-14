@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { enqueueProfileSource, startBuild } from "@/lib/career/queue";
+import { withLlmContext } from "@/lib/llm/context";
 import { DecisionsSchema } from "@/lib/career/proposal-schema";
 import {
   applyReviewedProposal,
@@ -138,7 +139,9 @@ export async function editRecordAction(op: unknown, version: number) {
 /** Compares a role's bullets with the role the user moved it under, so each bullet gets a suggestion that fits. */
 export async function regroupRoleAction(proposalId: string, roleKey: string, target: unknown) {
   return run(async () => {
-    const out = await regroupRole(Id.parse(proposalId), z.string().min(1).parse(roleKey), target);
+    const id = Id.parse(proposalId);
+    const key = z.string().min(1).parse(roleKey);
+    const out = await withLlmContext("regroup-role", { proposalId: id }, () => regroupRole(id, key, target));
     return { proposal: out.proposal };
   });
 }

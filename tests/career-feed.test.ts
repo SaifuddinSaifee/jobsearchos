@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
 process.env.DATABASE_URL ??= "postgres://unused";
-vi.mock("@/lib/llm/client", () => ({ together: () => ({}) }));
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 const { kick } = vi.hoisted(() => ({ kick: vi.fn() }));
 vi.mock("@/lib/queue/worker", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/queue/worker")>()), kickWorker: kick }));
 

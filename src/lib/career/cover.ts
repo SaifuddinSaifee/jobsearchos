@@ -74,7 +74,7 @@ export function makeClassifier(chat: typeof chatStructured = chatStructured): Cl
     let last: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 3000 });
+        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 3000, step: "classify-cover-paragraphs" });
         return readClasses(result.items, paragraphs, shown);
       } catch (err) {
         last = err;

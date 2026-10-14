@@ -16,6 +16,7 @@ import { profileToDoc } from "@/lib/documents/convert/profile-to-doc";
 import { hasStructure, sectionsOf } from "@/lib/documents/read";
 import { addStructuredVersion, getDocument, getVersion, latestVersion } from "@/lib/documents/service";
 import { env } from "@/lib/env";
+import { addLlmIds } from "@/lib/llm/context";
 import type { Profile } from "@/lib/profile/schema";
 import { embedQuery, embedTexts } from "./embed";
 import { parseResume } from "./parse";
@@ -169,6 +170,7 @@ export async function processResumeIndex(indexId: string, deps: IndexDeps = {}):
     const version = await getVersion(versionId, db);
     const doc = version ? await getDocument(version.documentId, db) : null;
     if (!version || !doc) throw new Error("The document was deleted.");
+    addLlmIds({ documentVersionId: version.id, documentId: doc.id });
 
     let note: string | null = null;
     if (needsStructuring(doc, version)) {

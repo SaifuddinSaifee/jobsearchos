@@ -3,10 +3,11 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { env } from "@/lib/env";
 import type { Usage } from "@/lib/llm/chat";
-import type { StructuredOptions } from "@/lib/llm/structured";
+import { withLlmContext } from "@/lib/llm/context";
+import { runLlmScript } from "@/lib/llm/script";
 import type { Profile } from "@/lib/profile/schema";
 import { extractResumeText, normalizeText } from "@/lib/resume/extract";
-import { PARSE_OPTIONS, parseResume } from "@/lib/resume/parse";
+import { PARSE_OPTIONS, parseResume, type ParseOptions } from "@/lib/resume/parse";
 
 const USAGE = `Usage: npm run eval:resume -- <resume file or folder> [--effort default|low|medium|high] [--runs N] [--out results.json]
 
@@ -62,7 +63,7 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-function optionsFor(effort: Args["effort"]): StructuredOptions {
+function optionsFor(effort: Args["effort"]): ParseOptions {
   if (effort === "production") return PARSE_OPTIONS;
   if (effort === "default") return {};
   return { reasoningEffort: effort };
@@ -103,14 +104,16 @@ const countsOf = (p: Profile): Counts => ({
 const countsLabel = (c: Counts) =>
   `${c.roles} roles, ${c.bullets} bullets, ${c.skillGroups} skill groups, ${c.technologies} technologies, ${c.projects} projects, ${c.education} education`;
 
-async function evalOnce(file: string, run: number, opts: StructuredOptions): Promise<RunResult> {
+async function evalOnce(file: string, run: number, opts: ParseOptions, effortLabel: string): Promise<RunResult> {
   const t0 = performance.now();
   const text = await textOf(file);
   const t1 = performance.now();
   let usage: Usage | null = null;
   const result: RunResult = { file: path.basename(file), run, chars: text.length, extractMs: Math.round(t1 - t0), parseMs: 0, ok: false, error: null, usage: null, counts: null, bullets: null, profile: null };
   try {
-    const profile = await parseResume(text, { ...opts, onUsage: (u) => (usage = u) });
+    const profile = await withLlmContext("eval-resume", {}, () => parseResume(text, { ...opts, onUsage: (u) => (usage = u) }), {
+      metadata: { effort: effortLabel, run },
+    });
     Object.assign(result, { ok: true, counts: countsOf(profile), bullets: verbatim(profile, text), profile });
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
@@ -170,7 +173,7 @@ async function main() {
   const results: RunResult[] = [];
   for (const file of files) {
     for (let run = 1; run <= args.runs; run++) {
-      const r = await evalOnce(file, run, opts);
+      const r = await evalOnce(file, run, opts, args.effort);
       printRun(r);
       results.push(r);
     }
@@ -185,7 +188,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+void runLlmScript(main);

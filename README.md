@@ -97,6 +97,16 @@ Only needed for Stage 7. Sending uses your own Gmail account through Google's AP
 
 In Testing mode Google expires the login after 7 days; Settings then shows **Reconnect needed**. Optional contact finders use `HUNTER_API_KEY` and `APOLLO_API_KEY`.
 
+### Setup: Phoenix tracing (optional, to see every AI call)
+
+The AI usage page works without this: the numbers for each call (tokens, cost, time) are always recorded in your database. [Arize Phoenix](https://arize.com/docs/phoenix) adds the full prompt and reply of every call, in a trace per action.
+
+1. Run Phoenix locally, for example `docker run -p 6006:6006 arizephoenix/phoenix:version-20.16.0`, and open <http://localhost:6006>.
+2. In `.env` set `PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006` (and `PHOENIX_PROJECT_NAME`, default `jobsearchos`). Restart the app.
+3. Prompts contain your resume and job text. They stay in your local Phoenix; set `OPENINFERENCE_HIDE_INPUTS=true` and `OPENINFERENCE_HIDE_OUTPUTS=true` to keep the text out and the timings and token counts in.
+
+See [docs/LLM-LOGGING.md](docs/LLM-LOGGING.md).
+
 ### 7. Check everything works
 
 ```bash
@@ -144,7 +154,7 @@ Research uses the cheapest source first: the job posting, then the company's own
 | `npm run browsers:install` | Download Chromium for Playwright (JS-rendered career pages) |
 | `npm run snapshot:job -- <url...> [--draft]` | Record job pages as regression fixtures in `tests/fixtures/jobs/` (`--draft` also writes `expected.json` with the model, to review by hand) |
 | `npm run eval:jobs [-- <slug>]` | Replay fixtures through the real extraction model and print a scorecard (target 90%) |
-| `npm run eval:resume <file>` | Parse a resume PDF or DOCX with the extraction model and print the result |
+| `npm run eval:resume -- <file or folder> [--effort default\|low\|medium\|high] [--runs N] [--out file.json]` | Parse resumes (PDF, DOCX or TXT) with the extraction model and report time, tokens, failures and how many bullets were copied word for word |
 
 ## Project layout
 

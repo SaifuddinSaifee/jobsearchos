@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { extractJob } from "@/lib/jobs/extract";
+import { withLlmContext } from "@/lib/llm/context";
+import { runLlmScript } from "@/lib/llm/script";
 import { fetchJob } from "@/lib/jobs/fetch";
 import { normalizeForDedup } from "@/lib/jobs/dedup";
 import { loadFixtures, replayFetcher, type Fixture } from "@/lib/jobs/fixtures";
@@ -68,7 +70,7 @@ async function main() {
     scored++;
     try {
       const { text, hints } = await textFor(f);
-      const { extraction } = await extractJob(text, hints);
+      const { extraction } = await withLlmContext("eval-jobs", {}, () => extractJob(text, hints));
       const checks = score(f.expected, extraction);
       const ratio = checks.filter((c) => c.ok).length / Math.max(checks.length, 1);
       const core = checks.filter((c) => ["title", "company"].includes(c.field)).every((c) => c.ok);
@@ -82,10 +84,7 @@ async function main() {
   }
   const pct = scored ? (passed / scored) * 100 : 0;
   console.log(`\n${passed}/${scored} fixtures passed (${pct.toFixed(0)}%), target 90%`);
-  process.exit(pct >= 90 ? 0 : 1);
+  return pct >= 90 ? 0 : 1;
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+void runLlmScript(main);

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { withLlmContext } from "@/lib/llm/context";
 import { deleteJobs, fillAdditionalDetails, restoreDeleted, updateJob } from "@/lib/jobs/service";
 import { STATUS_VALUES } from "@/lib/jobs/status";
 import {
@@ -99,5 +100,8 @@ export async function restoreDeletedAction(deleted: unknown) {
 
 /** Reads the saved posting text again (one LLM call) to fill the Additional details section. */
 export async function fillAdditionalDetailsAction(jobId: string) {
-  return run(async () => ({ details: await fillAdditionalDetails(Id.parse(jobId)) }));
+  return run(async () => {
+    const id = Id.parse(jobId);
+    return { details: await withLlmContext("fill-job-details", { jobId: id }, () => fillAdditionalDetails(id)) };
+  });
 }

@@ -17,6 +17,7 @@ import { docToText } from "@/lib/documents/convert/doc-to-text";
 import { profileToDoc } from "@/lib/documents/convert/profile-to-doc";
 import { hasStructure } from "@/lib/documents/read";
 import type { DbOrTx } from "@/lib/documents/service";
+import { addLlmIds } from "@/lib/llm/context";
 import { parseResume } from "@/lib/resume/parse";
 import type { Profile } from "@/lib/profile/schema";
 import { emptyExtract, extractCoverLetter, extractFromDoc, extractFromProfile, type SourceExtract } from "./extract";
@@ -353,6 +354,7 @@ export async function processProposal(id: string, deps: ProcessDeps = {}): Promi
   try {
     const source = await getSourceRow(row.sourceId, db);
     if (!source) throw new Error("The source of this proposal no longer exists.");
+    addLlmIds({ documentId: source.documentId ?? undefined, documentVersionId: source.documentVersionId ?? undefined });
     const { extract, note } = await readSource(source, db, deps.parse ?? parseResume);
     const current = await currentRecord(db);
 

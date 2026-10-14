@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
 process.env.DATABASE_URL ??= "postgres://unused";
-vi.mock("@/lib/llm/client", () => ({ together: () => ({}) }));
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 import { careerProposals, careerSources } from "@/lib/db/schema";
 import { profileToDoc } from "@/lib/documents/convert/profile-to-doc";

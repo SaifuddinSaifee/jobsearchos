@@ -18,7 +18,7 @@ export class TogetherProvider implements GenerationProvider {
         { role: "system", content: system },
         { role: "user", content: prompt },
       ],
-    });
+    }, { step: "generate-document" });
     if (finishReason === "length") {
       throw new Error("Output was cut off (max_tokens); the input may be too long");
     }

@@ -55,6 +55,8 @@ First result, one synthetic resume, three runs each (`npm run eval:resume -- <fo
 
 Still to do: repeat on 10 to 20 real resumes before treating this as settled. If low effort loses fields or verbatim bullets there, pass `{}` from `parseResume` to restore the default.
 
+Prices are kept in code in [src/lib/llm/prices.ts](../src/lib/llm/prices.ts), and what each task actually costs is measured on the **AI usage** page (see [LLM-LOGGING.md](LLM-LOGGING.md)). Compare models on cost per task from there, not only on price per million tokens.
+
 ## Guiding principle
 
 The question is not "what is the smartest model", it is:

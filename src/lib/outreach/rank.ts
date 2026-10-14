@@ -58,7 +58,7 @@ Return one entry per candidate id, using the ids given.`,
         candidates: list,
       }),
     },
-    { maxTokens: 4000 },
+    { maxTokens: 4000, step: "rank-contacts" },
   );
   const known = new Set(list.map((c) => c.id));
   const seen = new Set<number>();

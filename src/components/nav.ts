@@ -2,6 +2,7 @@ import {
   Briefcase,
   Building2,
   Compass,
+  Gauge,
   LayoutDashboard,
   LibraryBig,
   PlusCircle,
@@ -29,6 +30,7 @@ export const NAV: NavItem[] = [
   { href: "/library", label: "Library", icon: LibraryBig, childLabel: "Document" },
   { href: "/discover", label: "Discover", icon: Compass },
   { href: "/profile", label: "Profile", icon: UserRound },
+  { href: "/usage", label: "AI usage", icon: Gauge },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

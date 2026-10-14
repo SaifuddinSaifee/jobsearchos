@@ -3,7 +3,10 @@ import { env } from "@/lib/env";
 
 let client: Together | undefined;
 
-/** Shared Together AI client (OpenAI-compatible chat API hosting open-weight models). */
+/**
+ * Shared Together AI client. Only used to list models (settings page): chat calls go through `chatClient()` in
+ * openai.ts, so they are traced.
+ */
 export function together(): Together {
   if (!client) {
     const apiKey = env().TOGETHER_AI_API_KEY;

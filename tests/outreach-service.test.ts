@@ -41,7 +41,7 @@ import type { AttachmentRef } from "@/lib/outreach/types";
 import { resetDb, testDb } from "./helpers";
 
 process.env.DATABASE_URL ??= "postgres://unused";
-vi.mock("@/lib/llm/client", () => ({ together: () => ({}) }));
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 const db = testDb();
 const TUE_MORNING = new Date(2026, 9, 6, 10, 0);

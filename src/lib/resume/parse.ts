@@ -1,6 +1,9 @@
 import { chatStructured, type StructuredOptions } from "@/lib/llm/structured";
 import { ProfileSchema, type Profile } from "@/lib/profile/schema";
 
+/** Options a caller may change for parsing; the step is always "parse-resume". */
+export type ParseOptions = Omit<StructuredOptions, "step">;
+
 const SYSTEM = `You convert resume text into structured JSON.
 Rules:
 - Extract only what is written in the resume. Never infer, embellish or invent anything.
@@ -15,15 +18,15 @@ Rules:
  * an uploaded resume. Low effort removes nearly all of the model's thinking. `scripts/eval-resume.ts` compares it
  * with the model's default.
  */
-export const PARSE_OPTIONS: StructuredOptions = { reasoningEffort: "low" };
+export const PARSE_OPTIONS: ParseOptions = { reasoningEffort: "low" };
 
-export async function parseResume(text: string, opts: StructuredOptions = PARSE_OPTIONS): Promise<Profile> {
+export async function parseResume(text: string, opts: ParseOptions = PARSE_OPTIONS): Promise<Profile> {
   return chatStructured(
     ProfileSchema,
     {
       system: SYSTEM,
       user: `Resume text:\n\n${text}`,
     },
-    opts,
+    { ...opts, step: "parse-resume" },
   );
 }

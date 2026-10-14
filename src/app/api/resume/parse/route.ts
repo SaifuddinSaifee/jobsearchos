@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withLlmContext } from "@/lib/llm/context";
 import { extractResumeText } from "@/lib/resume/extract";
 import { parseResume } from "@/lib/resume/parse";
 import { sha256 } from "@/lib/documents/intake";
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
     const { text, mime } = await extractResumeText(bytes, file.name, file.type);
-    const profile = await parseResume(text);
+    const profile = await withLlmContext("upload-resume", {}, () => parseResume(text));
     // Only the content is kept. The file's name, type and hash are returned so the base resume made from it can say where it came from.
     return NextResponse.json({ text, profile, source: { name: file.name, mime, sha256: sha256(bytes) } });
   } catch (err) {

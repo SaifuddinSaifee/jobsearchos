@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -21,6 +22,7 @@ import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
 import type { DocJSON } from "@/lib/documents/build";
 import type { PageSettings } from "@/lib/documents/page-settings";
 import type { DocumentKind, DocumentOrigin, VersionReason } from "@/lib/documents/types";
+import type { LlmCallStatus, RecordedAction, LlmStep } from "@/lib/llm/names";
 import type { IndexStatus } from "@/lib/resume/types";
 import type {
   CareerRecord,
@@ -748,9 +750,53 @@ export const careerProposals = pgTable(
   ],
 );
 
+/**
+ * One row per model call, numbers only: which step and action it was for, the model and settings, token counts, cost,
+ * time and outcome. Prompts and replies are never stored here (they live in Phoenix). Kept forever. The ids link a
+ * call to what it was for but are deliberately not foreign keys, so usage history survives deleting or merging them.
+ * Token columns are null when the provider reported no usage (a rejected, stopped or broken request); `cost_usd` is
+ * null when the model has no known price (see src/lib/llm/prices.ts).
+ */
+export const llmCalls = pgTable(
+  "llm_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    action: text("action").$type<RecordedAction>().notNull(),
+    step: text("step").$type<LlmStep>().notNull(),
+    runId: uuid("run_id"),
+    model: text("model").notNull(),
+    reasoningEffort: text("reasoning_effort"),
+    status: text("status").$type<LlmCallStatus>().notNull(),
+    error: text("error"),
+    finishReason: text("finish_reason"),
+    promptTokens: integer("prompt_tokens"),
+    cachedTokens: integer("cached_tokens"),
+    completionTokens: integer("completion_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    costUsd: doublePrecision("cost_usd"),
+    durationMs: integer("duration_ms").notNull(),
+    traceId: text("trace_id"),
+    jobId: uuid("job_id"),
+    companyId: uuid("company_id"),
+    documentId: uuid("document_id"),
+    documentVersionId: uuid("document_version_id"),
+    proposalId: uuid("proposal_id"),
+    searchId: uuid("search_id"),
+    queueItemId: uuid("queue_item_id"),
+  },
+  (t) => [
+    index("llm_calls_created_idx").on(t.createdAt),
+    index("llm_calls_job_idx").on(t.jobId, t.createdAt).where(sql`${t.jobId} is not null`),
+  ],
+);
+
 export type CareerRecordVersionRow = typeof careerRecordVersions.$inferSelect;
 export type CareerSourceRow = typeof careerSources.$inferSelect;
 export type CareerProposalRow = typeof careerProposals.$inferSelect;
+
+export type LlmCallRow = typeof llmCalls.$inferSelect;
+export type NewLlmCall = typeof llmCalls.$inferInsert;
 
 export type ResumeIndexRow = typeof resumeIndexes.$inferSelect;
 export type ResumeChunkRow = typeof resumeChunks.$inferSelect;

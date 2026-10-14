@@ -27,7 +27,7 @@ import { saveJob } from "@/lib/jobs/service";
 import { resetDb, testDb } from "./helpers";
 
 process.env.DATABASE_URL ??= "postgres://unused";
-vi.mock("@/lib/llm/client", () => ({ together: () => ({}) }));
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 const db = testDb();
 beforeEach(() => resetDb(db));

@@ -111,7 +111,7 @@ export function makeGrouper(chat: typeof chatStructured = chatStructured): Group
     // One retry: the model sometimes returns text that is not valid JSON.
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 4000 });
+        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 4000, step: "group-bullets" });
         return readAnswer(result.groups, bullets, facts);
       } catch (err) {
         last = err;

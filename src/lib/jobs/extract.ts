@@ -56,7 +56,7 @@ export async function extractJob(
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
   const user = `${known ? `Known fields (reliable, from the source):\n${known}\n\n` : ""}Job posting:\n\n${text.slice(0, MAX_CHARS)}`;
-  const extraction = await chatStructured(JobExtractionSchema, { system: SYSTEM, user }, { model });
+  const extraction = await chatStructured(JobExtractionSchema, { system: SYSTEM, user }, { model, step: "extract-job" });
   return { extraction: mergeHints(extraction, hints), model };
 }
 
@@ -75,7 +75,7 @@ ${ADDITIONAL_RULE}
   const out = await chatStructured(
     DetailsOnlySchema,
     { system, user: `Job posting:\n\n${text.slice(0, MAX_CHARS)}` },
-    { model: env().EXTRACTION_MODEL },
+    { model: env().EXTRACTION_MODEL, step: "extract-additional-details" },
   );
   return out.additionalDetails;
 }

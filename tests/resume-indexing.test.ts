@@ -31,7 +31,7 @@ import { DOCX_MIME } from "./docx";
 import { resetDb, testDb } from "./helpers";
 
 process.env.DATABASE_URL ??= "postgres://unused";
-vi.mock("@/lib/llm/client", () => ({ together: () => ({}) }));
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 const db = testDb();
 let dir: string;

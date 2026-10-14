@@ -5,7 +5,7 @@ code, no schema. For how each piece is built, follow the links to the stage docs
 
 Keep this file current. When a feature ships, move it from "Roadmap" to "What it does today" and add its user stories.
 
-Last updated: 2026-10-13 (branch `stage-4a`).
+Last updated: 2026-10-14 (branch `stage-4a`).
 
 ---
 
@@ -85,11 +85,12 @@ Nothing is ever submitted or sent without an explicit click from you.
 - **Work survives the tab.** Slow tasks (reading postings, finding people, indexing resumes) run in the background and
   keep going if you leave the page.
 - **Private by default.** Data lives in your local database and disk. The exception: AI calls send their input (resume
-  text, job pages) to Together AI, and Gmail, Tavily and Prospeo receive what they need.
+  text, job pages) to Together AI, and Gmail, Tavily and Prospeo receive what they need. If you turn on Phoenix tracing
+  (optional), the prompts and replies of AI calls are also kept in your own local Phoenix; they never go anywhere else.
 
 ## 5. What it does today
 
-The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Library, Discover, Profile, Settings.**
+The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Library, Discover, Profile, AI usage, Settings.**
 
 ### Profile
 
@@ -294,6 +295,20 @@ Open any document and write on it, like Notion on a real sheet of A4.
 - Your own list of bookmarks for the job search (job boards, saved searches, portals), grouped, with notes, showing
   which ones you have already opened today.
 
+### AI usage
+
+- Every AI call the app makes is recorded with its numbers only: which step and action it was for, the model, tokens
+  (including the model's thinking), cost, time and whether it worked. The text of prompts and replies is not stored.
+- **Headline numbers** for the last 7, 30 or 90 days: spend (with all-time spend beneath it), calls and failures,
+  tokens, and typical call time. If a model has no known price its calls are counted but left out of the spend, and
+  the page says how many.
+- **Spend per day** as a chart you can hover, or as a table.
+- **Where it went**, by action (adding a job, reading a resume, researching a company, finding people), by step, or by
+  model, with the cost of one action on average.
+- **Failures** with what went wrong, and the **latest calls**, each linking to the job, company or document it was for.
+  A call you stopped is shown as stopped, not as a failure.
+- With Phoenix running, each call also has a trace there (the full prompt and reply), and an **Open Phoenix** button.
+
 ### Settings
 
 - **General:** health checks for the database and the AI provider.
@@ -360,6 +375,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
 
 **Utilities**
 
+- I can see what the AI calls cost, which actions spend the most, and which calls fail.
 - I can keep my job-search bookmarks in one place and see which I have checked today.
 - I can connect Gmail and set my sending rules once.
 
@@ -382,7 +398,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
 | 9 | Global search, more filters, follow-ups, browser extension | Not started |
 | 10 | Analytics | Not started |
 | 11 | Later: interview prep, reply detection, salary data | Not started |
-| Extra | Quick links, Ask Claude, Markdown export, job editing | Done |
+| Extra | Quick links, Ask Claude, Markdown export, job editing, AI usage page and call tracing | Done |
 
 Stages were not built in number order: outreach (7) came before writing (4) because sending was the immediate need.
 
@@ -515,5 +531,6 @@ In order:
 | [RESUME-LIBRARY.md](RESUME-LIBRARY.md) | Earlier note on the Resumes page and master resume (replaced by Stage 4a) |
 | [cold-email.md](cold-email.md) | How cold emails should be written and sent |
 | [ai-models-for-jso.md](ai-models-for-jso.md) | Choice of AI models |
+| [LLM-LOGGING.md](LLM-LOGGING.md) | How AI calls are recorded and traced, and the AI usage page |
 | [prospeo.md](prospeo.md) | Prospeo API reference |
 | [mcp-jobsearchos.md](mcp-jobsearchos.md) | MCP ideas |

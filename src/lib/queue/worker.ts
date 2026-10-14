@@ -27,6 +27,7 @@ import {
 import { careerProposals, documentVersions } from "@/lib/db/schema";
 import { backfillDocuments } from "@/lib/documents/backfill";
 import { withAbortSignal } from "@/lib/llm/abort";
+import { withLlmContext } from "@/lib/llm/context";
 import { backfillResumeIndexes, claimNextIndexes, processResumeIndex, sweepStaleIndexes, touchIndex } from "@/lib/resume/indexing";
 import { isClean, reviewReason } from "./clean";
 import {
@@ -77,10 +78,12 @@ export async function processItem(id: string, deps: Partial<WorkerDeps> = {}): P
   try {
     const run = deps.run ?? runPipeline;
     const result = await withTimeout(
-      run(
-        row.kind === "url" ? { kind: "url", url: row.input } : { kind: "text", text: row.input, url: row.sourceUrl ?? undefined },
-        onStep,
-        deps.pipeline ?? defaultPipelineDeps,
+      withLlmContext("add-job", { queueItemId: id }, () =>
+        run(
+          row.kind === "url" ? { kind: "url", url: row.input } : { kind: "text", text: row.input, url: row.sourceUrl ?? undefined },
+          onStep,
+          deps.pipeline ?? defaultPipelineDeps,
+        ),
       ),
       ITEM_TIMEOUT_MS,
     );
@@ -132,7 +135,11 @@ export async function processSearch(
 
   try {
     const timeoutMs = deps.timeoutMs ?? SEARCH_TIMEOUT_MS;
-    const result = await withTimeout((deps.find ?? findContacts)(row.jobId, { onStep }, db), timeoutMs, "Timed out after 3 minutes");
+    const result = await withTimeout(
+      withLlmContext("find-contacts", { searchId: id, jobId: row.jobId }, () => (deps.find ?? findContacts)(row.jobId, { onStep }, db)),
+      timeoutMs,
+      "Timed out after 3 minutes",
+    );
     await chain;
     await markSearchDone(id, result.found, result.notes, db);
   } catch (err) {
@@ -159,7 +166,11 @@ async function offerAfterIndex(indexId: string, db: Db): Promise<void> {
 export async function processIndex(indexId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
   try {
-    await withTimeout((deps.run ?? processResumeIndex)(indexId, { db }), deps.timeoutMs ?? INDEX_TIMEOUT_MS, "Timed out after 5 minutes");
+    await withTimeout(
+      withLlmContext("index-resume", {}, () => (deps.run ?? processResumeIndex)(indexId, { db })),
+      deps.timeoutMs ?? INDEX_TIMEOUT_MS,
+      "Timed out after 5 minutes",
+    );
   } catch (err) {
     await db
       .update(resumeIndexes)
@@ -181,7 +192,7 @@ export async function processCareer(
   const db = deps.db ?? defaultDb();
   const signal = deps.signal ?? new AbortController().signal;
   try {
-    const work = withAbortSignal(signal, () => (deps.run ?? processProposal)(id, { db }));
+    const work = withAbortSignal(signal, () => withLlmContext("read-career-source", { proposalId: id }, () => (deps.run ?? processProposal)(id, { db })));
     await withTimeout(untilAborted(work, signal), deps.timeoutMs ?? CAREER_TIMEOUT_MS, "Timed out after 5 minutes");
   } catch (err) {
     if (signal.aborted) return;

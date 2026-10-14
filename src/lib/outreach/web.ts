@@ -68,7 +68,7 @@ Rules:
 - Never invent a name or title. If no one qualifies, return an empty list.`,
       user: JSON.stringify(unique.map((r) => ({ url: r.url, title: r.title, snippet: r.content.slice(0, 500) }))),
     },
-    { maxTokens: 3000 },
+    { maxTokens: 3000, step: "find-people-web" },
   );
 
   const names = new Set<string>();

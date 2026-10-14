@@ -25,7 +25,7 @@ import { getJobDetail } from "@/lib/jobs/tracker";
 import { resetDb, testDb } from "./helpers";
 
 process.env.DATABASE_URL ??= "postgres://unused";
-vi.mock("@/lib/llm/client", () => ({ together: () => ({}) }));
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 const chatStructured = vi.fn();
 vi.mock("@/lib/llm/structured", () => ({ chatStructured: (...a: unknown[]) => chatStructured(...a) }));
 
