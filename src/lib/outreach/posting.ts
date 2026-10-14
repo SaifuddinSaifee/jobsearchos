@@ -37,7 +37,7 @@ Rules:
 - If nobody is named, return an empty list.`,
       user: text,
     },
-    { maxTokens: 2000 },
+    { maxTokens: 2000, step: "extract-posting-people" },
   );
   return out.people
     .filter((p) => p.name.trim().length > 1)

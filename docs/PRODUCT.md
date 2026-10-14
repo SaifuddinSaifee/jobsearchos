@@ -5,7 +5,7 @@ code, no schema. For how each piece is built, follow the links to the stage docs
 
 Keep this file current. When a feature ships, move it from "Roadmap" to "What it does today" and add its user stories.
 
-Last updated: 2026-10-12 (branch `stage-emails`).
+Last updated: 2026-10-14 (branch `stage-4a`).
 
 ---
 
@@ -85,11 +85,12 @@ Nothing is ever submitted or sent without an explicit click from you.
 - **Work survives the tab.** Slow tasks (reading postings, finding people, indexing resumes) run in the background and
   keep going if you leave the page.
 - **Private by default.** Data lives in your local database and disk. The exception: AI calls send their input (resume
-  text, job pages) to Together AI, and Gmail, Tavily and Prospeo receive what they need.
+  text, job pages) to Together AI, and Gmail, Tavily and Prospeo receive what they need. If you turn on Phoenix tracing
+  (optional), the prompts and replies of AI calls are also kept in your own local Phoenix; they never go anywhere else.
 
 ## 5. What it does today
 
-The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Discover, Profile, Settings.**
+The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Library, Discover, Profile, AI usage, Settings.**
 
 ### Profile
 
@@ -99,7 +100,8 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Dis
   preferred technologies, excluded roles and companies.
 - **Generation instructions:** your style rules, tone and per-section length limits, ready for when the app writes for
   you.
-- **Past resumes:** import older resumes so the app can learn from them later.
+- **Base resume:** importing a resume file here also makes your base resume in the Library, from the profile you reviewed.
+  Past resumes now live in the Library.
 - **Version history:** every save is kept; you can look back and restore an older version.
 
 ### Adding jobs (New Application)
@@ -109,8 +111,12 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Dis
 - Works with the common applicant tracking systems (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable) and
   ordinary career pages, including ones that need a browser to render.
 - For sites that block automated reading (LinkedIn, Indeed), paste the job text instead.
+- Y Combinator's Work at a Startup pages are read from the data behind the page, which includes parts the page hides
+  when you are logged out: the company's tech stack, the full skills list, the application questions and the founders.
 - The app pulls out company, title, location, remote type, employment type, salary, posted date, responsibilities,
   requirements, technologies, keywords, and extra details such as benefits and the interview process.
+- Keywords aim to be the full list a resume should match (usually 25-60): every technology, the posting's named focus
+  areas, domains, practices, role type and stage, and the working traits it asks for.
 - Clean results save automatically. Doubtful ones wait for your review.
 - Duplicates are detected, so the same job is not saved twice.
 
@@ -158,16 +164,150 @@ Opened from a job's side panel ("Email a contact").
 - Add or edit people by hand. Mark someone **Do not contact**.
 - **Write the email:** an editor laid out like a real message, with Write/Preview, a word count and live advice
   (length, template phrases, too many links, long subject). The draft saves itself.
-- **Attach a resume:** your base resume by default, or any resume from your library, or upload a new one for this job.
+- **Format it:** select text for a small toolbar with bold, italic, underline and link; the link button opens a field to
+  paste the address, so "My proposal (GitHub)" can link to the page. Web addresses you type or paste become links on
+  their own. A formatted email goes out with an HTML version and a plain-text copy (a link reads "text <address>" there);
+  an email with no formatting goes as plain text.
+- **Attach files:** as many as the email needs (up to 10, 5 MB in total). Your base resume is attached by default; add
+  any resume or cover letter from your Library, upload a new resume for this job (it is filed in the Library under the
+  job), or upload other files for this email alone, such as a proposal or a writing sample (PDF, Word, text, Markdown,
+  slides, spreadsheets or images; they go exactly as uploaded and are not added to the Library). An uploaded resume
+  nobody has edited goes out as that exact file, so your own formatting is untouched. Anything else from the Library goes
+  out as a PDF made at the moment you send (a cover letter's file name ends in "Cover letter"). Attachments go in the
+  order you added them, and the confirmation shows each file's real name, size and page count.
 - **Send from your Gmail** after a confirmation showing exactly who gets what. Sending is blocked by hard problems
   (no address, a Do not contact person, an unfilled placeholder, the daily limit) and warns on softer ones (an
   unverified address, a repeat email, outside your usual sending hours).
-- **Sent history** per job, with the exact resume that went out, and "Use as a new draft" to adapt one.
+- **Sent history** per job, with every file that went out (and a link to each Library version), and "Use as a new draft"
+  to adapt one (it keeps the same attachments).
+
+### Library
+
+Resumes, cover letters and emails, kept as text you can read and search, not as files.
+
+- Four tabs: **Resumes, Cover letters, Emails, Career record** (see Career record, below). Each document shows what it is for (job and company), its date, where it
+  came from, how many versions it has, and (for resumes) whether it is indexed for search.
+- **Add** a document three ways: upload a PDF or DOCX, paste text, or start blank (a resume can start as a copy of your base
+  resume). Link it to a job, and add the role, date and the job description it was written for.
+- An uploaded resume is read into headings, bullets and sections, then the AI structures it in the background (roles with
+  title, company and dates) and saves that as a new version. Text the AI has no place for (Publications, Languages) is kept.
+  If you edit it before that finishes, your version is left alone. Uploading the same file twice is caught.
+- A **document page** is where you read and write it (see Editor, below), with its version history (view any version,
+  restore one as a new version), its details (editable) and **Copy Markdown**.
+- **Export** any document as **PDF, Word (DOCX), Markdown or plain text** (emails: Markdown or text). Files are named
+  "Name - Company - Role". A PDF or Word export is first saved as a version, so you can always find exactly what you sent.
+- **Base resume:** the one marked Base is attached to emails by default. Make any resume the base from its menu.
+- **Emails you send** appear in the Emails tab on their own, locked, so they cannot be changed or deleted afterwards.
+- Anything sent or used in an application is **locked**: marking a job **Applied** locks the resume and cover letter
+  written for it (unsaved edits are saved as a version first), and a sent email locks every resume and cover letter version it carried.
+  Locking is never undone, not even by undoing the status. You can still edit; the edit becomes a new version.
+  Deleting hides a document from the library and search, and is refused for anything locked.
+- Your earlier past resumes, base resume and sent emails were moved into the Library automatically.
+- Uploads are read into text and the file is not kept. A file is stored only when it leaves the app as an email attachment.
+
+### Career record
+
+One record of everything you have done, merged from your resumes, cover letters, the Profile and a LinkedIn profile saved
+as a PDF. It lives in the **Career record** tab of the Library. It has no length limit and is never sent anywhere. It is
+the base the writer will use to pick the right facts and wording for a job.
+
+- **Build from your library** queues every resume (the base first, then newest first), the Profile, a LinkedIn print
+  if you added one, and your cover letters last. Sources are prepared one at a time in the background, each compared
+  with the record as it stands after the one before. **Include Profile** and **Add LinkedIn PDF** add those two by hand
+  (save your LinkedIn page as a PDF from the browser's print dialog; only its text is kept, never the file). Once a record
+  exists, a saved Profile is offered for review on its own.
+- **Progress in the sidebar.** While sources are being prepared, a card in the sidebar (on every page) shows which one
+  is being read and how many of the batch are done. When one is ready, the card says so (with how many wait after it)
+  and opens the review, and a toast with a **Review** button appears wherever you are. Only one source is prepared ahead
+  of your review, so the next starts after you save. Failures show on the card and as a toast too.
+- **Skip a source for now.** **Stop and skip** (on the sidebar card and the Career record tab) stops the source being
+  read, cancelling its model calls, and starts the next one. **Review later** does the same for one waiting for review,
+  keeping your choices so far. A skipped source is not reviewed and not in the record: it is listed under "Skipped, not
+  reviewed yet" with **Prepare** to queue it again, and looking for new sources leaves it alone. A new version of its
+  document replaces it as usual.
+- **After a restart.** A source that was being read when the server stopped is queued again as soon as the server
+  starts, so it never shows as in progress when nothing is working on it.
+- **When a source fails.** The record tab names the sources that could not be prepared, with **Try again** and
+  **View details**. Details opens a dialog with each failure taken apart: the plain reason, when it failed, attempts, the
+  step that failed and, for model errors, the HTTP status, error type, code, parameter and request id, plus the raw
+  error. Copy one failure or **Copy all** as plain text to share or debug.
+- **Review before anything is added.** For each source you see every employer, role and bullet with a suggestion: new,
+  the same role, a new **framing** of a role you already have, the same fact worded differently, or already in your
+  record. You can include or leave out anything, move a role under another role or framing, say which fact a bullet
+  belongs to, and see in words what saving will add. Your choices are saved as you go. Saving makes a new record version.
+- **Framings.** The same employer and dates under a different title (Product Manager in one resume, Software Engineer in
+  another) is one role with two framings. Each framing keeps its own title, angle and the roles it was written for, and
+  facts are shared, so one fact can hold a PM wording and an engineering wording. A promotion that overlaps by a month
+  stays a separate role. Dates widen to cover every source; a disagreement becomes a note, never a block.
+- **Browse and edit.** Employers, then roles (with a filter by framing), then facts, then wordings, each with the
+  documents it came from (linking to the exact version). Search the whole record. Edit a wording, add a fact or
+  wording, move a wording to another fact, merge facts, edit dates and location, add or edit a framing, split a
+  framing off as its own role, merge roles, rename or delete an employer, and manage skills and achievements.
+- **Your edits win.** Anything you change is marked "Edited by you" and a later merge never overwrites it. Something you
+  delete is proposed as "left out" the next time it appears, with "You removed this before".
+- **Versions.** Every merge, edit and restore is a new version; restoring an old one saves it as a new version and marks
+  the merges since as undone, so you can review them again.
+- Employers are linked to the Companies directory when a company of that name exists. Nothing is created there.
+- **Reworded bullets.** A bullet that matches nothing exactly is put to the AI, which only chooses whether it repeats a
+  fact you already have (or another new bullet); it cannot write or change text. If you move a role under a different
+  role, "Compare bullets with this role" re-checks its bullets against it.
+- **Cover letters.** Each paragraph is labelled a story about a job (kept under that role and fact), a reason for
+  applying to the company (the company is the one the letter is linked to), a general reason, or filler that is skipped.
+  You can change any label, role or fact. Reasons are listed under "Reasons for applying".
+- A resume with no structure is read by the AI before it is compared. Merges never rewrite text: every wording is word
+  for word from its source.
+- **From the editor.** Once a record exists, a resume or cover letter you create or save a version of is offered to the
+  record (a resume waits until it has been read for search). A newer version replaces an older one still waiting. A source
+  that would add nothing (every bullet is already there, the dates and the role it was written for are noted) is left out
+  without asking, with a note, so saving a small edit does not leave a review to click through.
+
+### Editor
+
+Open any document and write on it, like Notion on a real sheet of A4.
+
+- **Type anywhere.** Enter moves through a role (title, dates, company, location) and into its bullets; Enter on an empty
+  last bullet starts the next role; Tab indents a bullet (two levels) and moves between fields. Backspace never merges or
+  deletes text by accident. `- ` starts a bullet list and `## ` starts a section.
+- **Slash menu:** type `/` on an empty line to add a role, project, education entry, skills line, bullet list, text, a new
+  section or a divider. It is narrowed as you type, and it does not open for a slash in the middle of a sentence ("AI/ML").
+- **Selection toolbar** over selected text: bold, italic, underline, link. Ctrl or Cmd with B, I, U also work.
+- **Handle in the margin** beside whatever you point at (a bullet, a role, a whole section): drag it to reorder, click it
+  for Duplicate, Move up, Move down, Delete, or press the plus to add below.
+- **Outline** (toolbar): the sections and entries, to jump around by.
+- **Record** (toolbar, resumes): a panel that shows your career record's wording for the role the cursor is in. It lists
+  the facts of that role with each wording (and cover letter stories), marks what is already on the page, and has an
+  **Insert** button that adds the wording as a bullet at the end of that role (Undo takes it back). By default it shows
+  only wordings that fit the title on the page (for example the engineering wording on an engineering resume); untick the
+  box to see the others too. If the record has nothing for the role, it says so.
+- **Saves as you type**, and a checkpoint is made when you choose **Save version**, export, attach to an email or apply.
+  If the same document is changed in another tab, it tells you instead of overwriting it. Ctrl or Cmd with S saves now.
+- **Page settings:** font (Calibri, Arial or Times style), spacing, **margins (Narrow half inch by default, Normal, Wide)**,
+  accent colour, and fine tuning in exact numbers. Body text is justified (the header stays centred, dates stay on the
+  right), in the editor and in the PDF and Word exports alike.
+- **Keep to one page** is a switch (on by default). On: a line shows where page one ends, the toolbar says "Fits on one
+  page" or how many lines it runs over, and the spacing tightens as you write so it stays on one page. Your words are never
+  cut, and if it still cannot fit it says which sections are longest. Off: no limit, no warnings.
+- Editing is for screens at least tablet wide; on a phone you can read and export.
+- Not built yet: dragging in the outline, turning a block into another kind, a zoom control.
 
 ### Quick links
 
 - Your own list of bookmarks for the job search (job boards, saved searches, portals), grouped, with notes, showing
   which ones you have already opened today.
+
+### AI usage
+
+- Every AI call the app makes is recorded with its numbers only: which step and action it was for, the model, tokens
+  (including the model's thinking), cost, time and whether it worked. The text of prompts and replies is not stored.
+- **Headline numbers** for the last 7, 30 or 90 days: spend (with all-time spend beneath it), calls and failures,
+  tokens, and typical call time. If a model has no known price its calls are counted but left out of the spend, and
+  the page says how many.
+- **Spend per day** as a chart you can hover, or as a table.
+- **Where it went**, by action (adding a job, reading a resume, researching a company, finding people), by step, or by
+  model, with the cost of one action on average.
+- **Failures** with what went wrong, and the **latest calls**, each linking to the job, company or document it was for.
+  A call you stopped is shown as stopped, not as a failure.
+- With Phoenix running, each call also has a trace there (the full prompt and reply), and an **Open Phoenix** button.
 
 ### Settings
 
@@ -175,11 +315,11 @@ Opened from a job's side panel ("Email a contact").
 - **Email:** connect Gmail, set sending rules (daily limit, days and hours), writing defaults and extra banned phrases,
   turn the automatic email lookup on or off, and check the contact-finder keys.
 
-### Behind the scenes (in progress on this branch)
+### Behind the scenes
 
-- Every resume that enters the app (base, uploaded for a job, past) is indexed for search in the background, so future
-  writing can reuse your real wording for similar jobs. Nothing uses this yet from a user's point of view, except the
-  index status shown on the Profile page and the attach panel.
+- Every library resume is indexed for search in the background (split into sections, one search vector each), so future
+  writing can reuse your real wording for similar jobs. Nothing uses this yet from a user's point of view, except the index
+  status shown in the Library, on the Profile page and in the attach panel.
 
 ## 6. User stories (built)
 
@@ -221,11 +361,21 @@ Opened from a job's side panel ("Email a contact").
 - I can add a contact myself and mark people I must not contact.
 - I can write an email with live advice, and my draft is still there when I come back.
 - I can attach the right resume for this job, or upload a new one.
+- I can attach several files to one email, such as my resume, a cover letter and a proposal the posting asks for.
+- I can make words bold, italic or underlined, and turn a phrase into a link, by selecting it.
 - I can send from my own Gmail, only after seeing exactly what will go out.
 - I can see every email sent for a job, with the resume that went with it.
 
+**Library**
+
+- I can keep every resume, cover letter and email as readable text, and find them again by job and date.
+- I can upload a resume and get it split into roles and bullets without retyping it.
+- I can see older versions of a document and bring one back.
+- I can tell which documents went out, because they are locked.
+
 **Utilities**
 
+- I can see what the AI calls cost, which actions spend the most, and which calls fail.
 - I can keep my job-search bookmarks in one place and see which I have checked today.
 - I can connect Gmail and set my sending rules once.
 
@@ -238,6 +388,7 @@ Opened from a job's side panel ("Email a contact").
 | 2 | New Application: link or text to structured job, background queue | Done |
 | 3 | Jobs tracker and dashboard | Done |
 | 3b | Company directory and research | Done |
+| 4a | Library, editor and export, career record, fit score | **Library, editor and export done**; **career record built** (resumes, Profile, LinkedIn and cover letters, review, grouping, browse and edit, editor panel); fit score not started |
 | 4 | Writing: resume, cover letter, cold email | **Not started** |
 | 5 | Learning from past resumes | **Started**: resume indexing built, not yet used for writing |
 | 6 | Match score and gap analysis | Not started |
@@ -247,11 +398,28 @@ Opened from a job's side panel ("Email a contact").
 | 9 | Global search, more filters, follow-ups, browser extension | Not started |
 | 10 | Analytics | Not started |
 | 11 | Later: interview prep, reply detection, salary data | Not started |
-| Extra | Quick links, Ask Claude, Markdown export, job editing | Done |
+| Extra | Quick links, Ask Claude, Markdown export, job editing, AI usage page and call tracing | Done |
 
 Stages were not built in number order: outreach (7) came before writing (4) because sending was the immediate need.
 
 ## 8. Roadmap: what comes next
+
+### Stage 4a: Career library, editor, career record, fit score (library and career record built, fit score next)
+
+Groundwork for writing. Plan and build notes: [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md). The **Library**, **editor**
+and **export** (first and last bullets) are built; the career record and fit score are next, in that order.
+
+- **Library (built):** every resume, cover letter and email stored as text, versioned, editable in the editor, exportable.
+- **Career record (built):** one "mega resume" of every employer, role, fact and wording across all your resumes,
+  including the same job framed differently (PM in one resume, engineer in another). Merges are proposed and reviewed,
+  never silent. **Built:** the record and its versions, merging resumes, cover letters, the Profile and a LinkedIn print
+  with review, framings, AI grouping of reworded bullets, browsing and hand edits, documents saved in the editor offered
+  back to the record, and a panel in the editor to reuse its wording. **Not yet:** the Profile still reads its own
+  experience (it becomes "the default selection from the career record" once the record is trusted).
+- **Fit score:** how well a resume matches a job and its company, with missing keywords split into "you have it, this
+  resume does not show it" and "real gap".
+- **Editor (built):** a Notion-like editor on a real A4 page, with one-page PDF, Word, Markdown and text export from the
+  same layout.
 
 ### Stage 4: Writing (the biggest gap)
 
@@ -359,8 +527,10 @@ In order:
 | [STAGE-2-PLAN.md](STAGE-2-PLAN.md), [STAGE-2B-QUEUE.md](STAGE-2B-QUEUE.md) | Adding jobs and the background queue |
 | [STAGE-3-PLAN.md](STAGE-3-PLAN.md), [STAGE-3B-COMPANIES.md](STAGE-3B-COMPANIES.md) | Jobs tracker, companies |
 | [STAGE-7A-EMAIL-SETTINGS.md](STAGE-7A-EMAIL-SETTINGS.md), [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md) | Gmail, outreach |
-| [RESUME-LIBRARY.md](RESUME-LIBRARY.md) | Resumes page and master resume (planned) |
+| [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md) | Library, editor and export (built), career record, fit score (planned) |
+| [RESUME-LIBRARY.md](RESUME-LIBRARY.md) | Earlier note on the Resumes page and master resume (replaced by Stage 4a) |
 | [cold-email.md](cold-email.md) | How cold emails should be written and sent |
 | [ai-models-for-jso.md](ai-models-for-jso.md) | Choice of AI models |
+| [LLM-LOGGING.md](LLM-LOGGING.md) | How AI calls are recorded and traced, and the AI usage page |
 | [prospeo.md](prospeo.md) | Prospeo API reference |
 | [mcp-jobsearchos.md](mcp-jobsearchos.md) | MCP ideas |

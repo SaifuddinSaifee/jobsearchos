@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import { emailAccounts, type EmailAccountRow } from "@/lib/db/schema";
 import { env } from "@/lib/env";
+import { MAX_ATTACHMENT_BYTES } from "@/lib/outreach/types";
 import { decrypt, encrypt } from "./crypto";
 
 export const GMAIL_SCOPES = [
@@ -186,13 +187,15 @@ export type OutgoingEmail = {
   /** Set to reply inside an existing thread. */
   threadId?: string;
   inReplyTo?: string;
+  /** The same email with its formatting. When set, `body` goes along as the plain-text alternative. */
+  html?: string;
   attachments?: OutgoingAttachment[];
 };
 
 export type OutgoingAttachment = { filename: string; mime: string; content: Buffer };
 
 /** Gmail's JSON send endpoint is documented for small messages; resumes are far below this. Base64 adds a third. */
-export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+export { MAX_ATTACHMENT_BYTES };
 
 const stripBreaks = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
 
@@ -207,10 +210,26 @@ function fileNameParam(name: string): string {
   return `"${encodeHeader(safe)}"`;
 }
 
-/** RFC 2822 message (plain text, or text plus attachments), base64url-encoded as the Gmail API expects. */
+const base64Text = (s: string) => wrap76(Buffer.from(s.replace(/\r?\n/g, "\r\n"), "utf8").toString("base64"));
+const newBoundary = () => `=_jobsearchos_${randomUUID().replaceAll("-", "")}`;
+
+/** One MIME entity: its headers, a blank line, its body. */
+type Entity = { headers: string[]; body: string };
+
+const multipart = (subtype: "mixed" | "alternative", parts: Entity[]): Entity => {
+  const boundary = newBoundary();
+  return {
+    headers: [`Content-Type: multipart/${subtype}; boundary="${boundary}"`],
+    body: `${parts.map((p) => `--${boundary}\r\n${p.headers.join("\r\n")}\r\n\r\n${p.body}`).join("\r\n")}\r\n--${boundary}--\r\n`,
+  };
+};
+
+/**
+ * RFC 2822 message, base64url-encoded as the Gmail API expects. Plain text alone; or, with formatting, plain text and
+ * HTML as alternatives of each other; then, with attachments, that body followed by the files.
+ */
 export function buildRawMessage(m: OutgoingEmail): string {
   const attachments = m.attachments ?? [];
-  const boundary = `=_jobsearchos_${randomUUID().replaceAll("-", "")}`;
   const headers = [
     m.from ? `From: ${stripBreaks(m.from)}` : null,
     `To: ${stripBreaks(m.to)}`,
@@ -219,22 +238,17 @@ export function buildRawMessage(m: OutgoingEmail): string {
     m.inReplyTo ? `In-Reply-To: ${stripBreaks(m.inReplyTo)}` : null,
     m.inReplyTo ? `References: ${stripBreaks(m.inReplyTo)}` : null,
     "MIME-Version: 1.0",
-    ...(attachments.length > 0
-      ? [`Content-Type: multipart/mixed; boundary="${boundary}"`]
-      : ["Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64"]),
   ].filter((h): h is string => h !== null);
-  const text = wrap76(Buffer.from(m.body.replace(/\r?\n/g, "\r\n"), "utf8").toString("base64"));
 
-  if (attachments.length === 0) return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${text}`, "utf8").toString("base64url");
-
-  const parts = [
-    `--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${text}`,
-    ...attachments.map(
-      (a) =>
-        `--${boundary}\r\nContent-Type: ${stripBreaks(a.mime)}; name=${fileNameParam(a.filename)}\r\nContent-Disposition: attachment; filename=${fileNameParam(a.filename)}\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap76(a.content.toString("base64"))}`,
-    ),
-  ];
-  return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}\r\n--${boundary}--\r\n`, "utf8").toString("base64url");
+  const plain: Entity = { headers: ["Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64"], body: base64Text(m.body) };
+  // Alternatives go from plainest to richest; a client shows the last one it can.
+  const text = m.html ? multipart("alternative", [plain, { headers: ["Content-Type: text/html; charset=UTF-8", "Content-Transfer-Encoding: base64"], body: base64Text(m.html) }]) : plain;
+  const files: Entity[] = attachments.map((a) => ({
+    headers: [`Content-Type: ${stripBreaks(a.mime)}; name=${fileNameParam(a.filename)}`, `Content-Disposition: attachment; filename=${fileNameParam(a.filename)}`, "Content-Transfer-Encoding: base64"],
+    body: wrap76(a.content.toString("base64")),
+  }));
+  const top = files.length > 0 ? multipart("mixed", [text, ...files]) : text;
+  return Buffer.from(`${[...headers, ...top.headers].join("\r\n")}\r\n\r\n${top.body}`, "utf8").toString("base64url");
 }
 
 export type SentMessage = { messageId: string; threadId: string };
@@ -242,7 +256,7 @@ export type SentMessage = { messageId: string; threadId: string };
 /** Sends one email from the connected account. The only code path that sends mail. */
 export async function sendEmail(m: OutgoingEmail, db: Db = defaultDb()): Promise<SentMessage> {
   const total = (m.attachments ?? []).reduce((n, a) => n + a.content.length, 0);
-  if (total > MAX_ATTACHMENT_BYTES) throw new Error("The attachment is larger than 5 MB. Use a smaller file.");
+  if (total > MAX_ATTACHMENT_BYTES) throw new Error("The attachments are larger than 5 MB together. Use smaller files.");
   const { token, account } = await getAccessToken(db);
   const res = await fetch(SEND_URL, {
     method: "POST",

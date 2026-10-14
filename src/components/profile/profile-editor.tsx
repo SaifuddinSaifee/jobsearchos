@@ -19,12 +19,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { ImportedSource } from "@/lib/documents/base";
 import { ProfileSchema, type Profile } from "@/lib/profile/schema";
 import { LinesField, TagsField } from "./fields";
 
 type Props = {
   initial: Profile;
-  baseResumeFileId?: string | null;
+  /** Set when the profile was read from an uploaded resume: saving it also makes your base resume in the library. */
+  importedSource?: ImportedSource | null;
   changeNote?: string;
   onSaved?: () => void;
 };
@@ -138,7 +140,7 @@ function Tags({
   );
 }
 
-export function ProfileEditor({ initial, baseResumeFileId, changeNote, onSaved }: Props) {
+export function ProfileEditor({ initial, importedSource, changeNote, onSaved }: Props) {
   const [pending, startTransition] = useTransition();
   const { control, register, handleSubmit } = useForm<Profile>({
     resolver: zodResolver(ProfileSchema),
@@ -153,7 +155,7 @@ export function ProfileEditor({ initial, baseResumeFileId, changeNote, onSaved }
 
   const onSubmit = handleSubmit((values) =>
     startTransition(async () => {
-      const result = await saveProfileAction(values, baseResumeFileId, changeNote);
+      const result = await saveProfileAction(values, importedSource, changeNote);
       if (result.ok) {
         toast.success(`Saved as version ${result.version}`);
         onSaved?.();

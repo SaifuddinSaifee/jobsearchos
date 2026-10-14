@@ -9,6 +9,8 @@ import {
   statusEvents,
 } from "@/lib/db/schema";
 import { loadParent, toProfile } from "@/lib/companies/service";
+import { lockForJob } from "@/lib/documents/service";
+import { enqueueDocumentIndex } from "@/lib/resume/indexing";
 import { dateToStored } from "./format";
 import { safeHref } from "./links";
 import {
@@ -179,6 +181,8 @@ async function applyStatus(
   applicationId: string,
   to: ApplicationStatus,
   opts: { appliedDate?: string; note?: string; restoreAppliedAt?: Date | null },
+  /** Collects documents that got a new version because the job was applied to, so the caller can index them after commit. */
+  newlyVersioned?: string[],
 ): Promise<PreviousState | null> {
   const app = await lockApplication(tx, applicationId);
   if (app.status === to) return null;
@@ -197,10 +201,18 @@ async function applyStatus(
     note: opts.note ?? null,
   });
   await tx.update(jobs).set({ updatedAt: new Date() }).where(eq(jobs.id, app.jobId));
+  // What was sent for this job is now fixed: unsaved edits become a version and the latest versions are locked. Undoing
+  // the status later does not unlock them (a version that may have been sent is never changed).
+  if (to === "applied") newlyVersioned?.push(...(await lockForJob(tx, app.jobId)).createdDocumentIds);
   return { applicationId, status: app.status, appliedAt: iso(app.appliedAt), expected: to };
 }
 
 export type ChangeResult = { previous: PreviousState[] };
+
+/** Queues the new resume versions for the search index. The worker picks them up on its next pass; a failure here is not the user's problem. */
+async function indexNewVersions(documentIds: string[], db: Db) {
+  for (const id of new Set(documentIds)) await enqueueDocumentIndex(id, {}, db).catch(() => null);
+}
 
 export async function changeStatus(
   applicationId: string,
@@ -208,10 +220,13 @@ export async function changeStatus(
   opts: { appliedDate?: string; note?: string } = {},
   db: Db = defaultDb(),
 ): Promise<ChangeResult> {
-  return db.transaction(async (tx) => {
-    const prev = await applyStatus(tx, applicationId, to, opts);
+  const created: string[] = [];
+  const result = await db.transaction(async (tx) => {
+    const prev = await applyStatus(tx, applicationId, to, opts, created);
     return { previous: prev ? [prev] : [] };
   });
+  await indexNewVersions(created, db);
+  return result;
 }
 
 export async function changeStatusBulk(
@@ -223,14 +238,17 @@ export async function changeStatusBulk(
   const ids = [...new Set(applicationIds)];
   if (ids.length === 0) return { previous: [] };
   if (ids.length > MAX_BULK) throw new Error(`Select at most ${MAX_BULK} jobs at once`);
-  return db.transaction(async (tx) => {
+  const created: string[] = [];
+  const result = await db.transaction(async (tx) => {
     const previous: PreviousState[] = [];
     for (const id of ids) {
-      const prev = await applyStatus(tx, id, to, opts); // throws on an unknown id, rolling back everything
+      const prev = await applyStatus(tx, id, to, opts, created); // throws on an unknown id, rolling back everything
       if (prev) previous.push(prev);
     }
     return { previous };
   });
+  await indexNewVersions(created, db);
+  return result;
 }
 
 /** Undo: puts each application back, unless its status was changed again since. */

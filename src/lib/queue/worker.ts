@@ -16,6 +16,18 @@ import {
   touchSearch,
 } from "@/lib/outreach/searches";
 import type { SearchSteps } from "@/lib/outreach/types";
+import {
+  claimNextProposal,
+  offerDocumentToRecord,
+  processProposal,
+  recoverInterruptedProposals,
+  sweepStaleProposals,
+  touchProposal,
+} from "@/lib/career/queue";
+import { careerProposals, documentVersions } from "@/lib/db/schema";
+import { backfillDocuments } from "@/lib/documents/backfill";
+import { withAbortSignal } from "@/lib/llm/abort";
+import { withLlmContext } from "@/lib/llm/context";
 import { backfillResumeIndexes, claimNextIndexes, processResumeIndex, sweepStaleIndexes, touchIndex } from "@/lib/resume/indexing";
 import { isClean, reviewReason } from "./clean";
 import {
@@ -42,6 +54,8 @@ const SEARCH_CONCURRENCY = 2;
 const INDEX_CONCURRENCY = 1;
 /** Reading, structuring and embedding one resume. */
 const INDEX_TIMEOUT_MS = 5 * 60_000;
+/** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
+const CAREER_TIMEOUT_MS = 5 * 60_000;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -64,10 +78,12 @@ export async function processItem(id: string, deps: Partial<WorkerDeps> = {}): P
   try {
     const run = deps.run ?? runPipeline;
     const result = await withTimeout(
-      run(
-        row.kind === "url" ? { kind: "url", url: row.input } : { kind: "text", text: row.input, url: row.sourceUrl ?? undefined },
-        onStep,
-        deps.pipeline ?? defaultPipelineDeps,
+      withLlmContext("add-job", { queueItemId: id }, () =>
+        run(
+          row.kind === "url" ? { kind: "url", url: row.input } : { kind: "text", text: row.input, url: row.sourceUrl ?? undefined },
+          onStep,
+          deps.pipeline ?? defaultPipelineDeps,
+        ),
       ),
       ITEM_TIMEOUT_MS,
     );
@@ -119,7 +135,11 @@ export async function processSearch(
 
   try {
     const timeoutMs = deps.timeoutMs ?? SEARCH_TIMEOUT_MS;
-    const result = await withTimeout((deps.find ?? findContacts)(row.jobId, { onStep }, db), timeoutMs, "Timed out after 3 minutes");
+    const result = await withTimeout(
+      withLlmContext("find-contacts", { searchId: id, jobId: row.jobId }, () => (deps.find ?? findContacts)(row.jobId, { onStep }, db)),
+      timeoutMs,
+      "Timed out after 3 minutes",
+    );
     await chain;
     await markSearchDone(id, result.found, result.notes, db);
   } catch (err) {
@@ -128,17 +148,72 @@ export async function processSearch(
   }
 }
 
-/** Indexes one claimed resume file; failures are recorded on its row by `processResumeIndex`. */
-export async function processIndex(fileId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
+/** Offers the document an index was for to the career record, which waited for the index to finish. Never raises. */
+async function offerAfterIndex(indexId: string, db: Db): Promise<void> {
+  try {
+    const [row] = await db
+      .select({ documentId: documentVersions.documentId })
+      .from(resumeIndexes)
+      .innerJoin(documentVersions, eq(documentVersions.id, resumeIndexes.documentVersionId))
+      .where(eq(resumeIndexes.id, indexId));
+    if (row) await offerDocumentToRecord(row.documentId, db);
+  } catch (err) {
+    console.error("[queue] could not offer a resume to the career record:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** Indexes one claimed resume version; failures are recorded on its row by `processResumeIndex`. */
+export async function processIndex(indexId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
   try {
-    await withTimeout((deps.run ?? processResumeIndex)(fileId, { db }), deps.timeoutMs ?? INDEX_TIMEOUT_MS, "Timed out after 5 minutes");
+    await withTimeout(
+      withLlmContext("index-resume", {}, () => (deps.run ?? processResumeIndex)(indexId, { db })),
+      deps.timeoutMs ?? INDEX_TIMEOUT_MS,
+      "Timed out after 5 minutes",
+    );
   } catch (err) {
     await db
       .update(resumeIndexes)
       .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(resumeIndexes.fileId, fileId), eq(resumeIndexes.status, "running")));
+      .where(and(eq(resumeIndexes.id, indexId), eq(resumeIndexes.status, "running")));
   }
+  await offerAfterIndex(indexId, db);
+}
+
+/**
+ * Prepares one claimed career proposal; failures are recorded on its row by `processProposal`. `signal` stops it
+ * (when the user skips it): its model calls are cancelled and it returns at once, so the next one can start. The
+ * skip has already moved the row on, so nothing is recorded here.
+ */
+export async function processCareer(
+  id: string,
+  deps: { db?: Db; run?: typeof processProposal; timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  const signal = deps.signal ?? new AbortController().signal;
+  try {
+    const work = withAbortSignal(signal, () => withLlmContext("read-career-source", { proposalId: id }, () => (deps.run ?? processProposal)(id, { db })));
+    await withTimeout(untilAborted(work, signal), deps.timeoutMs ?? CAREER_TIMEOUT_MS, "Timed out after 5 minutes");
+  } catch (err) {
+    if (signal.aborted) return;
+    await db
+      .update(careerProposals)
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not prepare this source").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(careerProposals.id, id), eq(careerProposals.status, "running")));
+  }
+}
+
+/** Settles with `p`, or rejects as soon as `signal` is aborted (without waiting for `p`). */
+function untilAborted<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error("Stopped"));
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Error("Stopped"));
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(
+      (v) => (signal.removeEventListener("abort", stop), resolve(v)),
+      (e) => (signal.removeEventListener("abort", stop), reject(e)),
+    );
+  });
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 minutes"): Promise<T> {
@@ -151,15 +226,29 @@ function withTimeout<T>(p: Promise<T>, ms: number, message = "Timed out after 4 
   });
 }
 
-type WorkerState = { running: Set<string>; searching: Set<string>; indexing: Set<string>; ticking: boolean; again: boolean; timer: ReturnType<typeof setInterval> | null };
+type WorkerState = {
+  running: Set<string>;
+  searching: Set<string>;
+  indexing: Set<string>;
+  /** Career proposals being prepared, each with the controller that stops it. */
+  career: Map<string, AbortController>;
+  /** Set once proposals cut off by the last shutdown have been put back. */
+  recovered?: boolean;
+  ticking: boolean;
+  again: boolean;
+  timer: ReturnType<typeof setInterval> | null;
+};
 const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  const s = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), ticking: false, again: false, timer: null });
+  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), ticking: false, again: false, timer: null });
   // A dev server that hot-reloaded from older code may hold a state without the search slots.
   s.searching ??= new Set();
   s.indexing ??= new Set();
+  if (!(s.career instanceof Map)) s.career = new Map();
+  // A worker already running before a hot reload has nothing to recover; only a fresh process does.
+  s.recovered ??= s.timer !== null;
   return s;
 }
 
@@ -205,16 +294,44 @@ async function tick(): Promise<void> {
       }
 
       await sweepStaleIndexes();
-      for (const fileId of await claimNextIndexes(INDEX_CONCURRENCY - s.indexing.size)) {
-        s.indexing.add(fileId);
-        const beat = setInterval(() => void touchIndex(fileId).catch(() => {}), HEARTBEAT_MS);
-        void processIndex(fileId)
-          .catch((err) => console.error("[queue] unexpected index failure", fileId, err))
+      for (const indexId of await claimNextIndexes(INDEX_CONCURRENCY - s.indexing.size)) {
+        s.indexing.add(indexId);
+        const beat = setInterval(() => void touchIndex(indexId).catch(() => {}), HEARTBEAT_MS);
+        void processIndex(indexId)
+          .catch((err) => console.error("[queue] unexpected index failure", indexId, err))
           .finally(() => {
             clearInterval(beat);
-            s.indexing.delete(fileId);
+            s.indexing.delete(indexId);
             void tick();
           });
+      }
+
+      if (!s.recovered) {
+        s.recovered = true;
+        // Runs inside the first tick, before this process claims anything: nothing is being prepared in a process
+        // that just started, so a proposal still marked running was cut off by the last shutdown. Queue it again now
+        // rather than show it as in progress until the sweeper's timeout.
+        if (s.career.size === 0) {
+          const n = await recoverInterruptedProposals();
+          if (n > 0) console.log(`[queue] put back ${n} career source(s) interrupted by the last shutdown`);
+        }
+      }
+      await sweepStaleProposals();
+      // One at a time: a proposal is only prepared once the one before it has been reviewed.
+      if (s.career.size === 0) {
+        const careerId = await claimNextProposal();
+        if (careerId) {
+          const controller = new AbortController();
+          s.career.set(careerId, controller);
+          const beat = setInterval(() => void touchProposal(careerId).catch(() => {}), HEARTBEAT_MS);
+          void processCareer(careerId, { signal: controller.signal })
+            .catch((err) => console.error("[queue] unexpected career failure", careerId, err))
+            .finally(() => {
+              clearInterval(beat);
+              s.career.delete(careerId);
+              void tick();
+            });
+        }
       }
     } while (s.again);
   } catch (err) {
@@ -224,14 +341,25 @@ async function tick(): Promise<void> {
   }
 }
 
+/**
+ * Stops preparing a career proposal in this process, freeing its slot for the next one. Call it after the row has
+ * been moved on (skipped), so the stopped work records nothing.
+ */
+export function stopCareerProposal(id: string): void {
+  state().career.get(id)?.abort();
+}
+
 /** Starts the background worker once per server process (called from instrumentation.ts). */
 export function startQueueWorker(): void {
   const s = state();
   if (s.timer) return;
   s.timer = setInterval(() => void tick(), TICK_MS);
   s.timer.unref?.();
-  // Resumes stored before indexing existed (or while the worker was off) get indexed now.
-  void backfillResumeIndexes().catch((err) => console.error("[queue] resume backfill failed", err instanceof Error ? err.message : err));
+
+  // Library resumes that have no index yet (added while the worker was off) get indexed now.
+  void backfillDocuments()
+    .then(() => backfillResumeIndexes())
+    .catch((err) => console.error("[queue] library backfill failed", err instanceof Error ? err.message : err));
   void tick();
 }
 

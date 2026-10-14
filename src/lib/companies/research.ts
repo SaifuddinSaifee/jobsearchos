@@ -233,7 +233,7 @@ async function extract(name: string, posting: string, pages: Page[]): Promise<Ex
   const sources = numbered
     .map((p, i) => `[${i + 1}] (${p.kind === "owned" ? "company-owned" : "third-party"}) ${p.title}${p.url ? ` (${p.url})` : ""}\n${p.text}`)
     .join("\n\n---\n\n");
-  const out = await chatStructured(ResearchSchema, { system: SYSTEM, user: `Company: ${name}\n\nSources:\n\n${sources}` });
+  const out = await chatStructured(ResearchSchema, { system: SYSTEM, user: `Company: ${name}\n\nSources:\n\n${sources}` }, { step: "research-company" });
 
   const used = [...new Set(out.usedSources)].filter((n) => Number.isInteger(n) && n >= 1 && n <= numbered.length);
   const usedPages = (used.length ? used : numbered.map((_, i) => i + 1)).map((n) => numbered[n - 1]);

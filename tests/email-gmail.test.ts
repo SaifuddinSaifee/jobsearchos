@@ -130,6 +130,42 @@ describe("buildRawMessage with attachments", () => {
   });
 });
 
+describe("buildRawMessage with formatting", () => {
+  const partsOf = (text: string, boundary: string) =>
+    text
+      .split(`--${boundary}`)
+      .slice(1, -1)
+      .map((p) => {
+        const [head, ...rest] = p.trim().split("\r\n\r\n");
+        return { head, body: rest.join("\r\n\r\n") };
+      });
+  const decode = (b64: string) => Buffer.from(b64.replace(/\r\n/g, ""), "base64").toString("utf8");
+  const html = '<div dir="ltr"><div>See <a href="https://x.com/p">my <b>proposal</b></a></div></div>';
+
+  it("sends plain text and HTML as alternatives, plain first", () => {
+    const text = decodeRaw(buildRawMessage({ to: "a@b.com", subject: "s", body: "See my proposal <https://x.com/p>", html }));
+    const boundary = /^Content-Type: multipart\/alternative; boundary="([^"]+)"/m.exec(text)?.[1];
+    expect(boundary).toBeTruthy();
+    const [plain, rich] = partsOf(text, boundary!);
+    expect(plain.head).toContain("Content-Type: text/plain; charset=UTF-8");
+    expect(decode(plain.body)).toBe("See my proposal <https://x.com/p>");
+    expect(rich.head).toContain("Content-Type: text/html; charset=UTF-8");
+    expect(decode(rich.body)).toBe(html);
+  });
+
+  it("puts the alternatives first and the files after them when there are attachments", () => {
+    const pdf = Buffer.from("%PDF-1.4 x");
+    const text = decodeRaw(buildRawMessage({ to: "a@b.com", subject: "s", body: "plain", html, attachments: [{ filename: "a.pdf", mime: "application/pdf", content: pdf }] }));
+    const mixed = /^Content-Type: multipart\/mixed; boundary="([^"]+)"/m.exec(text)?.[1];
+    const [body, file] = partsOf(text, mixed!);
+    expect(body.head).toMatch(/^Content-Type: multipart\/alternative; boundary="[^"]+"$/);
+    const alt = /boundary="([^"]+)"/.exec(body.head)![1];
+    expect(partsOf(body.body, alt).map((p) => p.head.split("\r\n")[0])).toEqual(["Content-Type: text/plain; charset=UTF-8", "Content-Type: text/html; charset=UTF-8"]);
+    expect(file.head).toContain('filename="a.pdf"');
+    expect(Buffer.from(file.body.replace(/\r\n/g, ""), "base64")).toEqual(pdf);
+  });
+});
+
 describe("sendEmail attachments", () => {
   it("refuses attachments over the size limit before calling Gmail", async () => {
     const fetchMock = vi.fn();

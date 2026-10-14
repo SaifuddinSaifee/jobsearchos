@@ -93,7 +93,7 @@ Migrations `0010_outreach`, `0011_prospeo`, `0012_contact_searches`, `0013_conta
 
 ### Resume indexing (started here, for generation later)
 
-Every resume that is stored (the base resume, one uploaded in the composer, one added on the Profile page) is queued in `resume_indexes` and handled by the same background worker as job extraction: read the text, ask the model to structure it, split it into sections (one per job, project, education entry, plus summary and skills), embed each section with the local `qwen3-embedding:4b` model (1024 dimensions) and store them in `resume_chunks` (pgvector, cosine index). If the model cannot structure a resume it is split by paragraph and the note says so. `searchResumeChunks(query)` returns the closest sections and is what the writer will use. Requires Ollama running with the model pulled (see README); without it indexing fails with a clear message and can be retried from the Profile page or the attach panel. The Resumes page, Markdown views and the optional master resume are written up in [RESUME-LIBRARY.md](RESUME-LIBRARY.md).
+Since the Library (Stage 4a), resumes are library documents and the index is keyed by document version (migration `0016`); the paragraph below describes the original file-based pipeline, which is otherwise the same steps. Every resume that is stored (the base resume, one uploaded in the composer, one added on the Profile page) is queued in `resume_indexes` and handled by the same background worker as job extraction: read the text, ask the model to structure it, split it into sections (one per job, project, education entry, plus summary and skills), embed each section with the local `qwen3-embedding:4b` model (1024 dimensions) and store them in `resume_chunks` (pgvector, cosine index). If the model cannot structure a resume it is split by paragraph and the note says so. `searchResumeChunks(query)` returns the closest sections and is what the writer will use. Requires Ollama running with the model pulled (see README); without it indexing fails with a clear message and can be retried from the Profile page or the attach panel. The Resumes page, Markdown views and the optional master resume are written up in [RESUME-LIBRARY.md](RESUME-LIBRARY.md).
 
 ## Not built yet
 
@@ -105,3 +105,9 @@ Every resume that is stored (the base resume, one uploaded in the composer, one 
 ## Unconfirmed against Prospeo
 
 Built from the parts of Prospeo's API docs in `docs/prospeo.md`. Not confirmed with a live key: that Enrich Person accepts `data.person_id`, and the `GET /account-information` path used by Check key. If either fails, the message shown is Prospeo's own error.
+
+## Attachments after the Library (Stage 4a)
+
+The attachment is a library resume, not a file. Sending settles what goes out: the original file of an upload nobody has edited,
+or a PDF made from the resume at that moment (stored, and linked to the version it came from). That version is then locked
+and the sent email is filed in the Library. See [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md#phase-2-as-built).

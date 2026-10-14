@@ -11,6 +11,7 @@ import { extractJsonLd } from "@/lib/jobs/fetch/jsonld";
 import { htmlToText, readableText } from "@/lib/jobs/fetch/text";
 import { FetchError } from "@/lib/jobs/fetch/types";
 import { canonicalizeUrl, detectSource } from "@/lib/jobs/fetch/url";
+import { salaryHints, ycJobFromHtml } from "@/lib/jobs/fetch/yc";
 
 const LONG = "We are hiring an engineer to build and operate distributed systems. ".repeat(6);
 
@@ -178,6 +179,69 @@ describe("JSON-LD", () => {
     expect(postingFromHtml(article, "https://x", "html")?.method).toBe("html");
     expect(postingFromHtml("<html><body><div id=root></div></body></html>", "https://x", "html")).toBeNull();
     expect(() => postingFromHtml("<html><body>Please complete the CAPTCHA</body></html>", "https://x", "html")).toThrow(/bot check/);
+  });
+});
+
+describe("Y Combinator job pages", () => {
+  /** The pages carry their data as HTML-escaped JSON in a data-page attribute. */
+  const page = (props: unknown) =>
+    `<html><body><div id="app" data-page="${JSON.stringify({ component: "JobDetailV2Page", props }).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></div></body></html>`;
+  const props = {
+    job: {
+      title: "Founding Engineer",
+      location: "San Francisco, CA, US",
+      jobType: "Full-time",
+      salaryRange: "$140K - $200K",
+      equityRange: "0.50% - 3.00%",
+      skills: ["TypeScript", "Vector Databases"],
+      descriptionHtml: `<p>${LONG}</p><ul><li><strong>Agents.</strong> Build agents &amp; tools.</li></ul>`,
+      interviewProcessHtml: "<ol><li>Intro call with Ray</li></ol>",
+    },
+    company: {
+      name: "Bloom",
+      description: "The brand layer for agents.",
+      techDescriptionHtml: "<ul><li>Firecrawl</li><li>Autumn (payments)</li></ul>",
+      hiringDescriptionHtml: "<p>Bloom is a three-person team.</p>",
+      founders: [{ name: "Ray Fitzgerald", bio: "Founder of Bloom." }],
+    },
+    customQuestions: [
+      { label: "What is the hardest system you have owned?", required: true },
+      { label: "Share links to your work.", required: false },
+    ],
+  };
+
+  it("reads the parts the page hides from logged-out visitors", () => {
+    const yc = ycJobFromHtml(page(props))!;
+    expect(yc.text).toContain("Skills: TypeScript, Vector Databases");
+    expect(yc.text).toContain("- Agents. Build agents & tools.");
+    expect(yc.text).toContain("Technology\n- Firecrawl\n- Autumn (payments)");
+    expect(yc.text).toContain("Interview process\n- Intro call with Ray");
+    expect(yc.text).toContain("About Bloom\nBloom is a three-person team.");
+    expect(yc.text).toContain("Application questions\n- What is the hardest system you have owned?\n- Share links to your work. (optional)");
+    expect(yc.text).toContain("Founders\n- Ray Fitzgerald, Founder");
+    expect(yc.hints).toEqual({
+      title: "Founding Engineer",
+      company: "Bloom",
+      location: "San Francisco, CA, US",
+      employmentType: "Full-time",
+      salaryMin: 140_000,
+      salaryMax: 200_000,
+      salaryCurrency: "USD",
+      salaryPeriod: "year",
+    });
+  });
+
+  it("is preferred over page text, and ignores pages without a job", () => {
+    const posting = postingFromHtml(page(props), "https://www.workatastartup.com/jobs/1", "html")!;
+    expect(posting.method).toBe("html");
+    expect(posting.text).toContain("Firecrawl");
+    expect(ycJobFromHtml(page({ company: { name: "Bloom" } }))).toBeNull();
+    expect(ycJobFromHtml('<div data-page="not json"></div>')).toBeNull();
+  });
+
+  it("reads salary ranges", () => {
+    expect(salaryHints("$90K - $120K CAD")).toMatchObject({ salaryMin: 90_000, salaryMax: 120_000, salaryCurrency: "CAD", salaryPeriod: "year" });
+    expect(salaryHints("")).toEqual({});
   });
 });
 

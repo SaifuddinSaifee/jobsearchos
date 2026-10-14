@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { companySiteBase, researchCompany } from "@/lib/companies/research";
+import { withLlmContext } from "@/lib/llm/context";
 import { renderPage } from "@/lib/jobs/fetch/browser";
 import { webSearch } from "@/lib/companies/search";
 import {
@@ -75,12 +76,14 @@ export async function researchCompanyAction(id: string) {
     if (!company) throw new Error("Company not found");
     // Free sources first (the company's own site); the search API is only used if those are thin.
     const siteBase = companySiteBase(company.name, [company.website, ...(await companyJobUrls(company.id))]);
-    const research = await researchCompany(company.name, {
-      search: webSearch(),
-      siteBase,
-      postingAbout: company.about,
-      render: renderPage,
-    });
+    const research = await withLlmContext("research-company", { companyId: company.id }, () =>
+      researchCompany(company.name, {
+        search: webSearch(),
+        siteBase,
+        postingAbout: company.about,
+        render: renderPage,
+      }),
+    );
     const applied: CompanyField[] = await applyResearch(company.id, research);
     return { applied, via: research.via };
   });

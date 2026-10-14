@@ -2,19 +2,34 @@ import { readBody } from "./fetcher";
 import { extractJsonLd } from "./jsonld";
 import { readableText } from "./text";
 import { FetchError, type FetchedPosting, type FetchMethodName } from "./types";
+import { ycJobFromHtml } from "./yc";
 
 export const MIN_TEXT = 800;
 const BLOCK_MARKERS = /captcha|access denied|are you a robot|verify you are human|enable javascript/i;
 
 /**
- * Pure step shared by plain-HTML and Playwright fetches. Prefers a JSON-LD JobPosting,
- * then Readability text. Returns null when the page is too thin (likely JS-rendered).
+ * Pure step shared by plain-HTML and Playwright fetches. Prefers posting data embedded in the page
+ * (Y Combinator's job board), then a JSON-LD JobPosting, then Readability text. Returns null when
+ * the page is too thin (likely JS-rendered).
  */
 export function postingFromHtml(
   html: string,
   sourceUrl: string,
   method: Extract<FetchMethodName, "html" | "playwright" | "jsonld">,
 ): FetchedPosting | null {
+  const yc = ycJobFromHtml(html);
+  if (yc && yc.text.length >= 200) {
+    return {
+      method: method === "playwright" ? "playwright" : "html",
+      sourceUrl,
+      applicationUrl: sourceUrl,
+      ats: null,
+      atsJobId: null,
+      raw: { body: html, mime: "text/html" },
+      text: yc.text,
+      hints: yc.hints,
+    };
+  }
   const ld = extractJsonLd(html);
   const page = readableText(html, sourceUrl);
 

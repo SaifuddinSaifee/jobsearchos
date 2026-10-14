@@ -28,6 +28,13 @@ const EnvSchema = z.object({
   /** How many queued job extractions run at the same time. */
   QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(5).default(2),
   STORAGE_DIR: z.string().default("./storage"),
+  // Optional: Arize Phoenix tracing of model calls (see docs/LLM-LOGGING.md). Unset, tracing is off; usage is still
+  // recorded in the database. instrumentation.ts and phoenix.ts read the first three straight from process.env.
+  PHOENIX_COLLECTOR_ENDPOINT: z.string().optional(),
+  PHOENIX_PROJECT_NAME: z.string().optional(),
+  PHOENIX_API_KEY: z.string().optional(),
+  /** Where your browser reaches Phoenix, for the "Open Phoenix" button. Defaults to the collector endpoint. */
+  PHOENIX_UI_URL: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

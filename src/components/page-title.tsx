@@ -3,7 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { navItemFor } from "./nav";
+import { childLabelFor, navItemFor } from "./nav";
 
 /**
  * The current page's name, shown in the top bar next to the sidebar toggle. This is the page's only `h1`.
@@ -14,7 +14,8 @@ export function PageTitle() {
   const pathname = usePathname();
   const item = navItemFor(pathname);
   if (!item) return null;
-  const nested = pathname !== item.href && Boolean(item.childLabel);
+  const childLabel = childLabelFor(item, pathname);
+  const nested = pathname !== item.href && Boolean(childLabel);
 
   return (
     <h1
@@ -30,7 +31,7 @@ export function PageTitle() {
             {item.label}
           </Link>
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate">{item.childLabel}</span>
+          <span className="truncate">{childLabel}</span>
         </>
       ) : (
         <span className="truncate">{item.label}</span>

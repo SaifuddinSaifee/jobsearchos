@@ -2,8 +2,11 @@
 
 export type IndexStatus = "queued" | "running" | "ready" | "failed";
 
+/** Where a library resume is in the search-index pipeline (the state of its latest version). */
 export type IndexInfo = {
-  fileId: string;
+  id: string;
+  documentId: string;
+  versionId: string;
   status: IndexStatus;
   chunkCount: number;
   note: string | null;
@@ -21,6 +24,7 @@ export function indexLabel(info: IndexInfo | undefined): string {
     case "running":
       return "Indexing";
     case "ready":
+      if (info.chunkCount === 0) return "Nothing to index yet";
       return `Indexed, ${info.chunkCount} ${info.chunkCount === 1 ? "section" : "sections"}`;
     case "failed":
       return "Indexing failed";

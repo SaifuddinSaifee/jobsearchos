@@ -4,27 +4,27 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, Loader2, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { indexResumeAction } from "@/app/(app)/profile/actions";
+import { retryIndexAction } from "@/app/(app)/library/actions";
 import { isIndexActive, indexLabel } from "@/lib/resume/types";
 import { cn } from "@/lib/utils";
 import { RESUME_INDEXES_KEY, useResumeIndexes } from "./use-resume-indexes";
 
 /**
- * Whether a resume is searchable yet: waiting, working, ready (with how many sections), or failed (with a retry).
+ * Whether a library resume is searchable yet: waiting, working, ready (with how many sections), or failed (with a retry).
  * Reads the shared polling query, so every badge on the page updates together.
  */
-export function IndexBadge({ fileId, className }: { fileId: string; className?: string }) {
-  const { byId, isSuccess } = useResumeIndexes();
+export function IndexBadge({ documentId, className }: { documentId: string; className?: string }) {
+  const { byDocument, isSuccess } = useResumeIndexes();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   if (!isSuccess) return <span className={cn("inline-block h-4 w-24 animate-pulse rounded bg-muted", className)} aria-hidden />;
 
-  const info = byId.get(fileId);
+  const info = byDocument.get(documentId);
   const active = isIndexActive(info?.status);
 
   async function start() {
     setBusy(true);
-    const res = await indexResumeAction(fileId);
+    const res = await retryIndexAction(documentId);
     setBusy(false);
     if (!res.ok) return void toast.error(res.error);
     void queryClient.invalidateQueries({ queryKey: RESUME_INDEXES_KEY });

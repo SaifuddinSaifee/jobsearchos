@@ -1,5 +1,7 @@
 # Resume library and master resume (idea, not built yet)
 
+> Replaced by [STAGE-4A-CAREER-LIBRARY.md](STAGE-4A-CAREER-LIBRARY.md), which turns this idea into a plan. Kept for history.
+
 Written down so it can be picked up later. The current priority is attaching a resume to a cold email (see
 [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md)). Nothing in this file is built except where marked **Built**.
 

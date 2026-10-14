@@ -3,15 +3,35 @@ import { z } from "zod";
 import { updateCompany } from "@/lib/companies/service";
 import { SearchError, webSearch, type WebSearchProvider } from "@/lib/companies/search";
 import { db as defaultDb, type Db } from "@/lib/db";
-import { companies, contacts, files, jobs, jobSnapshots, outreachEmails, pastResumes, profileVersions, type ContactRow } from "@/lib/db/schema";
-import { connectedAccount, MAX_ATTACHMENT_BYTES, sendEmail, type OutgoingEmail, type SentMessage } from "@/lib/email/gmail";
+import { companies, contacts, documents, documentVersions, files, jobs, jobSnapshots, outreachAttachments, outreachEmails, type ContactRow } from "@/lib/db/schema";
+import { connectedAccount, sendEmail, type OutgoingEmail, type SentMessage } from "@/lib/email/gmail";
 import { getColdEmailSettings } from "@/lib/email/settings";
 import { env } from "@/lib/env";
-import { extractResumeText } from "@/lib/resume/extract";
-import { fileDisplayName, isKnownResumeFile } from "@/lib/resume/files";
-import { enqueueResumeIndex } from "@/lib/resume/indexing";
+import { contentFromText } from "@/lib/documents/intake";
+import { extractForDocument } from "@/lib/documents/extract";
+import { createSentEmailDocument } from "@/lib/documents/sent-email";
+import { createDocument } from "@/lib/documents/service";
+import { fileDisplayName } from "@/lib/resume/files";
+import { enqueueDocumentIndex } from "@/lib/resume/indexing";
 import { getFileBytes, putFile } from "@/lib/storage/local";
-import { checkEmail, isGenericInbox, sendWarnings, type SendWarning } from "./checks";
+import {
+  attachmentOptions,
+  attachmentRows,
+  baseDocumentId,
+  checkRefs,
+  checkSize,
+  draftAttachments,
+  lockSentVersions,
+  optionForDocument,
+  prepareAttachments,
+  setAttachments,
+  storeUploadedAttachment,
+  type PrepareDeps,
+  type PreparedAttachment,
+} from "./attachments";
+import { emailDocToHtml, emailDocToText, hasFormatting, normalizeEmailDoc, trimEmailDoc } from "./body";
+import { checkEmail, isGenericInbox, sendWarnings } from "./checks";
+import { OutreachError } from "./errors";
 import { extractPostingPeople } from "./posting";
 import { latestSearchForJob } from "./searches";
 import { resolveEmail, type EmailResult, type EmailTrace } from "./email-finder";
@@ -28,25 +48,18 @@ import {
   type SearchItem,
   type SearchStepName,
   type SearchStepState,
-  type AttachmentDTO,
   type ContactDTO,
   type ContactKind,
   type DraftDTO,
-  type ResumeOption,
+  type AttachmentOption,
+  type AttachmentRef,
   type EmailStatus,
+  type SentAttachmentDTO,
   type SentDTO,
 } from "./types";
 
-/** A failure with a message for the user. `needs` lists warnings that must be acknowledged before sending. */
-export class OutreachError extends Error {
-  constructor(
-    message: string,
-    readonly code: "invalid" | "not_found" | "not_connected" | "blocked" | "needs_ack" | "busy" | "send_failed",
-    readonly needs?: SendWarning[],
-  ) {
-    super(message);
-  }
-}
+export { OutreachError } from "./errors";
+export { attachmentOptions, prepareAttachments } from "./attachments";
 
 const lower = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
 
@@ -662,20 +675,14 @@ const DraftInput = z.object({
   body: z.string().max(MAX_BODY, "The email is too long"),
 });
 
-/** The attached file's name, size and type, or null when nothing is attached (or the file row is gone). */
-async function attachmentFor(fileId: string | null, db: Db, name?: string | null): Promise<AttachmentDTO | null> {
-  if (!fileId) return null;
-  const [f] = await db.select().from(files).where(eq(files.id, fileId));
-  return f ? { fileId: f.id, name: name?.trim() || fileDisplayName(f), size: f.size, mime: f.mime } : null;
-}
-
 async function toDraftDTO(d: typeof outreachEmails.$inferSelect, db: Db): Promise<DraftDTO> {
   return {
     id: d.id,
     contactId: d.contactId,
     subject: d.subject,
     body: d.body,
-    attachment: await attachmentFor(d.attachmentFileId, db, d.attachmentName),
+    bodyDoc: d.bodyDoc,
+    attachments: await draftAttachments(d, db),
     updatedAt: d.updatedAt.toISOString(),
   };
 }
@@ -688,138 +695,151 @@ export async function getDraft(jobId: string, db: Db = defaultDb()): Promise<Dra
   return d ? toDraftDTO(d, db) : null;
 }
 
-/** The file of the latest saved base resume, or null when none has been uploaded. */
-export async function baseResumeFileId(db: Db = defaultDb()): Promise<string | null> {
-  const [latest] = await db.select({ id: profileVersions.baseResumeFileId }).from(profileVersions).orderBy(desc(profileVersions.version)).limit(1);
-  return latest?.id ?? null;
-}
-
 /**
- * The resumes that can be attached to an email for this job, in the order they are offered: the base resume (the
- * default), resumes uploaded for this job, then the rest of the library, newest first. A file appears once.
- */
-export async function resumeOptions(jobId: string, db: Db = defaultDb()): Promise<ResumeOption[]> {
-  const out: ResumeOption[] = [];
-  const seen = new Set<string>();
-  const add = (f: { id: string; originalName: string | null; mime: string; size: number }, kind: ResumeOption["kind"], label: string) => {
-    if (seen.has(f.id)) return;
-    seen.add(f.id);
-    out.push({ fileId: f.id, name: fileDisplayName(f), size: f.size, mime: f.mime, kind, label });
-  };
-
-  const baseId = await baseResumeFileId(db);
-  if (baseId) {
-    const [f] = await db.select().from(files).where(eq(files.id, baseId));
-    if (f) add(f, "base", "Base resume");
-  }
-  const rows = await db
-    .select({ f: files, title: pastResumes.title, company: pastResumes.company, jobId: pastResumes.jobId })
-    .from(pastResumes)
-    .innerJoin(files, eq(files.id, pastResumes.fileId))
-    .orderBy(desc(pastResumes.createdAt))
-    .limit(60);
-  for (const r of rows.filter((x) => x.jobId === jobId)) add(r.f, "job", r.title);
-  for (const r of rows.filter((x) => x.jobId !== jobId)) add(r.f, "past", r.company ? `${r.title} (${r.company})` : r.title);
-  return out;
-}
-
-/** Throws unless the file is a stored resume small enough to send. */
-async function checkAttachable(fileId: string, db: Db): Promise<void> {
-  if (!(await isKnownResumeFile(fileId, db))) throw new OutreachError("That resume could not be found. Choose another or upload it again.", "invalid");
-  const [f] = await db.select({ size: files.size }).from(files).where(eq(files.id, fileId));
-  if (f && f.size > MAX_ATTACHMENT_BYTES) throw new OutreachError("That file is larger than 5 MB. Choose a smaller resume.", "invalid");
-}
-
-/**
- * `contactId` and `attachmentFileId`: leave out to keep the current value, null to clear it. A new draft starts with
- * the base resume attached unless `attachmentFileId` says otherwise.
+ * `bodyDoc`: the body with its formatting, from the composer's editor. When given, the plain-text `body` is made from it
+ * (whatever `body` says), so the two always agree. Without it the body is plain text.
+ * `contactId`: leave out to keep the current value, null to clear it. `attachments`: leave out to keep them, or the
+ * full list in order ([] for none). A new draft starts with the base resume attached unless `attachments` says
+ * otherwise. Library documents are attached by reference; what actually goes out for each (its original file, or a PDF
+ * made at send time) is settled when the email is sent.
  */
 export async function saveDraft(
   jobId: string,
-  input: { subject: string; body: string; contactId?: string | null; attachmentFileId?: string | null },
+  input: { subject: string; body: string; bodyDoc?: unknown; contactId?: string | null; attachments?: AttachmentRef[] },
   db: Db = defaultDb(),
 ): Promise<DraftDTO> {
-  const v = DraftInput.parse({ subject: input.subject, body: input.body });
+  const bodyDoc = input.bodyDoc === undefined || input.bodyDoc === null ? null : normalizeEmailDoc(input.bodyDoc);
+  const v = DraftInput.parse({ subject: input.subject, body: bodyDoc ? emailDocToText(bodyDoc) : input.body });
   if (input.contactId) {
     const c = await getContact(input.contactId, db);
     if (c.jobId !== jobId) throw new OutreachError("That contact belongs to a different job.", "invalid");
   }
-  if (input.attachmentFileId) await checkAttachable(input.attachmentFileId, db);
-  const attachmentOnInsert = input.attachmentFileId !== undefined ? input.attachmentFileId : await baseResumeFileId(db);
+  const chosen = input.attachments === undefined ? undefined : await checkRefs(input.attachments, db);
+  const [existing] = await db
+    .select({ id: outreachEmails.id })
+    .from(outreachEmails)
+    .where(and(eq(outreachEmails.jobId, jobId), eq(outreachEmails.status, "draft")));
   const [row] = await db
     .insert(outreachEmails)
-    .values({ jobId, subject: v.subject, body: v.body, contactId: input.contactId ?? null, attachmentFileId: attachmentOnInsert })
+    .values({ jobId, subject: v.subject, body: v.body, bodyDoc, contactId: input.contactId ?? null })
     .onConflictDoUpdate({
       target: outreachEmails.jobId,
       targetWhere: sql`${outreachEmails.status} = 'draft'`,
       set: {
         subject: v.subject,
         body: v.body,
+        bodyDoc,
         ...(input.contactId !== undefined ? { contactId: input.contactId } : {}),
-        ...(input.attachmentFileId !== undefined ? { attachmentFileId: input.attachmentFileId, attachmentName: null } : {}),
         updatedAt: new Date(),
       },
     })
     .returning();
+  if (chosen !== undefined) {
+    await db.transaction((tx) => setAttachments(row.id, chosen, tx));
+  } else if (!existing) {
+    const base = await baseDocumentId(db);
+    if (base) await setAttachments(row.id, [{ documentId: base }], db);
+  }
   return toDraftDTO(row, db);
 }
 
 /**
- * Stores a resume uploaded while writing an email for a job, so it can be attached, and files it in the resume
- * library with the job's company, role and posting text (the job it was written for makes it far more useful as a
- * reference later). The file is queued for indexing. Uploading the same file twice reuses it.
+ * Stores a resume uploaded while writing an email for a job, so it can be attached, and files it in the library with
+ * the job's company, role and posting text (the job it was written for makes it far more useful as a reference
+ * later). It is queued for indexing; the caller wakes the worker. Uploading the same file twice reuses it.
  */
 export async function uploadResumeForJob(
   jobId: string,
   file: { bytes: Buffer; name: string; mime: string },
   db: Db = defaultDb(),
-): Promise<ResumeOption> {
+): Promise<AttachmentOption> {
   const { job, rawText, urls } = await jobContext(jobId, db);
-  let extracted: { text: string; mime: string };
+  let extracted: Awaited<ReturnType<typeof extractForDocument>>;
   try {
-    extracted = await extractResumeText(file.bytes, file.name, file.mime);
+    extracted = await extractForDocument(file.bytes, file.name, file.mime);
   } catch (err) {
     throw new OutreachError(err instanceof Error ? err.message : "Could not read that file.", "invalid");
   }
-  if (file.bytes.length > MAX_ATTACHMENT_BYTES) throw new OutreachError("That file is larger than 5 MB. Use a smaller resume.", "invalid");
+  checkSize(file.bytes.length, "That file");
 
   const stored = await putFile(file.bytes, { mime: extracted.mime, originalName: file.name }, { db });
-  const [existing] = await db.select({ id: pastResumes.id }).from(pastResumes).where(and(eq(pastResumes.fileId, stored.id), eq(pastResumes.jobId, jobId)));
-  if (!existing) {
-    await db.insert(pastResumes).values({
-      fileId: stored.id,
-      jobId,
-      title: `Resume for ${job.company}`,
-      company: job.company || null,
-      role: job.title || null,
-      jdText: rawText || null,
-      jdUrl: urls.find((u): u is string => Boolean(u)) ?? null,
-      extractedText: extracted.text,
-    });
+  const [existing] = await db
+    .select({ id: documents.id })
+    .from(documents)
+    .where(and(eq(documents.sourceFileId, stored.id), eq(documents.jobId, jobId), isNull(documents.deletedAt)));
+  let documentId = existing?.id ?? null;
+  if (!documentId) {
+    const { document } = await createDocument(
+      {
+        kind: "resume",
+        origin: "uploaded",
+        title: `Resume for ${job.company}`,
+        content: contentFromText("resume", extracted.text, extracted.headings).content,
+        jobId,
+        companyName: job.company || null,
+        targetRole: job.title || null,
+        jdText: rawText || null,
+        jdUrl: urls.find((u): u is string => Boolean(u)) ?? null,
+        sourceName: file.name,
+        sourceMime: extracted.mime,
+        sourceFileId: stored.id,
+      },
+      db,
+    );
+    documentId = document.id;
   }
-  await enqueueResumeIndex(stored.id, {}, db);
-  return { fileId: stored.id, name: fileDisplayName(stored), size: stored.size, mime: stored.mime, kind: "job", label: existing ? "Uploaded before" : `Resume for ${job.company}` };
+  await enqueueDocumentIndex(documentId, {}, db);
+  return optionForDocument(documentId, jobId, db, existing ? "Uploaded before" : `Resume for ${job.company}`);
+}
+
+/**
+ * Stores a file uploaded to go with an email for a job (a proposal, a writing sample...), exactly as it is. Unlike a
+ * resume it is not added to the library: it belongs to the email. Uploading the same file twice reuses it.
+ */
+export async function uploadAttachmentForJob(jobId: string, file: { bytes: Buffer; name: string }, db: Db = defaultDb()): Promise<AttachmentOption> {
+  await jobContext(jobId, db);
+  return storeUploadedAttachment(file, db);
 }
 
 // --------------------------------------------------------------------- sent
 
+/** What went out with each of these sent emails, in order. Only attachments that were actually sent have a file. */
+async function sentAttachments(emailIds: string[], db: Db): Promise<Map<string, SentAttachmentDTO[]>> {
+  const out = new Map<string, SentAttachmentDTO[]>();
+  if (emailIds.length === 0) return out;
+  const rows = await db
+    .select({ a: outreachAttachments, file: files, version: documentVersions.version })
+    .from(outreachAttachments)
+    .innerJoin(files, eq(files.id, outreachAttachments.fileId))
+    .leftJoin(documentVersions, eq(documentVersions.id, outreachAttachments.versionId))
+    .where(inArray(outreachAttachments.emailId, emailIds))
+    .orderBy(asc(outreachAttachments.position));
+  for (const { a, file, version } of rows) {
+    const list = out.get(a.emailId) ?? [];
+    list.push({ fileId: file.id, name: a.name ?? fileDisplayName(file), size: file.size, mime: file.mime, documentId: a.documentId, versionId: a.versionId, version });
+    out.set(a.emailId, list);
+  }
+  return out;
+}
+
 export async function listSent(jobId: string, db: Db = defaultDb()): Promise<SentDTO[]> {
   const rows = await db
-    .select({ e: outreachEmails, contactName: contacts.name, file: files })
+    .select({ e: outreachEmails, contactName: contacts.name })
     .from(outreachEmails)
     .leftJoin(contacts, eq(contacts.id, outreachEmails.contactId))
-    .leftJoin(files, eq(files.id, outreachEmails.attachmentFileId))
     .where(and(eq(outreachEmails.jobId, jobId), eq(outreachEmails.status, "sent")))
     .orderBy(desc(outreachEmails.sentAt));
-  return rows.map(({ e, contactName, file }) => ({
+  const attached = await sentAttachments(rows.map((r) => r.e.id), db);
+  return rows.map(({ e, contactName }) => ({
     id: e.id,
     contactId: e.contactId,
     contactName: contactName ?? e.toEmail ?? "Unknown",
     toEmail: e.toEmail ?? "",
     subject: e.subject,
     body: e.body,
+    bodyDoc: e.bodyDoc,
     threadId: e.gmailThreadId,
-    attachment: file ? { fileId: file.id, name: e.attachmentName ?? fileDisplayName(file), size: file.size, mime: file.mime } : null,
+    attachments: attached.get(e.id) ?? [],
     sentAt: (e.sentAt ?? e.createdAt).toISOString(),
   }));
 }
@@ -839,10 +859,16 @@ export async function sentToday(db: Db = defaultDb(), now = new Date()): Promise
 export async function reuseAsDraft(jobId: string, sentId: string, db: Db = defaultDb()): Promise<DraftDTO> {
   const [e] = await db.select().from(outreachEmails).where(and(eq(outreachEmails.id, sentId), eq(outreachEmails.jobId, jobId)));
   if (!e) throw new OutreachError("That email no longer exists.", "not_found");
-  return saveDraft(jobId, { subject: e.subject, body: e.body, contactId: null, attachmentFileId: e.attachmentFileId }, db);
+  // The same choices, not the same files: a library document goes out as it is now. One since deleted is left out.
+  const refs: AttachmentRef[] = [];
+  for (const a of await attachmentRows(e.id, db)) {
+    const ref: AttachmentRef = a.documentId ? { documentId: a.documentId } : { fileId: a.fileId! };
+    if (await checkRefs([ref], db).then(() => true, () => false)) refs.push(ref);
+  }
+  return saveDraft(jobId, { subject: e.subject, body: e.body, bodyDoc: e.bodyDoc, contactId: null, attachments: refs }, db);
 }
 
-export type SendDeps = {
+export type SendDeps = PrepareDeps & {
   send?: (m: OutgoingEmail) => Promise<SentMessage>;
   now?: Date;
   /** Reads a stored file's bytes; defaults to the app's file storage. */
@@ -887,13 +913,12 @@ export async function sendDraft(
     throw new OutreachError(`You have reached your daily limit of ${settings.dailyCap} emails. It resets at midnight, or change it in Settings.`, "blocked");
   }
 
-  const attachment = await attachmentFor(draft.attachmentFileId, db, draft.attachmentName);
-  if (draft.attachmentFileId && !attachment) throw new OutreachError("The attached resume is missing. Choose another or remove it.", "invalid");
-  if (attachment && attachment.size > MAX_ATTACHMENT_BYTES) throw new OutreachError("The attached resume is larger than 5 MB. Choose a smaller one.", "invalid");
+  // Settle what goes out now: each original file, or a PDF made from the document as it is at this moment.
+  const prepared = await prepareAttachments(jobId, deps, db);
 
   const sent = (await sentCounts(jobId, db)).get(contact.id) ?? 0;
   const acknowledged = new Set(opts.acknowledge ?? []);
-  const needs = sendWarnings({ name: contact.name, emailStatus: contact.emailStatus, sentCount: sent, attachmentSize: attachment?.size }, settings, now).filter((w) => !acknowledged.has(w.code));
+  const needs = sendWarnings({ name: contact.name, emailStatus: contact.emailStatus, sentCount: sent, attachments: prepared }, settings, now).filter((w) => !acknowledged.has(w.code));
   if (needs.length > 0) throw new OutreachError("Confirm the warnings before sending.", "needs_ack", needs);
 
   // Claim the draft so a double click cannot send twice.
@@ -906,20 +931,22 @@ export async function sendDraft(
 
   try {
     let attachments: OutgoingEmail["attachments"];
-    if (attachment) {
-      const [file] = await db.select({ sha256: files.sha256 }).from(files).where(eq(files.id, attachment.fileId));
+    for (const p of prepared) {
+      const [file] = await db.select({ sha256: files.sha256 }).from(files).where(eq(files.id, p.fileId));
       let content: Buffer;
       try {
         content = await (deps.readFile ?? ((sha) => getFileBytes(sha, { db })))(file.sha256);
       } catch {
-        throw new Error("Could not read the attached resume from storage.");
+        throw new Error(`Could not read the attached file "${p.name}" from storage.`);
       }
-      attachments = [{ filename: attachment.name, mime: attachment.mime, content }];
+      (attachments ??= []).push({ filename: p.name, mime: p.mime, content });
     }
     const message = await (deps.send ?? ((m) => sendEmail(m, db)))({
       to: contact.email,
       subject: draft.subject.trim(),
       body: draft.body.trim(),
+      // Only an email with formatting needs an HTML version; a plain one goes as plain text, as before.
+      html: draft.bodyDoc && hasFormatting(draft.bodyDoc) ? emailDocToHtml(trimEmailDoc(draft.bodyDoc)) : undefined,
       bcc: settings.bccSelf ? account.email : undefined,
       attachments,
     });
@@ -930,13 +957,14 @@ export async function sendDraft(
         toEmail: contact.email,
         gmailMessageId: message.messageId,
         gmailThreadId: message.threadId,
-        attachmentName: attachment?.name ?? null,
         sentAt: now,
         error: null,
         updatedAt: now,
       })
       .where(eq(outreachEmails.id, draft.id))
       .returning();
+    // The email is out. Locking what went with it and filing it in the library must not turn that into a failure.
+    await afterSend(row, prepared, db).catch((err) => console.error("[outreach] could not file the sent email in the library:", err));
     return {
       id: row.id,
       contactId: contact.id,
@@ -944,8 +972,9 @@ export async function sendDraft(
       toEmail: contact.email,
       subject: row.subject,
       body: row.body,
+      bodyDoc: row.bodyDoc,
       threadId: row.gmailThreadId,
-      attachment,
+      attachments: (await sentAttachments([row.id], db)).get(row.id) ?? [],
       sentAt: row.sentAt!.toISOString(),
     };
   } catch (err) {
@@ -960,14 +989,21 @@ export async function sendDraft(
   }
 }
 
+/** Locks every library version that was attached, and adds the sent email to the library (already locked). */
+async function afterSend(row: typeof outreachEmails.$inferSelect, prepared: PreparedAttachment[], db: Db) {
+  const at = row.sentAt ?? new Date();
+  await lockSentVersions(prepared.map((p) => p.versionId), row.jobId, at, db);
+  await createSentEmailDocument(row, db);
+}
+
 // ------------------------------------------------------------------ the page
 
 export type OutreachData = {
   contacts: ContactDTO[];
   draft: DraftDTO | null;
-  /** Resumes that can be attached, base resume first. */
-  resumes: ResumeOption[];
-  /** The resume a new draft starts with (the base resume), as a file id. */
+  /** Library resumes and cover letters that can be attached, base resume first. */
+  options: AttachmentOption[];
+  /** The resume a new draft starts with (the base resume), as a library document id. */
   defaultAttachmentId: string | null;
   sent: SentDTO[];
   sentToday: number;
@@ -986,11 +1022,11 @@ export type OutreachData = {
 
 export async function getOutreachData(jobId: string, db: Db = defaultDb()): Promise<OutreachData> {
   const { company, job } = await jobContext(jobId, db);
-  const [contactList, draft, resumes, defaultAttachmentId, sent, today, settings, account, search] = await Promise.all([
+  const [contactList, draft, options, defaultAttachmentId, sent, today, settings, account, search] = await Promise.all([
     listContacts(jobId, db),
     getDraft(jobId, db),
-    resumeOptions(jobId, db),
-    baseResumeFileId(db),
+    attachmentOptions(jobId, db),
+    baseDocumentId(db),
     listSent(jobId, db),
     sentToday(db),
     getColdEmailSettings(db),
@@ -1001,7 +1037,7 @@ export async function getOutreachData(jobId: string, db: Db = defaultDb()): Prom
   return {
     contacts: contactList,
     draft,
-    resumes,
+    options,
     defaultAttachmentId,
     sent,
     sentToday: today,
