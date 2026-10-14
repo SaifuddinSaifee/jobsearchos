@@ -14,14 +14,13 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-  vector,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
 import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
 import type { DocJSON } from "@/lib/documents/build";
 import type { PageSettings } from "@/lib/documents/page-settings";
-import type { DocumentKind, DocumentOrigin, VersionReason } from "@/lib/documents/types";
+import type { DocumentKind, DocumentOrigin, RecordChoice, VersionReason } from "@/lib/documents/types";
 import type { LlmCallStatus, RecordedAction, LlmStep } from "@/lib/llm/names";
 import type { IndexStatus } from "@/lib/resume/types";
 import type {
@@ -517,6 +516,12 @@ export const documents = pgTable(
     /** Set only when the file is kept anyway: imported past resumes and resumes uploaded in the email composer. */
     sourceFileId: uuid("source_file_id").references(() => files.id),
     pageSettings: jsonb("page_settings").$type<Partial<PageSettings>>().notNull().default({}),
+    /**
+     * What the user said about adding this document to the career record: "later" (Not now) for the version in
+     * `record_choice_version_id` only, or "never" for every version. Null means it is offered as usual.
+     */
+    recordChoice: text("record_choice").$type<RecordChoice>(),
+    recordChoiceVersionId: uuid("record_choice_version_id"),
     legacyPastResumeId: uuid("legacy_past_resume_id")
       .unique()
       .references(() => pastResumes.id),
@@ -535,6 +540,7 @@ export const documents = pgTable(
     index("documents_job_idx").on(t.jobId),
     index("documents_source_sha_idx").on(t.sourceSha256),
     check("documents_base_is_resume", sql`not ${t.isBase} or ${t.kind} = 'resume'`),
+    check("documents_record_choice", sql`${t.recordChoice} is null or ${t.recordChoice} in ('later', 'never')`),
   ],
 );
 
@@ -588,9 +594,10 @@ export type DocumentDraftRow = typeof documentDrafts.$inferSelect;
 export type DocumentVersionRow = typeof documentVersions.$inferSelect;
 
 /**
- * Where each resume (a version of a library document) is in the search-index pipeline: split it into sections,
- * embed them. One row per document version, worked off by the same background worker as the job queue. Rows keyed
- * by `file_id` are from before the library existed; they are kept as they were and no longer used.
+ * Where each resume (a version of a library document) is in being read: an upload with no sections is read into
+ * sections by the model, so it can be edited and added to the career record. One row per document version, worked
+ * off by the same background worker as the job queue. Rows keyed by `file_id` are from before the library existed;
+ * they are kept as they were and no longer used.
  */
 export const resumeIndexes = pgTable(
   "resume_indexes",
@@ -604,8 +611,6 @@ export const resumeIndexes = pgTable(
     /** Something worth telling the user even though indexing succeeded. */
     note: text("note"),
     error: text("error"),
-    chunkCount: integer("chunk_count").notNull().default(0),
-    embeddingModel: text("embedding_model"),
     attempts: integer("attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -622,33 +627,6 @@ export const resumeIndexes = pgTable(
       .on(t.documentVersionId)
       .where(sql`${t.documentVersionId} is not null`),
     check("resume_indexes_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
-  ],
-);
-
-/** One searchable piece of a resume (a job, a project, the skills list...) with its embedding. */
-export const resumeChunks = pgTable(
-  "resume_chunks",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    fileId: uuid("file_id").references(() => files.id),
-    documentVersionId: uuid("document_version_id").references(() => documentVersions.id),
-    ordinal: integer("ordinal").notNull(),
-    section: text("section").notNull(),
-    label: text("label").notNull(),
-    text: text("text").notNull(),
-    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
-    embeddingModel: text("embedding_model").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("resume_chunks_file_ordinal_idx")
-      .on(t.fileId, t.ordinal)
-      .where(sql`${t.fileId} is not null`),
-    uniqueIndex("resume_chunks_version_ordinal_idx")
-      .on(t.documentVersionId, t.ordinal)
-      .where(sql`${t.documentVersionId} is not null`),
-    index("resume_chunks_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
-    check("resume_chunks_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
   ],
 );
 
@@ -725,6 +703,8 @@ export const careerProposals = pgTable(
     status: text("status").$type<ProposalStatus>().notNull().default("queued"),
     /** Lower runs first (base resume, other resumes, profile, LinkedIn, cover letters). */
     priority: integer("priority").notNull().default(1),
+    /** Added with one click: once prepared, it is applied as suggested instead of waiting for review. */
+    autoApply: boolean("auto_apply").notNull().default(false),
     /** The record version this proposal was computed against. */
     baseVersion: integer("base_version"),
     proposal: jsonb("proposal").$type<unknown>(),
@@ -799,7 +779,6 @@ export type LlmCallRow = typeof llmCalls.$inferSelect;
 export type NewLlmCall = typeof llmCalls.$inferInsert;
 
 export type ResumeIndexRow = typeof resumeIndexes.$inferSelect;
-export type ResumeChunkRow = typeof resumeChunks.$inferSelect;
 
 export type ContactSearchRow = typeof contactSearches.$inferSelect;
 export type ContactRow = typeof contacts.$inferSelect;

@@ -166,4 +166,4 @@ Not checked live: stopping a background job mid-call (covered by a test with a m
 - The queue's timeout does not cancel the model call, so a late row can show a duration longer than the timeout.
 - An insert in flight can be lost if the dev server is killed.
 - Prices are from our own notes, not yet checked on Together's site.
-- Embeddings (local Ollama) are not recorded: they are not model calls on Together.
+- Embeddings (local Ollama) are not recorded: they are not model calls on Together. Nothing calls them at the moment.

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { DocJSON } from "@/lib/documents/build";
-import { chunkDocument } from "@/lib/documents/convert/chunk-document";
 import { docToMarkdown } from "@/lib/documents/convert/doc-to-markdown";
 import { docToProfile, parseDates } from "@/lib/documents/convert/doc-to-profile";
 import { docToText } from "@/lib/documents/convert/doc-to-text";
@@ -212,24 +211,3 @@ describe("normalizeDoc", () => {
   });
 });
 
-describe("chunkDocument", () => {
-  it("chunks a structured resume like chunkProfile does", () => {
-    const chunks = chunkDocument(profileToDoc(profile, counter()));
-    expect(chunks.map((c) => c.section)).toEqual(expect.arrayContaining(["summary", "experience", "projects", "skills", "education"]));
-    const staff = chunks.find((c) => c.label === "Staff Engineer at Acme Corp");
-    expect(staff?.text).toContain("- Cut p95 latency by 40%");
-  });
-
-  it("keeps the text of a resume that was only split into headings and bullets", () => {
-    const doc = textToDoc("JANE DOE\n\nEXPERIENCE\nStaff Engineer, Acme\n- Cut costs by 30%\n\nHOBBIES\nChess and rowing", { id: counter() });
-    const chunks = chunkDocument(doc);
-    expect(chunks.find((c) => c.section === "experience")?.text).toContain("Cut costs by 30%");
-    expect(chunks.find((c) => c.section === "custom")?.text).toContain("Chess and rowing");
-  });
-
-  it("splits a cover letter by paragraph", () => {
-    const chunks = chunkDocument(textToDoc("Dear team,\n\nThis is my letter.", { mode: "letter", id: counter() }));
-    expect(chunks.length).toBeGreaterThan(0);
-    expect(chunks[0].text).toContain("Dear team");
-  });
-});

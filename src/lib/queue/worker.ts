@@ -18,13 +18,13 @@ import {
 import type { SearchSteps } from "@/lib/outreach/types";
 import {
   claimNextProposal,
-  offerDocumentToRecord,
   processProposal,
   recoverInterruptedProposals,
   sweepStaleProposals,
   touchProposal,
 } from "@/lib/career/queue";
-import { careerProposals, documentVersions } from "@/lib/db/schema";
+import { applyIfAutomatic } from "@/lib/career/review";
+import { careerProposals } from "@/lib/db/schema";
 import { backfillDocuments } from "@/lib/documents/backfill";
 import { withAbortSignal } from "@/lib/llm/abort";
 import { withLlmContext } from "@/lib/llm/context";
@@ -50,9 +50,9 @@ const ITEM_TIMEOUT_MS = 4 * 60_000;
 const SEARCH_TIMEOUT_MS = 3 * 60_000;
 /** Contact searches that may run at once, separate from job extractions so neither waits for the other. */
 const SEARCH_CONCURRENCY = 2;
-/** Resume files indexed at once. One, because embeddings run on the local Ollama model and a second would only slow both. */
+/** Resumes read into sections at once. Most need no model; an upload that does waits its turn. */
 const INDEX_CONCURRENCY = 1;
-/** Reading, structuring and embedding one resume. */
+/** Reading and structuring one resume. */
 const INDEX_TIMEOUT_MS = 5 * 60_000;
 /** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
 const CAREER_TIMEOUT_MS = 5 * 60_000;
@@ -148,21 +148,7 @@ export async function processSearch(
   }
 }
 
-/** Offers the document an index was for to the career record, which waited for the index to finish. Never raises. */
-async function offerAfterIndex(indexId: string, db: Db): Promise<void> {
-  try {
-    const [row] = await db
-      .select({ documentId: documentVersions.documentId })
-      .from(resumeIndexes)
-      .innerJoin(documentVersions, eq(documentVersions.id, resumeIndexes.documentVersionId))
-      .where(eq(resumeIndexes.id, indexId));
-    if (row) await offerDocumentToRecord(row.documentId, db);
-  } catch (err) {
-    console.error("[queue] could not offer a resume to the career record:", err instanceof Error ? err.message : err);
-  }
-}
-
-/** Indexes one claimed resume version; failures are recorded on its row by `processResumeIndex`. */
+/** Reads one claimed resume version into sections; failures are recorded on its row by `processResumeIndex`. */
 export async function processIndex(indexId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
   try {
@@ -174,10 +160,9 @@ export async function processIndex(indexId: string, deps: { db?: Db; run?: typeo
   } catch (err) {
     await db
       .update(resumeIndexes)
-      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not read this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(resumeIndexes.id, indexId), eq(resumeIndexes.status, "running")));
   }
-  await offerAfterIndex(indexId, db);
 }
 
 /**
@@ -194,6 +179,8 @@ export async function processCareer(
   try {
     const work = withAbortSignal(signal, () => withLlmContext("read-career-source", { proposalId: id }, () => (deps.run ?? processProposal)(id, { db })));
     await withTimeout(untilAborted(work, signal), deps.timeoutMs ?? CAREER_TIMEOUT_MS, "Timed out after 5 minutes");
+    // Added with one click: apply it as suggested now, so the next one can start without a review in between.
+    if (!signal.aborted) await applyIfAutomatic(id, { db });
   } catch (err) {
     if (signal.aborted) return;
     await db
@@ -356,7 +343,7 @@ export function startQueueWorker(): void {
   s.timer = setInterval(() => void tick(), TICK_MS);
   s.timer.unref?.();
 
-  // Library resumes that have no index yet (added while the worker was off) get indexed now.
+  // Library resumes that were never read (added while the worker was off) are read now.
   void backfillDocuments()
     .then(() => backfillResumeIndexes())
     .catch((err) => console.error("[queue] library backfill failed", err instanceof Error ? err.message : err));

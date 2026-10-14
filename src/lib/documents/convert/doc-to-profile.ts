@@ -48,8 +48,7 @@ const paragraphs = (section: DocJSON) =>
 
 /**
  * An editor document as a structured resume, with no model call. Everything a profile can hold comes back; custom
- * sections, the headline and nesting of bullets have no place in a profile and are dropped (use `chunkDocument` to
- * keep custom sections searchable).
+ * sections, the headline and nesting of bullets have no place in a profile and are dropped.
  */
 export function docToProfile(doc: DocJSON): Profile {
   const profile = emptyProfile();

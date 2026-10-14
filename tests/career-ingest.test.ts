@@ -17,7 +17,6 @@ import {
   enqueueProfileSource,
   processProposal,
   recoverInterruptedProposals,
-  startBuild,
   sweepStaleProposals,
 } from "@/lib/career/queue";
 import {
@@ -38,6 +37,7 @@ import { regroupRole } from "@/lib/career/review";
 import { currentAbortSignal } from "@/lib/llm/abort";
 import { processCareer } from "@/lib/queue/worker";
 import { counter, profileWith } from "./career-helpers";
+import { queueEverything } from "./career-queue-helpers";
 import { resetDb, testDb } from "./helpers";
 
 const db = testDb();
@@ -75,7 +75,7 @@ describe("starting a build", () => {
     await resume("New", acmePm, { writtenOn: "2024-01-01" });
     await resume("Base", acmeEng, { isBase: true, writtenOn: "2018-01-01" });
     await saveProfileVersion({ profile: { ...emptyProfile(), achievements: ["Won an award"] } }, db);
-    const out = await startBuild(db);
+    const out = await queueEverything(db);
     expect(out).toEqual({ queued: 4, skipped: 0 });
 
     const order: string[] = [];
@@ -96,14 +96,14 @@ describe("starting a build", () => {
     const doc = await resume("Gone", acmeEng);
     await softDelete(doc.document.id, db);
     await createDocument({ kind: "email", origin: "pasted", title: "Mail", content: textToDoc("Hello there", { mode: "letter" }) }, db);
-    expect(await startBuild(db)).toEqual({ queued: 0, skipped: 0 });
+    expect(await queueEverything(db)).toEqual({ queued: 0, skipped: 0 });
     expect(await enqueueProfileSource(db)).toBeNull();
   });
 
   it("is safe to run twice", async () => {
     await resume("A", acmeEng);
-    await startBuild(db);
-    expect(await startBuild(db)).toEqual({ queued: 0, skipped: 0 });
+    await queueEverything(db);
+    expect(await queueEverything(db)).toEqual({ queued: 0, skipped: 0 });
     const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(careerProposals);
     expect(n).toBe(1);
   });
@@ -113,7 +113,7 @@ describe("one proposal at a time", () => {
   it("claims nothing while one is running or waiting for review", async () => {
     await resume("A", acmeEng);
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     const first = await claimNextProposal(db);
     expect(first).toBeTruthy();
     expect(await claimNextProposal(db)).toBeNull();
@@ -125,7 +125,7 @@ describe("one proposal at a time", () => {
 
   it("requeues a running proposal whose worker stopped, and fails it after too many tries", async () => {
     await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     await db.execute(sql`UPDATE career_proposals SET updated_at = now() - interval '10 minutes' WHERE id = ${id}`);
     expect(await sweepStaleProposals(db)).toBe(1);
@@ -143,7 +143,7 @@ describe("one proposal at a time", () => {
   it("puts back every running proposal at startup, however recent, and fails it after too many tries", async () => {
     await resume("A", acmeEng);
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     expect(await sweepStaleProposals(db)).toBe(0);
     expect(await recoverInterruptedProposals(db)).toBe(1);
@@ -156,7 +156,7 @@ describe("one proposal at a time", () => {
 
   it("records a failure when the source cannot be read", async () => {
     const { document } = await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     await db.execute(sql`UPDATE career_sources SET document_version_id = NULL, text = 'x', kind = 'linkedin' WHERE document_id = ${document.id}`);
     await processProposal(id, {
@@ -174,7 +174,7 @@ describe("the worker", () => {
   it("marks a proposal failed when preparing it throws or takes too long", async () => {
     await resume("A", acmeEng);
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     const first = (await claimNextProposal(db))!;
     await processCareer(first, {
       db,
@@ -195,7 +195,7 @@ describe("the worker", () => {
 
   it("stops at once when skipped, cancelling its model calls and recording nothing", async () => {
     await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     const controller = new AbortController();
     let seen: AbortSignal | undefined;
@@ -217,7 +217,7 @@ describe("the worker", () => {
 
   it("prepares a proposal for real when nothing goes wrong", async () => {
     await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     await processCareer(id, { db });
     const [row] = await db.select().from(careerProposals).where(eq(careerProposals.id, id));
@@ -229,7 +229,7 @@ describe("reviewing and applying", () => {
   it("prepares a proposal, applies it, and moves the queue on", async () => {
     await resume("Base", acmeEng, { isBase: true });
     await resume("PM", acmePm, { writtenOn: "2020-01-01" });
-    await startBuild(db);
+    await queueEverything(db);
 
     const first = (await prepareNext())!;
     const review = (await getOpenReview(db))!;
@@ -260,7 +260,7 @@ describe("reviewing and applying", () => {
 
   it("applies the choices that were saved, not the suggestions", async () => {
     await resume("Base", acmeEng, { isBase: true });
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await prepareNext())!;
     const review = (await getOpenReview(db))!;
     const bullet = review.proposal.employers[0].roles[0].bullets[0];
@@ -273,7 +273,7 @@ describe("reviewing and applying", () => {
 
   it("rejects bad decisions and decisions for a proposal that is not waiting", async () => {
     await resume("Base", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     await expect(saveDecisions(id, {}, db)).rejects.toBeInstanceOf(ProposalError);
     await processProposal(id, { db, parse: never, grouper: noGroup });
@@ -284,7 +284,7 @@ describe("reviewing and applying", () => {
   it("links an employer to its page in the companies directory", async () => {
     const company = await resolveCompany({ name: "Acme" }, db);
     await resume("Base", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await prepareNext())!;
     expect((await getOpenReview(db))!.proposal.employers[0].companyId).toBe(company.id);
     await applyReviewedProposal(id, { db, newId });
@@ -301,7 +301,7 @@ describe("reviewing and applying", () => {
       },
       db,
     );
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     const parse = vi.fn(async () => profileWith(acmeEng));
     await processProposal(id, { db, parse, grouper: noGroup });
@@ -324,7 +324,7 @@ describe("cover letters", () => {
     const company = await resolveCompany({ name: "Globex" }, db);
     await createDocument({ kind: "cover_letter", origin: "pasted", title: "Letter to Globex", content: textToDoc(LETTER, { mode: "letter" }), companyId: company.id, targetRole: "Software Engineer" }, db);
     await resume("Base", acmeEng, { isBase: true });
-    expect(await startBuild(db)).toEqual({ queued: 2, skipped: 0 });
+    expect(await queueEverything(db)).toEqual({ queued: 2, skipped: 0 });
 
     await applyReviewedProposal((await prepareNext())!, { db, newId });
     const record = (await currentRecord(db)).record;
@@ -354,7 +354,7 @@ describe("cover letters", () => {
 
   it("fails the proposal when the letter cannot be read, so it can be retried", async () => {
     await createDocument({ kind: "cover_letter", origin: "pasted", title: "Letter", content: textToDoc(LETTER, { mode: "letter" }) }, db);
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await claimNextProposal(db))!;
     await processProposal(id, {
       db,
@@ -373,7 +373,7 @@ describe("grouping with the model", () => {
   it("puts reworded bullets on the fact they repeat, for roles that join one in the record", async () => {
     await resume("Base", acmeEng, { isBase: true });
     await resume("PM", [{ ...acmePm[0], title: "Software Engineer", bullets: ["Designed and shipped the billing platform", "Brand new accomplishment"] }], { writtenOn: "2020-01-01" });
-    await startBuild(db);
+    await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
 
     const record = (await currentRecord(db)).record;
@@ -398,7 +398,7 @@ describe("grouping with the model", () => {
   it("fails the proposal when the model cannot be reached, so it can be retried", async () => {
     await resume("Base", acmeEng, { isBase: true });
     await resume("PM", [{ ...acmePm[0], title: "Software Engineer", bullets: ["Something reworded"] }], { writtenOn: "2020-01-01" });
-    await startBuild(db);
+    await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
     const id = (await claimNextProposal(db))!;
     await processProposal(id, {
@@ -418,7 +418,7 @@ describe("grouping with the model", () => {
   it("settles a role's bullets against another role when the user moves it, and forgets old choices for them", async () => {
     await resume("Base", acmeEng, { isBase: true });
     await resume("Other", [{ company: "Acme", title: "Manager", start: "Jan 2010", end: "Dec 2011", bullets: ["Hired the first team", "Cut build times by 40%"] }], { writtenOn: "2020-01-01" });
-    await startBuild(db);
+    await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
     const id = (await prepareNext())!;
     const review = (await getOpenReview(db))!;
@@ -442,20 +442,20 @@ describe("dismissing and skipping", () => {
   it("does not queue a source that was left out, or one that is already in the record", async () => {
     const a = await resume("A", acmeEng);
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     const first = (await prepareNext())!;
     await dismissProposal(first, db);
     const second = (await prepareNext())!;
     await applyReviewedProposal(second, { db, newId });
 
-    expect(await startBuild(db)).toEqual({ queued: 0, skipped: 2 });
+    expect(await queueEverything(db)).toEqual({ queued: 0, skipped: 2 });
     const outcome = await enqueueDocumentSource(a.document.id, db);
     expect(outcome?.status).toBe("skipped");
   });
 
   it("skips a different document with the same content", async () => {
     await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
     const copy = await resume("Copy", acmeEng);
     const outcome = await enqueueDocumentSource(copy.document.id, db);
@@ -464,7 +464,7 @@ describe("dismissing and skipping", () => {
 
   it("queues a source again once its content changes", async () => {
     const a = await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
 
     const edited = profileToDoc(profileWith([{ ...acmeEng[0], bullets: ["Built the billing service", "Something brand new"] }]), counter("c"));
@@ -485,7 +485,7 @@ describe("a record that changed while reviewing", () => {
   async function setup() {
     await resume("Base", acmeEng, { isBase: true });
     await resume("PM", acmePm, { writtenOn: "2020-01-01" });
-    await startBuild(db);
+    await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
     return (await prepareNext())!;
   }
@@ -523,7 +523,7 @@ describe("a record that changed while reviewing", () => {
 
   it("offers to review a merge again after it is undone by a restore", async () => {
     await resume("Base", acmeEng, { isBase: true });
-    await startBuild(db);
+    await queueEverything(db);
     const id = (await prepareNext())!;
     await saveRecordVersion({ record: emptyRecord(), reason: "edit", expectedVersion: 0 }, db);
     await applyReviewedProposal(id, { db, newId });
@@ -542,7 +542,7 @@ describe("skipping a source for now", () => {
   it("sets the running one aside unreviewed, moves on, and prepares it again only when asked", async () => {
     await resume("A", acmeEng, { isBase: true });
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     const first = (await claimNextProposal(db))!;
     expect(await skipProposal(first, db)).toEqual({ label: "A" });
     await expect(skipProposal(first, db)).rejects.toThrow(ProposalError);
@@ -558,7 +558,7 @@ describe("skipping a source for now", () => {
     expect(status).toMatchObject({ counts: { skipped: 1, running: 1 }, total: 2, done: 0 });
 
     // Looking for new sources leaves it alone.
-    expect(await startBuild(db)).toEqual({ queued: 0, skipped: 0 });
+    expect(await queueEverything(db)).toEqual({ queued: 0, skipped: 0 });
     await processProposal(second, { db, parse: never, grouper: noGroup });
     await dismissProposal(second, db);
     expect(await claimNextProposal(db)).toBeNull();
@@ -571,7 +571,7 @@ describe("skipping a source for now", () => {
   it("frees the review slot of one waiting for review, keeping its choices", async () => {
     await resume("A", acmeEng);
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     const first = (await prepareNext())!;
     await saveDecisions(first, { x: { action: "reject" } }, db);
     await skipProposal(first, db);
@@ -582,7 +582,7 @@ describe("skipping a source for now", () => {
 
   it("replaces a skipped source when its document gets a new version", async () => {
     const { document } = await resume("A", acmeEng);
-    await startBuild(db);
+    await queueEverything(db);
     const first = (await claimNextProposal(db))!;
     await skipProposal(first, db);
     const [{ rev }] = await db.execute<{ rev: number }>(sql`SELECT revision AS rev FROM document_drafts WHERE document_id = ${document.id}`);
@@ -599,7 +599,7 @@ describe("career status", () => {
   it("counts proposals and reports failures", async () => {
     await resume("A", acmeEng);
     await resume("B", acmePm);
-    await startBuild(db);
+    await queueEverything(db);
     expect(await getCareerStatus(db)).toMatchObject({ counts: { queued: 2 }, total: 2, done: 0, current: null });
     const id = (await claimNextProposal(db))!;
     expect((await getCareerStatus(db)).current).toMatchObject({ id, status: "running" });

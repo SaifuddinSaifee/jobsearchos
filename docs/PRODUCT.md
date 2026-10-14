@@ -5,7 +5,7 @@ code, no schema. For how each piece is built, follow the links to the stage docs
 
 Keep this file current. When a feature ships, move it from "Roadmap" to "What it does today" and add its user stories.
 
-Last updated: 2026-10-14 (branch `stage-4a`).
+Last updated: 2026-10-14 (branch `enh-career-records`).
 
 ---
 
@@ -82,7 +82,7 @@ Nothing is ever submitted or sent without an explicit click from you.
   always see exactly what was used for an application.
 - **Cheapest reliable source first.** Public APIs before scraping, free lookups before paid credits, and the app tells
   you what a lookup cost.
-- **Work survives the tab.** Slow tasks (reading postings, finding people, indexing resumes) run in the background and
+- **Work survives the tab.** Slow tasks (reading postings, finding people, reading resumes) run in the background and
   keep going if you leave the page.
 - **Private by default.** Data lives in your local database and disk. The exception: AI calls send their input (resume
   text, job pages) to Together AI, and Gmail, Tavily and Prospeo receive what they need. If you turn on Phoenix tracing
@@ -186,7 +186,7 @@ Opened from a job's side panel ("Email a contact").
 Resumes, cover letters and emails, kept as text you can read and search, not as files.
 
 - Four tabs: **Resumes, Cover letters, Emails, Career record** (see Career record, below). Each document shows what it is for (job and company), its date, where it
-  came from, how many versions it has, and (for resumes) whether it is indexed for search.
+  came from, how many versions it has, and (for an uploaded resume) whether it is still being read into sections.
 - **Add** a document three ways: upload a PDF or DOCX, paste text, or start blank (a resume can start as a copy of your base
   resume). Link it to a job, and add the role, date and the job description it was written for.
 - An uploaded resume is read into headings, bullets and sections, then the AI structures it in the background (roles with
@@ -211,19 +211,27 @@ One record of everything you have done, merged from your resumes, cover letters,
 as a PDF. It lives in the **Career record** tab of the Library. It has no length limit and is never sent anywhere. It is
 the base the writer will use to pick the right facts and wording for a job.
 
-- **Build from your library** queues every resume (the base first, then newest first), the Profile, a LinkedIn print
-  if you added one, and your cover letters last. Sources are prepared one at a time in the background, each compared
-  with the record as it stands after the one before. **Include Profile** and **Add LinkedIn PDF** add those two by hand
-  (save your LinkedIn page as a PDF from the browser's print dialog; only its text is kept, never the file). Once a record
-  exists, a saved Profile is offered for review on its own.
+- **You choose what goes in.** Nothing is added on its own, and nothing is sent to the AI until you add it. The tab
+  lists **Not in your record**: every resume and cover letter that is not in the record and would add something to it,
+  with what it would add, worked out for free by comparing words ("2 of 4 bullets are already in your record. New: 2
+  bullets, a job (Junior Developer at Initech, Jun 2018 to Dec 2019) and 1 skill."). Tick the ones that belong (or
+  **Select all**) and choose **Add to record** (added as suggested, one after another, no review) or **Review each
+  first**. A document whose content is all in the record already is not listed; when nothing is left to choose, the
+  tab says so, with how many documents are in the record and how many were left out. **Never** takes a document off the
+  list for good; the documents set to never are listed apart, with **Ask again**. The first build is the same list.
+- **Include Profile** and **Add LinkedIn PDF** add those two by hand (save your LinkedIn page as a PDF from the browser's
+  print dialog; only its text is kept, never the file). Once a record exists, a saved Profile is offered for review on
+  its own.
 - **Progress in the sidebar.** While sources are being prepared, a card in the sidebar (on every page) shows which one
   is being read and how many of the batch are done. When one is ready, the card says so (with how many wait after it)
   and opens the review, and a toast with a **Review** button appears wherever you are. Only one source is prepared ahead
-  of your review, so the next starts after you save. Failures show on the card and as a toast too.
+  of your review, so the next starts after you save; sources added with one click go straight through. Failures show
+  on the card and as a toast too.
 - **Skip a source for now.** **Stop and skip** (on the sidebar card and the Career record tab) stops the source being
   read, cancelling its model calls, and starts the next one. **Review later** does the same for one waiting for review,
   keeping your choices so far. A skipped source is not reviewed and not in the record: it is listed under "Skipped, not
-  reviewed yet" with **Prepare** to queue it again, and looking for new sources leaves it alone. A new version of its
+  reviewed yet" with **Prepare** to queue it again (adding it from the editor does the same) and **Leave out** to drop
+  it for good (it is not offered again, but you can still add it by hand from the editor). A new version of its
   document replaces it as usual.
 - **After a restart.** A source that was being read when the server stopped is queued again as soon as the server
   starts, so it never shows as in progress when nothing is working on it.
@@ -231,7 +239,7 @@ the base the writer will use to pick the right facts and wording for a job.
   **View details**. Details opens a dialog with each failure taken apart: the plain reason, when it failed, attempts, the
   step that failed and, for model errors, the HTTP status, error type, code, parameter and request id, plus the raw
   error. Copy one failure or **Copy all** as plain text to share or debug.
-- **Review before anything is added.** For each source you see every employer, role and bullet with a suggestion: new,
+- **Review, when you ask for it.** For each source you chose to review, you see every employer, role and bullet with a suggestion: new,
   the same role, a new **framing** of a role you already have, the same fact worded differently, or already in your
   record. You can include or leave out anything, move a role under another role or framing, say which fact a bullet
   belongs to, and see in words what saving will add. Your choices are saved as you go. Saving makes a new record version.
@@ -256,10 +264,15 @@ the base the writer will use to pick the right facts and wording for a job.
   You can change any label, role or fact. Reasons are listed under "Reasons for applying".
 - A resume with no structure is read by the AI before it is compared. Merges never rewrite text: every wording is word
   for word from its source.
-- **From the editor.** Once a record exists, a resume or cover letter you create or save a version of is offered to the
-  record (a resume waits until it has been read for search). A newer version replaces an older one still waiting. A source
-  that would add nothing (every bullet is already there, the dates and the role it was written for are noted) is left out
-  without asking, with a note, so saving a small edit does not leave a review to click through.
+- **From the editor.** A resume or cover letter that is not in the record shows a short card above the page: what
+  adding it would bring (the same free summary), with **Add to record** (one click, no review), **Review first**, **Not
+  now** (hides the card until the next version) and **Never for this document**. The header always has **Add to career
+  record** (adding overrides Not now and Never), and shows "Adding to career record" while it is added, then "In career
+  record", with a toast when it is done (or a **Review** button when it waits for review). Adding saves what is on the
+  page as a version first, so the record gets exactly that. Use it for a resume you have polished and want the record
+  to remember, including one tailored for a job. Saving a document never adds it to the record or calls the AI.
+- A source that turns out to add nothing once it is read (every bullet is already there, the dates and the role it was
+  written for are noted) is left out without asking, with a note.
 
 ### Editor
 
@@ -317,9 +330,9 @@ Open any document and write on it, like Notion on a real sheet of A4.
 
 ### Behind the scenes
 
-- Every library resume is indexed for search in the background (split into sections, one search vector each), so future
-  writing can reuse your real wording for similar jobs. Nothing uses this yet from a user's point of view, except the index
-  status shown in the Library, on the Profile page and in the attach panel.
+- An uploaded resume with no sections is read into sections by the AI in the background (once per upload). Resumes are
+  no longer embedded for search: the career record is what writing will draw on. Its reading status is shown in the
+  Library, on the Profile page and in the attach panel only while it is being read, or if reading failed.
 
 ## 6. User stories (built)
 
@@ -390,7 +403,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
 | 3b | Company directory and research | Done |
 | 4a | Library, editor and export, career record, fit score | **Library, editor and export done**; **career record built** (resumes, Profile, LinkedIn and cover letters, review, grouping, browse and edit, editor panel); fit score not started |
 | 4 | Writing: resume, cover letter, cold email | **Not started** |
-| 5 | Learning from past resumes | **Started**: resume indexing built, not yet used for writing |
+| 5 | Learning from past resumes | **Replaced** by the career record: resumes are no longer embedded; the record is what writing will draw on |
 | 6 | Match score and gap analysis | Not started |
 | 7a | Email settings and Gmail connection | Done |
 | 7b | Outreach: find people, find emails, compose, attach, send | Done (on `stage-emails`, not yet merged) |
@@ -413,8 +426,8 @@ and **export** (first and last bullets) are built; the career record and fit sco
 - **Career record (built):** one "mega resume" of every employer, role, fact and wording across all your resumes,
   including the same job framed differently (PM in one resume, engineer in another). Merges are proposed and reviewed,
   never silent. **Built:** the record and its versions, merging resumes, cover letters, the Profile and a LinkedIn print
-  with review, framings, AI grouping of reworded bullets, browsing and hand edits, documents saved in the editor offered
-  back to the record, and a panel in the editor to reuse its wording. **Not yet:** the Profile still reads its own
+  with review, framings, AI grouping of reworded bullets, browsing and hand edits, choosing which documents go in (with
+  a free summary of what each adds, and a one-click add from the editor), and a panel in the editor to reuse its wording. **Not yet:** the Profile still reads its own
   experience (it becomes "the default selection from the career record" once the record is trusted).
 - **Fit score:** how well a resume matches a job and its company, with missing keywords split into "you have it, this
   resume does not show it" and "real gap".

@@ -5,6 +5,7 @@ import { ChevronDown, Download, FileCode2, FileText, Type } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { DOCUMENT_OFFER_KEY } from "@/components/career/use-document-offer";
 import { RESUME_INDEXES_KEY } from "@/components/resume/use-resume-indexes";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -71,6 +72,7 @@ export function ExportMenu({
       else toast.success(`Downloaded ${name}`);
       if (res.headers.get("X-Version")) {
         void queryClient.invalidateQueries({ queryKey: RESUME_INDEXES_KEY });
+        void queryClient.invalidateQueries({ queryKey: DOCUMENT_OFFER_KEY });
         router.refresh();
       }
     } catch (err) {

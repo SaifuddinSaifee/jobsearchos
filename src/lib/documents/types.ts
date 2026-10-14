@@ -29,5 +29,9 @@ export const REASON_LABELS: Record<VersionReason, string> = {
   sent: "Sent",
 };
 
+/** What the user said about adding a document to the career record: "later" (Not now, for one version) or "never". */
+export const RECORD_CHOICES = ["later", "never"] as const;
+export type RecordChoice = (typeof RECORD_CHOICES)[number];
+
 /** Bumped if the editor document format ever changes in a way old content cannot be read as-is. */
 export const CONTENT_SCHEMA_VERSION = 1;

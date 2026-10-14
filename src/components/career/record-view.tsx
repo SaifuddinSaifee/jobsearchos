@@ -1,24 +1,26 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, FileUp, Hammer, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
+import { Ban, ClipboardCheck, FileUp, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
+  dismissProposalAction,
   includeProfileAction,
   prepareSkippedAction,
   restoreRecordVersionAction,
   retryFailedAction,
   reviewAgainAction,
-  startBuildAction,
 } from "@/app/(app)/library/record/actions";
+import type { DocumentOffer } from "@/lib/career/offer";
 import type { CareerStatus } from "@/lib/career/review";
 import type { CareerRecord } from "@/lib/career/schema";
 import type { SourceInfo } from "@/lib/career/service";
 import { FailureDialog } from "./failure-dialog";
 import { RecordBrowser } from "./record-browser";
+import { RecordOffers } from "./record-offers";
 import { SkipButton } from "./skip-button";
 import { RecordEditProvider } from "./record-edit";
 import { CAREER_STATUS_KEY, isPreparing, useCareerStatus } from "./use-career-status";
@@ -47,31 +49,37 @@ export function RecordView({
   status,
   record,
   sources,
+  offers,
+  handled,
 }: {
   summary: RecordSummary | null;
   versions: RecordVersionItem[];
   status: CareerStatus;
   record: CareerRecord | null;
   sources: Record<string, SourceInfo>;
+  /** Library documents not in the record that would add something to it. */
+  offers: Extract<DocumentOffer, { state: "new" }>[];
+  handled: { inRecord: number; leftOut: number };
 }) {
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="max-w-xl text-sm text-muted-foreground">
           Everything you have done, merged from your resumes and cover letters. It has no length limit and it is never
-          sent anywhere. Nothing is added to it without your review.
+          sent anywhere. Nothing is added to it unless you choose to add it.
         </p>
         <VersionsSheet versions={versions} latest={summary?.version ?? 0} />
       </div>
 
       <Progress initial={status} />
+      <RecordOffers offers={offers} recordExists={summary !== null} handled={handled} />
       {summary && record ? (
         <RecordEditProvider version={summary.version} sources={sources}>
           <Summary summary={summary} />
           <RecordBrowser record={record} />
         </RecordEditProvider>
       ) : (
-        <EmptyState hasSources={status.total > 0} />
+        <EmptyState />
       )}
     </div>
   );
@@ -86,7 +94,8 @@ function Progress({ initial }: { initial: CareerStatus }) {
   const [retrying, startRetry] = useTransition();
   const [again, startAgain] = useTransition();
   const [, startPrepare] = useTransition();
-  const [preparingSkipped, setPreparingSkipped] = useState<string | null>(null);
+  // Which skipped source is busy, and with what: being queued again, or left out.
+  const [skippedBusy, setSkippedBusy] = useState<{ id: string; action: "prepare" | "dismiss" } | null>(null);
 
   const preparing = isPreparing(status);
   const refresh = () => client.invalidateQueries({ queryKey: CAREER_STATUS_KEY }).then(() => router.refresh());
@@ -169,43 +178,64 @@ function Progress({ initial }: { initial: CareerStatus }) {
       {status.skipped.length > 0 && (
         <div className="space-y-1 rounded-lg border px-4 py-3 text-sm animate-in fade-in duration-300 motion-reduce:animate-none">
           <p className="font-medium">Skipped, not reviewed yet</p>
+          <p className="text-muted-foreground">Prepare one to review it, or leave it out of your record.</p>
           <ul className="space-y-1">
             {status.skipped.map((u) => (
               <li key={u.id} className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">{u.label}</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  loading={preparingSkipped === u.id}
-                  disabled={preparingSkipped !== null}
-                  onClick={() => {
-                    setPreparingSkipped(u.id);
-                    startPrepare(async () => {
-                      const res = await prepareSkippedAction(u.id);
-                      if (res.ok) toast.success(`${u.label} queued for review`);
-                      else toast.error(res.error);
-                      await refresh();
-                      setPreparingSkipped(null);
-                    });
-                  }}
-                >
-                  <Play aria-hidden />
-                  Prepare
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={skippedBusy?.id === u.id && skippedBusy.action === "dismiss"}
+                    disabled={skippedBusy !== null}
+                    onClick={() => {
+                      setSkippedBusy({ id: u.id, action: "dismiss" });
+                      startPrepare(async () => {
+                        const res = await dismissProposalAction(u.id);
+                        if (res.ok) toast.success(`${u.label} left out of your record`);
+                        else toast.error(res.error);
+                        await refresh();
+                        setSkippedBusy(null);
+                      });
+                    }}
+                  >
+                    <Ban aria-hidden />
+                    Leave out
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={skippedBusy?.id === u.id && skippedBusy.action === "prepare"}
+                    disabled={skippedBusy !== null}
+                    onClick={() => {
+                      setSkippedBusy({ id: u.id, action: "prepare" });
+                      startPrepare(async () => {
+                        const res = await prepareSkippedAction(u.id);
+                        if (res.ok) toast.success(`${u.label} queued for review`);
+                        else toast.error(res.error);
+                        await refresh();
+                        setSkippedBusy(null);
+                      });
+                    }}
+                  >
+                    <Play aria-hidden />
+                    Prepare
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      <SourceActions refresh={refresh} started={status.total > 0 || status.recordVersion > 0} />
+      <SourceActions refresh={refresh} />
     </div>
   );
 }
 
-/** More things to read into the record: new documents, the Profile, or a LinkedIn profile saved as a PDF. */
-function SourceActions({ refresh, started }: { refresh: () => Promise<unknown>; started: boolean }) {
-  const [building, startBuild] = useTransition();
+/** More things to read into the record besides Library documents: the Profile, or a LinkedIn profile saved as a PDF. */
+function SourceActions({ refresh }: { refresh: () => Promise<unknown> }) {
   const [including, startInclude] = useTransition();
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -228,24 +258,6 @@ function SourceActions({ refresh, started }: { refresh: () => Promise<unknown>; 
 
   return (
     <div className="flex flex-wrap gap-2">
-      {started && (
-        <Button
-          variant="outline"
-          size="sm"
-          loading={building}
-          onClick={() =>
-            startBuild(async () => {
-              const res = await startBuildAction();
-              if (res.ok) toast.success(res.queued > 0 ? `${res.queued} sources queued` : "Nothing new to add");
-              else toast.error(res.error);
-              await refresh();
-            })
-          }
-        >
-          <Hammer aria-hidden />
-          Look for new sources
-        </Button>
-      )}
       <Button
         variant="outline"
         size="sm"
@@ -281,36 +293,15 @@ function SourceActions({ refresh, started }: { refresh: () => Promise<unknown>; 
   );
 }
 
-function EmptyState({ hasSources }: { hasSources: boolean }) {
-  const router = useRouter();
-  const client = useQueryClient();
-  const [building, start] = useTransition();
+function EmptyState() {
   return (
     <div className="animate-in fade-in slide-in-from-bottom-1 rounded-lg border border-dashed p-8 text-center duration-300 motion-reduce:animate-none">
       <Library className="mx-auto size-6 text-muted-foreground" aria-hidden />
       <h2 className="mt-3 text-sm font-medium">Your career record is empty</h2>
       <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-        It will hold every employer, role and accomplishment from your documents, with each way you have worded them.
-        You review each source before anything is added.
+        It will hold every employer, role and accomplishment from the documents you choose, with each way you have worded
+        them. Choose documents above to start it.
       </p>
-      {!hasSources && (
-        <Button
-          className="mt-4"
-          loading={building}
-          onClick={() =>
-            start(async () => {
-              const res = await startBuildAction();
-              if (res.ok) toast.success(res.queued > 0 ? `${res.queued} sources queued` : "There is nothing to read yet");
-              else toast.error(res.error);
-              await client.invalidateQueries({ queryKey: CAREER_STATUS_KEY });
-              router.refresh();
-            })
-          }
-        >
-          <Hammer aria-hidden />
-          Build from your library
-        </Button>
-      )}
     </div>
   );
 }

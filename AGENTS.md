@@ -24,6 +24,6 @@ Both happen automatically if, and only if, the call goes through the logging lay
 - **A new model** needs a price in `src/lib/llm/prices.ts`, or its calls are counted as unpriced.
 - **Never store prompt or reply text in our database.** The `llm_calls` table is numbers and ids only; the text lives in Phoenix.
 - **Tests** must not reach a real model or the dev database: mock `@/lib/llm/openai` (`chatClient`), and `@/lib/llm/usage` when asserting on what is recorded. The recorder writes nothing under Vitest unless given a test `db`.
-- **Known gap:** embeddings (`src/lib/resume/embed.ts`, local Ollama) are not logged yet. Do not add any other uncovered model call. If a different provider or kind of model call is needed, extend the logging layer so it records both, instead of bypassing it.
+- **Known gap:** embeddings (`src/lib/resume/embed.ts`, local Ollama) are not logged. Nothing calls them now (resume embeddings were removed); if the career record gets an index, log them first. Do not add any other uncovered model call. If a different provider or kind of model call is needed, extend the logging layer so it records both, instead of bypassing it.
 
 Update `docs/LLM-LOGGING.md` when this layer changes, and see it for how it works.

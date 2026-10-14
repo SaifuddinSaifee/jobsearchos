@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { deleteAction, duplicateAction, setBaseAction, type Result } from "@/app/(app)/library/actions";
+import { DOCUMENT_OFFER_KEY } from "@/components/career/use-document-offer";
 import { RESUME_INDEXES_KEY } from "@/components/resume/use-resume-indexes";
 
 /** The things you can do to a document from a list or its page, each with a toast and a refresh. */
@@ -20,6 +21,7 @@ export function useDocumentActions() {
     if (!res.ok) return void toast.error(res.error);
     done(res);
     void queryClient.invalidateQueries({ queryKey: RESUME_INDEXES_KEY });
+    void queryClient.invalidateQueries({ queryKey: DOCUMENT_OFFER_KEY });
     router.refresh();
   }
 

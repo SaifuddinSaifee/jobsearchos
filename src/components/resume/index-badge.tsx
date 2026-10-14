@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, CircleCheck, Loader2, RotateCcw } from "lucide-react";
+import { CircleAlert, Loader2, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { retryIndexAction } from "@/app/(app)/library/actions";
@@ -10,19 +10,20 @@ import { cn } from "@/lib/utils";
 import { RESUME_INDEXES_KEY, useResumeIndexes } from "./use-resume-indexes";
 
 /**
- * Whether a library resume is searchable yet: waiting, working, ready (with how many sections), or failed (with a retry).
- * Reads the shared polling query, so every badge on the page updates together.
+ * Shows a library resume while it is being read into sections (waiting or working), or when that failed (with a
+ * retry). A resume that is read, or never needed reading, shows nothing. Reads the shared polling query, so every
+ * badge on the page updates together.
  */
 export function IndexBadge({ documentId, className }: { documentId: string; className?: string }) {
-  const { byDocument, isSuccess } = useResumeIndexes();
+  const { byDocument } = useResumeIndexes();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
-  if (!isSuccess) return <span className={cn("inline-block h-4 w-24 animate-pulse rounded bg-muted", className)} aria-hidden />;
 
   const info = byDocument.get(documentId);
+  const label = indexLabel(info);
   const active = isIndexActive(info?.status);
 
-  async function start() {
+  async function retry() {
     setBusy(true);
     const res = await retryIndexAction(documentId);
     setBusy(false);
@@ -30,25 +31,22 @@ export function IndexBadge({ documentId, className }: { documentId: string; clas
     void queryClient.invalidateQueries({ queryKey: RESUME_INDEXES_KEY });
   }
 
-  const canStart = !info || info.status === "failed";
+  if (!label) return null;
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-xs", info?.status === "failed" ? "text-destructive" : "text-muted-foreground", className)} title={info?.error ?? info?.note ?? undefined}>
-      {active || busy ? (
-        <Loader2 className="size-3.5 animate-spin" aria-hidden />
-      ) : info?.status === "ready" ? (
-        <CircleCheck className="size-3.5 text-green-600 dark:text-green-400" aria-hidden />
-      ) : info?.status === "failed" ? (
-        <CircleAlert className="size-3.5" aria-hidden />
-      ) : null}
-      <span aria-live="polite">{indexLabel(info)}</span>
-      {canStart && (
+    <span
+      className={cn("inline-flex items-center gap-1.5 text-xs animate-in fade-in duration-200 motion-reduce:animate-none", info?.status === "failed" ? "text-destructive" : "text-muted-foreground", className)}
+      title={info?.error ?? info?.note ?? undefined}
+    >
+      {active || busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <CircleAlert className="size-3.5" aria-hidden />}
+      <span aria-live="polite">{label}</span>
+      {info?.status === "failed" && (
         <button
           type="button"
-          onClick={start}
+          onClick={retry}
           disabled={busy}
           className="inline-flex items-center gap-1 rounded px-1 font-medium text-foreground underline-offset-4 outline-none transition-[background-color,scale] hover:bg-muted hover:underline focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:opacity-60"
         >
-          <RotateCcw className="size-3" aria-hidden /> {info ? "Retry" : "Index now"}
+          <RotateCcw className="size-3" aria-hidden /> Retry
         </button>
       )}
     </span>

@@ -11,6 +11,7 @@ import { KIND_LABELS } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
 import { RecordView } from "@/components/career/record-view";
 import type { RecordSummary, RecordVersionItem } from "@/components/career/types";
+import type { DocumentOffer } from "@/lib/career/offer";
 import type { CareerStatus } from "@/lib/career/review";
 import type { CareerRecord } from "@/lib/career/schema";
 import type { SourceInfo } from "@/lib/career/service";
@@ -48,6 +49,8 @@ export function LibraryTabs({
   careerStatus,
   careerRecord,
   careerSources,
+  offers,
+  handled,
 }: {
   rows: LibraryRow[];
   jobs: JobChoice[];
@@ -56,6 +59,8 @@ export function LibraryTabs({
   careerStatus: CareerStatus;
   careerRecord: CareerRecord | null;
   careerSources: Record<string, SourceInfo>;
+  offers: Extract<DocumentOffer, { state: "new" }>[];
+  handled: { inRecord: number; leftOut: number };
 }) {
   const [tab, setTab] = useQueryState("tab", parseAsStringLiteral(TABS).withDefault("resumes"));
   const [adding, setAdding] = useState(false);
@@ -81,7 +86,7 @@ export function LibraryTabs({
       </TabsList>
 
       <TabsContent value="record" className="pt-4">
-        <RecordView summary={record} versions={recordVersions} status={careerStatus} record={careerRecord} sources={careerSources} />
+        <RecordView summary={record} versions={recordVersions} status={careerStatus} record={careerRecord} sources={careerSources} offers={offers} handled={handled} />
       </TabsContent>
 
       {DOC_TABS.map((t) => (

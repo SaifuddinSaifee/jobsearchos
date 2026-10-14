@@ -76,7 +76,7 @@ export function PreparingNext({ initial }: { initial: CareerStatus }) {
           <>
             <h2 className="text-sm font-medium">Nothing is waiting for review</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {status.total > 0 ? `All ${status.total} sources are done.` : "Build your career record from the Library to start."}
+              {status.total > 0 ? `All ${status.total} sources are done.` : "Choose documents to add on the Career record tab to start."}
             </p>
             <Button className="mt-4" variant="outline" nativeButton={false} render={<Link href="/library?tab=record" />}>
               Back to the career record
