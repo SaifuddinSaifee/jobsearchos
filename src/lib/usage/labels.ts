@@ -12,7 +12,9 @@ export const ACTION_LABELS: Record<RecordedAction, string> = {
   "read-career-source": "Read a career source",
   "eval-resume": "Resume eval (script)",
   "eval-jobs": "Job eval (script)",
+  "eval-resume-writer": "Resume writer eval (script)",
   "snapshot-job": "Job snapshot (script)",
+  "generate-resume": "Write a resume for a job",
   unknown: "Unattributed",
 };
 
@@ -26,7 +28,10 @@ export const STEP_LABELS: Record<LlmStep, string> = {
   "rank-contacts": "Rank contacts",
   "group-bullets": "Group bullets",
   "classify-cover-paragraphs": "Classify cover letter",
-  "generate-document": "Write a document",
+  "match-requirements": "Match job requirements",
+  "write-resume": "Write the resume",
+  "review-resume": "Review the resume",
+  "revise-resume": "Revise the resume after review",
 };
 
 /** Rows keep working after a name is retired from the code, so unknown keys show as they are stored. */

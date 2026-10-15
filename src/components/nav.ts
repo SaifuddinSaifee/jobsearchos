@@ -41,6 +41,7 @@ export function isActive(item: NavItem, pathname: string): boolean {
 /** What a page below a section is called in the top bar, when its section's `childLabel` would be wrong for it. */
 export function childLabelFor(item: NavItem, pathname: string): string | undefined {
   if (item.href === "/library" && pathname.startsWith("/library/record")) return "Career record review";
+  if (item.href === "/jobs" && /^\/jobs\/[^/]+\/resume(\/|$)/.test(pathname)) return "Resume";
   return item.childLabel;
 }
 

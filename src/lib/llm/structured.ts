@@ -14,6 +14,13 @@ export type StructuredOptions = {
    * Together accepts unknown values silently, which is why this is typed.
    */
   reasoningEffort?: ChatParams["reasoning_effort"];
+  /**
+   * How the JSON is asked for. "schema" (the default) uses Together's structured outputs. "prompt" only puts the schema
+   * in the prompt and reads the JSON out of the reply: GLM-5.3 does not think at all under structured outputs (no
+   * reasoning tokens, whatever the effort), so a call that needs its reasoning asks this way. The reply is validated
+   * against the schema the same way in both.
+   */
+  jsonMode?: "schema" | "prompt";
   /** Called with the call's token counts, when the provider reports them. */
   onUsage?: (usage: Usage) => void;
 };
@@ -31,9 +38,10 @@ export async function chatStructured<T extends z.ZodType>(
   opts: StructuredOptions,
 ): Promise<z.infer<T>> {
   const jsonSchema = z.toJSONSchema(schema);
+  const byPrompt = opts.jsonMode === "prompt";
   const system = `${input.system}
 
-Respond only with a JSON object that matches this JSON Schema:
+Respond only with a JSON object that matches this JSON Schema${byPrompt ? ", with no other text before or after it" : ""}:
 ${JSON.stringify(jsonSchema)}`;
 
   return chatCompletion(
@@ -45,10 +53,14 @@ ${JSON.stringify(jsonSchema)}`;
         { role: "system", content: system },
         { role: "user", content: input.user },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: "output", schema: jsonSchema as Record<string, unknown> },
-      },
+      ...(byPrompt
+        ? {}
+        : {
+            response_format: {
+              type: "json_schema" as const,
+              json_schema: { name: "output", schema: jsonSchema as Record<string, unknown> },
+            },
+          }),
     },
     {
       step: opts.step,
@@ -62,7 +74,7 @@ ${JSON.stringify(jsonSchema)}`;
 
         let json: unknown;
         try {
-          json = JSON.parse(stripFences(content));
+          json = JSON.parse(byPrompt ? jsonIn(content) : stripFences(content));
         } catch {
           throw new Error("The model's output was not valid JSON");
         }
@@ -74,6 +86,14 @@ ${JSON.stringify(jsonSchema)}`;
       },
     },
   );
+}
+
+/** The JSON object in a reply asked for by prompt: inside fences, or between the first "{" and the last "}". */
+export function jsonIn(text: string): string {
+  const unfenced = stripFences(text).trim();
+  const start = unfenced.indexOf("{");
+  const end = unfenced.lastIndexOf("}");
+  return start >= 0 && end > start ? unfenced.slice(start, end + 1) : unfenced;
 }
 
 /** Some models wrap JSON in ```json fences despite response_format. */

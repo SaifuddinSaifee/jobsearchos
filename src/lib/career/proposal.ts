@@ -113,7 +113,7 @@ export function buildProposal(
       start: e.start,
       end: e.end,
       details: e.details,
-      suggestion: simple(matchEducation(record, e.institution, e.degree)),
+      suggestion: simple(matchEducation(record, e.institution, e.degree, e.end)),
       removedBefore: isRemoved(record, "education", removalKey.education(e.institution, e.degree)),
     })),
     certifications: extract.certifications.map((c) => ({
@@ -122,7 +122,7 @@ export function buildProposal(
       name: c.name,
       issuer: c.issuer,
       date: c.date,
-      suggestion: simple(matchCertification(record, c.name)),
+      suggestion: simple(matchCertification(record, c.name, c.issuer)),
       removedBefore: isRemoved(record, "certification", removalKey.certification(c.name)),
     })),
     // Until a paragraph has been classified it is left out (boilerplate), so nothing unread ever reaches the record.

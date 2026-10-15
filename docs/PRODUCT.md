@@ -77,7 +77,9 @@ Nothing is ever submitted or sent without an explicit click from you.
 - **You are in control.** AI proposes; you decide. Emails send only on a click, after a confirmation that shows exactly
   what goes out.
 - **Your edits win.** Anything you type is never overwritten by automation or research.
-- **Nothing is invented.** Generated content must trace back to your profile. Guessed emails are labelled as guesses.
+- **You know what is true about you.** Writing starts from your career record and assumes you are qualified for the job.
+  Anything you tell it you have (a certification, a tool) is worked in, and nothing is refused. The record itself only
+  ever holds words from your own documents. Guessed emails are labelled as guesses.
 - **History is kept.** Profile saves, job snapshots and attached files are never changed after the fact, so you can
   always see exactly what was used for an application.
 - **Cheapest reliable source first.** Public APIs before scraping, free lookups before paid credits, and the app tells
@@ -134,6 +136,79 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
 - **Ask Claude:** opens a claude.ai chat with the job already loaded and a prompt to tailor your resume and cover letter
   and point out gaps.
 - Keyboard shortcuts: `/` search, `j`/`k` move, `Enter` open, `x` select, `Shift+A` mark Applied, `Esc` close.
+- A **Documents** section in the side panel lists every resume and cover letter linked to the job, each opening in the
+  editor. The row menu has **Resume for this job**.
+
+### Writing a resume for a job
+
+Nothing is written when a job is saved. When you want a resume for a job, you ask for it, from the job's side panel
+(**Generate resume**), from the row menu, or from the **Generate resume** button on the "Saved" toast after a pasted
+link. It is written from your career record (or from your base resume while the record is empty), takes about a minute,
+and ends in the editor.
+
+- **A page per job** (`/jobs/<job>/resume`), so it survives a reload and leaving. A sidebar card and toasts say when the
+  match is ready to look at, when the resume is ready, or when it failed. **Stop** cancels it.
+- **Match first.** Everything the job asks for (must haves, nice to haves, the posting's keywords and the company's
+  values) is lined up against your record: **In your record**, **Partly in your record** or **Not in your record**, with
+  the lines of your record behind each. Short terms like a tool name are found directly; the rest are judged by the AI,
+  which can only point at items of your record, not write evidence. In the same pass the AI says what each item is: an
+  **experience**, a **skill** (a tool or technical area), a **field** (the kind of product or audience, such as "Books
+  apps"), a **way of working** ("Adaptability") or a **condition** ("willing to relocate"). That decides where it may go on
+  the resume: skills go in bullets and the skills lines, a field is at most a few words in the summary, a way of working is
+  shown by what you did and never named, and a condition is left off (it sits under **Not on the resume** and does not count
+  toward the match).
+- **You are taken to be qualified.** Whatever the record does not fully show of the experience and skills the job asks for
+  (its must haves and nice to haves) starts out ticked as **I have this**, because a record is usually shorter than what you
+  have done. Untick what you would rather leave out, and add a note where it helps ("AWS certified, 2023"). Each ticked
+  item is worked into the resume, in a bullet under the role it fits or in the skills line, in plain terms with no
+  invented numbers, certifications or degrees. **Keywords are your pick** and start unticked, as do fields, ways of working,
+  the company's values and conditions: tick the ones you want in. The footer shows "Your record covers 76%. With what you
+  have: 100%", which updates as you tick. **Don't show this step again** skips the match screen from then on, and the
+  experience and skills are then taken as yours without asking (a switch in Profile, under instructions, turns the screen
+  back on).
+- **Written for the job.** The most recent roles, each under the title that fits the job. Only the facts you worded for that
+  title are used (an engineering job gets your engineering facts, not your product ones; a role with nothing for that title
+  keeps all its wording so it is never missing), the bullets that answer the heaviest requirements first, reworded in the
+  posting's terms and keeping your numbers. One bullet tells one thing you did. Length follows importance: the bullets that
+  answer the top requirements carry the full detail and may run to four lines, the rest stay to one or two. Education is
+  one entry per school (repeats of the same school written different ways are one), without high school and board exams
+  once there is a degree; certifications and skills are cleaned of repeats and broken brackets. Projects that answer the
+  job are included. Employers, titles, dates, schools and certifications are copied
+  from your record, never written. Your Profile's tone, style rules and section limits are followed, and generic wording
+  such as "passionate", "leverage" or "results-driven" is rewritten. Each bullet remembers which facts it came from.
+- **Made to pass applicant tracking, without stuffing.** The writing rules come from the job application skill (`SKILL.md`):
+  the posting's own terms in its own spelling, an acronym spelled out once, the job's title in the summary, each bullet an
+  action and a result, the company never named in the resume, and no responsibility line of the posting copied in. The
+  terms it is asked to use are only the tools and skills you have (shown in your record, or ticked by you), each used once
+  where it fits. After writing, the resume is checked in code for the signs of writing for a keyword scanner: wording
+  copied from the posting or the company's own text, a term used in more than three places, or a way of working named
+  outright. If it finds one the writer is asked once more. The notes say which terms were worked in, and bullets and skills
+  are ordered with what the job asks for first.
+- **Your words, edited, then reviewed.** The writer (GLM-5.3, thinking as long as it can) starts each bullet from your own
+  wording in the record and changes only what the job needs: the posting's spelling of a term, something you ticked, a
+  cut, a reorder. It keeps your names and numbers and never adds a result you did not write ("so that the team..."). A
+  second model (Kimi K3) then reviews the draft like a hiring manager would, against ten criteria (faithful to the record,
+  sounds like you, specific, no invented results, answers the job, terms placed naturally, varied rhythm, a summary with a
+  point of view, clean, skills), and the writer makes its edits. Code checks the same things and puts back to your own
+  words any bullet still rewritten beyond recognition. The notes show the review's score. It takes about seven minutes and
+  costs about $0.22 a resume.
+- **Your wins, your interests, your conditions.** Achievements from the record (a hackathon win) are always on the
+  resume. An interest the job asks about ("into fandom or fanfiction") is yours to tick, with a note for the specifics; it
+  becomes one short **Interests** line and is never claimed if you did not tick it. A condition such as relocating can be
+  ticked as **Mention it**, and closes the summary in a short sentence.
+- **Links that work.** The name and contact line come from your Profile, then your resumes; a link shown as a label
+  ("GitHub") keeps its address.
+- **Length is yours to set.** A resume written for a job is not squeezed to one page: its length follows the bullets above,
+  and you trim it in the editor (the editor's **Keep to one page** switch still works there).
+- **One resume per job.** It is saved in your Library, linked to the job, and the job then offers **Open resume**. The job moves
+  from Saved to **Preparing** when writing starts (with Undo); a job already past Saved is left alone.
+- **Write it again** from the editor (**Regenerate**, shown above any resume written for a job): it is matched again, with your
+  earlier "I have this" answers filled in, and saved as the next version of the same resume. Your current version, edits
+  included, stays in the version history, and a version already sent with an application is never changed.
+- **Connected.** An email for that job starts with this resume attached instead of the base resume. Marking the job Applied
+  locks it like any document. **Add to career record** (see Career record) adds it with one click if you want the record to
+  remember it.
+- The AI usage page shows it as "Write a resume for a job", with two steps: matching the requirements and writing the resume.
 
 ### Dashboard
 
@@ -211,6 +286,10 @@ One record of everything you have done, merged from your resumes, cover letters,
 as a PDF. It lives in the **Career record** tab of the Library. It has no length limit and is never sent anywhere. It is
 the base the writer will use to pick the right facts and wording for a job.
 
+- **Export as Markdown.** **Export** (next to Versions) downloads the whole record as one structured Markdown file
+  ("Career record - date.md"): each employer and role with its dates, the titles it was told under, every fact with all
+  its wordings, then skills by category, projects, education, certifications, achievements and reasons for applying.
+  Internal ids, sources and removed items are left out. It is the record as it is now; nothing is saved or sent.
 - **You choose what goes in.** Nothing is added on its own, and nothing is sent to the AI until you add it. The tab
   lists **Not in your record**: every resume and cover letter that is not in the record and would add something to it,
   with what it would add, worked out for free by comparing words ("2 of 4 bullets are already in your record. New: 2
@@ -316,7 +395,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
   tokens, and typical call time. If a model has no known price its calls are counted but left out of the spend, and
   the page says how many.
 - **Spend per day** as a chart you can hover, or as a table.
-- **Where it went**, by action (adding a job, reading a resume, researching a company, finding people), by step, or by
+- **Where it went**, by action (adding a job, reading a resume, researching a company, finding people, writing a resume), by step, or by
   model, with the cost of one action on average.
 - **Failures** with what went wrong, and the **latest calls**, each linking to the job, company or document it was for.
   A call you stopped is shown as stopped, not as a failure.
@@ -402,7 +481,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
 | 3 | Jobs tracker and dashboard | Done |
 | 3b | Company directory and research | Done |
 | 4a | Library, editor and export, career record, fit score | **Library, editor and export done**; **career record built** (resumes, Profile, LinkedIn and cover letters, review, grouping, browse and edit, editor panel); fit score not started |
-| 4 | Writing: resume, cover letter, cold email | **Not started** |
+| 4 | Writing: resume, cover letter, cold email | **Resume built** (written on request from a job, in the editor); cover letter and cold email not started |
 | 5 | Learning from past resumes | **Replaced** by the career record: resumes are no longer embedded; the record is what writing will draw on |
 | 6 | Match score and gap analysis | Not started |
 | 7a | Email settings and Gmail connection | Done |
@@ -434,23 +513,21 @@ and **export** (first and last bullets) are built; the career record and fit sco
 - **Editor (built):** a Notion-like editor on a real A4 page, with one-page PDF, Word, Markdown and text export from the
   same layout.
 
-### Stage 4: Writing (the biggest gap)
+### Stage 4: Writing (resume built, cover letter and cold email next)
 
-The app can send an email, but you still write it elsewhere. This stage closes that gap.
+The **resume** is built (see "Writing a resume for a job" above). Next, the same path for the other two documents, always on
+request from a job, with the company profile counted as part of the job:
 
-- Generate a **tailored resume** per job, section by section (summary, skills, bullets per role, projects), within your
-  template's length limits, with "copy section" and "copy all" buttons that paste cleanly.
-- Generate a **cover letter** and a **cold email** (short subject, 80 to 150 words) from the same inputs.
-- Edit each document in the app, with every save kept as a version. Versions lock when the job is marked Applied.
-- An **accuracy check** flags any line that cannot be traced back to your profile.
-- Optionally upload the final PDF you made in your template and keep it on the application.
-- The cold email drafts straight into the Outreach composer.
+- A **cover letter**, written from your career record's stories and reasons for applying.
+- A **cold email** (short subject, 80 to 150 words) that drafts straight into the Outreach composer.
+- The **match score and Fix with AI** panel next to the resume (Stage 6, below): a match percentage with why it matches and
+  what is missing, a weighted keyword list including obvious inferred ones, and one click to work a gap or keyword into the
+  resume, updating the score. It reuses the requirements already stored with each generated resume.
 
-User stories: *As a job seeker, I can generate a tailored resume, cover letter and cold email for a job in under two
-minutes, edit them, and trust that nothing is made up.*
+User stories: *As a job seeker, I can generate a tailored resume for a job in about a minute, see how it matches what the job
+asks for, edit it, and write it again when I have added to my career record.*
 
-Spec: [PLAN.md](PLAN.md) (Stage 4),
-[cold-email.md](cold-email.md).
+Spec: [generate-resume.md](generate-resume.md), [PLAN.md](PLAN.md) (Stage 4), [cold-email.md](cold-email.md).
 
 ### Stage 5: Learning from past resumes (finish it)
 
@@ -510,21 +587,18 @@ User story: *Each morning I can scan relevant new openings and save the good one
 
 In order:
 
-1. **Finish and merge `stage-emails`.** Resume attachments, the resume library plumbing and indexing are in the working
-   tree but not committed. Run tests, typecheck and lint, try a real send end to end, then merge to `main`. Confirm the
-   two unchecked Prospeo calls with a live key (see [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md#unconfirmed-against-prospeo)).
-2. **Refresh the README status table.** It still says Stage 2 is next.
-3. **Stage 4, cold email first.** The composer is ready to receive a draft, so generating the cold email gives value
-   right away. Then the resume, then the cover letter. Answer open question 1 (template sections and limits) before the
-   resume.
-4. **Stage 5 retrieval in generation**, then the Resumes page. The index already exists, so this is mostly wiring.
-5. **Stage 6 match score.** It is needed before Discover, because Discover ranks by score.
-6. **Stage 8 Discover.** Decide the first sources in a dedicated discussion first.
-7. **Follow-ups (from Stage 9)**, since outreach without follow-ups leaves replies on the table.
+1. **Confirm the two unchecked Prospeo calls** with a live key (see
+   [STAGE-7B-OUTREACH.md](STAGE-7B-OUTREACH.md#unconfirmed-against-prospeo)).
+2. **The score panel with Fix with AI**, beside the resume you just got: match percentage, gaps, weighted keywords, one-click
+   fixes. Then the **cold email** (the composer is ready to receive a draft) and the **cover letter**.
+3. **Stage 6 match score for jobs.** It reuses the same requirement matching, and is needed before Discover, because Discover
+   ranks by score.
+4. **Stage 8 Discover.** Decide the first sources in a dedicated discussion first.
+5. **Follow-ups (from Stage 9)**, since outreach without follow-ups leaves replies on the table.
 
 ## 10. Open questions
 
-1. **Resume template:** which sections and per-section length limits? This decides the structured output for Stage 4.
+1. **Resume template:** answered for resumes: the editor's one page, with limits from your Profile's instructions.
 2. **Past resumes:** how many, and are the original job descriptions available? This decides how much retrieval can
    help.
 3. **Master resume:** when the same role is worded differently in two resumes, keep both or ask you to pick?

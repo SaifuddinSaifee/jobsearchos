@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import { resumeIndexes, type QueueSteps } from "@/lib/db/schema";
 import { env } from "@/lib/env";
@@ -24,7 +24,15 @@ import {
   touchProposal,
 } from "@/lib/career/queue";
 import { applyIfAutomatic } from "@/lib/career/review";
-import { careerProposals } from "@/lib/db/schema";
+import {
+  claimNextGeneration,
+  getGenerationRow,
+  recoverInterruptedGenerations,
+  sweepStaleGenerations,
+  touchGeneration,
+} from "@/lib/resume-writer/service";
+import { processGeneration, type ProcessDeps } from "@/lib/resume-writer/process";
+import { careerProposals, resumeGenerations } from "@/lib/db/schema";
 import { backfillDocuments } from "@/lib/documents/backfill";
 import { withAbortSignal } from "@/lib/llm/abort";
 import { withLlmContext } from "@/lib/llm/context";
@@ -56,6 +64,14 @@ const INDEX_CONCURRENCY = 1;
 const INDEX_TIMEOUT_MS = 5 * 60_000;
 /** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
 const CAREER_TIMEOUT_MS = 5 * 60_000;
+/** One phase of writing a resume: matching the job against the record, or writing and fitting it. */
+/**
+ * Writing is three calls to large models: the draft at the highest effort (about 3 minutes), the review (about 3) and the
+ * revision (about 1), plus waits for rate limits. Measured at about 6.5 minutes, so it gets far longer than the rest.
+ */
+const GENERATION_TIMEOUT_MS = 15 * 60_000;
+/** Resumes being matched or written at once, for different jobs. */
+const GENERATION_CONCURRENCY = 2;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -190,6 +206,33 @@ export async function processCareer(
   }
 }
 
+/**
+ * Runs one claimed phase of a resume generation (matching, or writing); failures are recorded on its row by
+ * `processGeneration`. `signal` stops it (when the user stops it): its model calls are cancelled and it returns at
+ * once, so the slot is free. The stop has already moved the row on, so nothing is recorded here.
+ */
+export async function processGenerationJob(
+  id: string,
+  deps: { db?: Db; run?: typeof processGeneration; timeoutMs?: number; signal?: AbortSignal; process?: ProcessDeps } = {},
+): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  const signal = deps.signal ?? new AbortController().signal;
+  const row = await getGenerationRow(id, db);
+  if (!row) return;
+  try {
+    const work = withAbortSignal(signal, () =>
+      withLlmContext("generate-resume", { jobId: row.jobId }, () => (deps.run ?? processGeneration)(id, { ...deps.process, db })),
+    );
+    await withTimeout(untilAborted(work, signal), deps.timeoutMs ?? GENERATION_TIMEOUT_MS, "Timed out after 15 minutes");
+  } catch (err) {
+    if (signal.aborted) return;
+    await db
+      .update(resumeGenerations)
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not write this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(resumeGenerations.id, id), inArray(resumeGenerations.status, ["matching", "writing"])));
+  }
+}
+
 /** Settles with `p`, or rejects as soon as `signal` is aborted (without waiting for `p`). */
 function untilAborted<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error("Stopped"));
@@ -219,6 +262,8 @@ type WorkerState = {
   indexing: Set<string>;
   /** Career proposals being prepared, each with the controller that stops it. */
   career: Map<string, AbortController>;
+  /** Resumes being written, each with the controller that stops it. */
+  generating: Map<string, AbortController>;
   /** Set once proposals cut off by the last shutdown have been put back. */
   recovered?: boolean;
   ticking: boolean;
@@ -229,11 +274,12 @@ const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), ticking: false, again: false, timer: null });
+  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), generating: new Map(), ticking: false, again: false, timer: null });
   // A dev server that hot-reloaded from older code may hold a state without the search slots.
   s.searching ??= new Set();
   s.indexing ??= new Set();
   if (!(s.career instanceof Map)) s.career = new Map();
+  if (!(s.generating instanceof Map)) s.generating = new Map();
   // A worker already running before a hot reload has nothing to recover; only a fresh process does.
   s.recovered ??= s.timer !== null;
   return s;
@@ -302,6 +348,26 @@ async function tick(): Promise<void> {
           const n = await recoverInterruptedProposals();
           if (n > 0) console.log(`[queue] put back ${n} career source(s) interrupted by the last shutdown`);
         }
+        if (s.generating.size === 0) {
+          const n = await recoverInterruptedGenerations();
+          if (n > 0) console.log(`[queue] put back ${n} resume(s) interrupted by the last shutdown`);
+        }
+      }
+
+      await sweepStaleGenerations();
+      while (s.generating.size < GENERATION_CONCURRENCY) {
+        const claimed = await claimNextGeneration();
+        if (!claimed) break;
+        const controller = new AbortController();
+        s.generating.set(claimed.id, controller);
+        const beat = setInterval(() => void touchGeneration(claimed.id).catch(() => {}), HEARTBEAT_MS);
+        void processGenerationJob(claimed.id, { signal: controller.signal })
+          .catch((err) => console.error("[queue] unexpected resume failure", claimed.id, err))
+          .finally(() => {
+            clearInterval(beat);
+            s.generating.delete(claimed.id);
+            void tick();
+          });
       }
       await sweepStaleProposals();
       // One at a time: a proposal is only prepared once the one before it has been reviewed.
@@ -334,6 +400,14 @@ async function tick(): Promise<void> {
  */
 export function stopCareerProposal(id: string): void {
   state().career.get(id)?.abort();
+}
+
+/**
+ * Stops writing a resume in this process, freeing its slot. Call it after the row has been moved on (stopped), so the
+ * stopped work records nothing.
+ */
+export function stopGenerationJob(id: string): void {
+  state().generating.get(id)?.abort();
 }
 
 /** Starts the background worker once per server process (called from instrumentation.ts). */

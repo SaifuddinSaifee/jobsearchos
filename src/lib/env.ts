@@ -16,8 +16,10 @@ const EnvSchema = z.object({
   TOKEN_ENCRYPTION_KEY: z.string().optional(),
   // Optional: Prospeo finds people at a company and reveals their verified email (https://prospeo.io).
   PROSPEO_API_KEY: z.string().optional(),
-  /** Writing: resume, cover letter, cold email. */
-  WRITER_MODEL: z.string().default("MiniMaxAI/MiniMax-M3"),
+  /** Writing: resume, cover letter, cold email. Run at the highest reasoning effort. */
+  WRITER_MODEL: z.string().default("zai-org/GLM-5.3"),
+  /** Reviewing what the writer wrote, against a fixed set of criteria. A different model from the writer on purpose. */
+  REVIEW_MODEL: z.string().default("moonshotai/Kimi-K3"),
   /** Extraction, parsing, scoring, classification, summarization. */
   EXTRACTION_MODEL: z.string().default("zai-org/GLM-5.3-Flash"),
   /** High-volume triage (discovery prefilter). */

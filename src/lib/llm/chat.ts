@@ -1,5 +1,6 @@
 import type { ChatCompletionCreateParamsBase } from "openai/resources/chat/completions";
 import { currentAbortSignal } from "./abort";
+import { countAttempts, retryStats, type Attempts } from "./attempts";
 import { currentLlmContext, currentTraceId, traceStep } from "./context";
 import type { LlmCallStatus, LlmStep } from "./names";
 import { UNKNOWN_ACTION } from "./names";
@@ -36,13 +37,15 @@ export async function chatCompletion<T>(params: ChatParams, meta: ChatMeta<T>): 
     const traceId = currentTraceId();
     const signal = currentAbortSignal();
     const started = Date.now();
+    const attempts: Attempts = { starts: [], ends: [] };
 
     let reply: Reply | null = null;
     let status: LlmCallStatus = "ok";
     let error: string | null = null;
     try {
       // A stopped background job (see withAbortSignal) cancels the request and the stream with it.
-      const stream = await chatClient().chat.completions.create({ ...params, stream: true, stream_options: { include_usage: true } }, { signal });
+      // The SDK's own retries happen inside `create`; each try is noted for the record.
+      const stream = await countAttempts(attempts, () => chatClient().chat.completions.create({ ...params, stream: true, stream_options: { include_usage: true } }, { signal }));
       let content = "";
       let finishReason: string | null = null;
       let usage: Usage | null = null;
@@ -82,6 +85,7 @@ export async function chatCompletion<T>(params: ChatParams, meta: ChatMeta<T>): 
         completionTokens: reply?.usage?.completionTokens ?? null,
         reasoningTokens: reply?.usage?.reasoningTokens ?? null,
         durationMs: Date.now() - started,
+        ...retryStats(attempts),
         traceId,
         jobId: ctx?.jobId ?? null,
         companyId: ctx?.companyId ?? null,

@@ -1,6 +1,7 @@
 "use client";
 
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +37,10 @@ export function RowActions({ job }: { job: JobRow }) {
         <DropdownMenuItem onClick={() => editJob(job.jobId)}>
           <Pencil aria-hidden />
           Edit job
+        </DropdownMenuItem>
+        <DropdownMenuItem render={<Link href={`/jobs/${job.jobId}/resume`} />}>
+          <FileText aria-hidden />
+          Resume for this job
         </DropdownMenuItem>
         {posting && (
           <DropdownMenuItem render={<a href={posting} target="_blank" rel="noopener noreferrer" />}>

@@ -14,7 +14,7 @@ export const DOCUMENT_ORIGINS = ["uploaded", "pasted", "blank", "copied", "sent"
 export type DocumentOrigin = (typeof DOCUMENT_ORIGINS)[number];
 
 /** Why a version was made. Manual saves, exports and attachments are the ones the user chose. */
-export const VERSION_REASONS = ["manual", "export", "attach", "applied", "upload", "structured", "restore", "migrated", "sent"] as const;
+export const VERSION_REASONS = ["manual", "export", "attach", "applied", "upload", "structured", "restore", "migrated", "sent", "generated"] as const;
 export type VersionReason = (typeof VERSION_REASONS)[number];
 
 export const REASON_LABELS: Record<VersionReason, string> = {
@@ -27,6 +27,7 @@ export const REASON_LABELS: Record<VersionReason, string> = {
   restore: "Restored",
   migrated: "Imported",
   sent: "Sent",
+  generated: "Written for a job",
 };
 
 /** What the user said about adding a document to the career record: "later" (Not now, for one version) or "never". */

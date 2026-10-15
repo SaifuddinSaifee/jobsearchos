@@ -442,6 +442,9 @@ reuses the same pieces later.
 
 ## Then: Stage 4 writing
 
+> The resume part is built: see [generate-resume.md](generate-resume.md). It writes from the career record only (or the base
+> resume while the record is empty), on request from a job, and links the result to the job.
+
 Stage 4 generation takes: the job, the company profile, the career record (or the profile if there is none),
 retrieved past wording (Stage 5), and your generation instructions. It writes the resume, cover letter and email as
 editor documents, then runs the fit score and the accuracy check on its own output. Everything it writes lands in the

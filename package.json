@@ -17,6 +17,7 @@
     "eval:jobs": "tsx scripts/eval-jobs.ts",
     "snapshot:job": "tsx scripts/snapshot-job.ts",
     "eval:resume": "tsx scripts/eval-resume.ts",
+    "eval:writer": "tsx scripts/eval-resume-writer.ts",
     "backfill:documents": "tsx scripts/backfill-documents.ts",
     "browsers:install": "playwright install chromium",
     "typecheck": "tsc --noEmit"

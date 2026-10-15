@@ -50,6 +50,43 @@ describe("chatStructured", () => {
     expect(create.mock.calls[0][1]).toEqual({ signal: controller.signal });
   });
 
+  it("records how often the client retried a call and how long it waited between tries", async () => {
+    const { countingFetch } = await import("@/lib/llm/attempts");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("")));
+    create.mockImplementation(async () => {
+      await countingFetch("https://example.com");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await countingFetch("https://example.com");
+      return reply('{"name":"Ada"}');
+    });
+    await chatStructured(Schema, input, opts);
+    vi.unstubAllGlobals();
+    const entry = record.mock.calls[0][0];
+    expect(entry.retryCount).toBe(1);
+    expect(entry.retryWaitMs).toBeGreaterThanOrEqual(20);
+
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
+    await chatStructured(Schema, input, opts);
+    expect(record.mock.calls[1][0]).toMatchObject({ retryCount: 0, retryWaitMs: 0 });
+  });
+
+  it("asks for the JSON in the prompt when told to, so a model that does not think under structured outputs can", async () => {
+    create.mockResolvedValue(reply('Here it is:\n```json\n{"name":"Ada"}\n```\nDone.'));
+    await expect(chatStructured(Schema, input, { ...opts, jsonMode: "prompt", reasoningEffort: "max" })).resolves.toEqual({ name: "Ada" });
+    const args = create.mock.calls[0][0];
+    expect(args.response_format).toBeUndefined();
+    expect(args.reasoning_effort).toBe("max");
+    expect(args.messages[0].content).toContain("with no other text before or after it");
+    expect(args.messages[0].content).toContain('"name"');
+  });
+
+  it("still checks a reply asked for by prompt against the schema", async () => {
+    create.mockResolvedValue(reply('{"nom":"Ada"}'));
+    await expect(chatStructured(Schema, input, { ...opts, jsonMode: "prompt" })).rejects.toThrow(/did not match the expected schema/);
+    create.mockResolvedValue(reply("I could not do that."));
+    await expect(chatStructured(Schema, input, { ...opts, jsonMode: "prompt" })).rejects.toThrow(/not valid JSON/);
+  });
+
   it("accepts JSON wrapped in code fences", async () => {
     create.mockResolvedValue(reply('```json\n{"name":"Ada"}\n```'));
     await expect(chatStructured(Schema, input, opts)).resolves.toEqual({ name: "Ada" });

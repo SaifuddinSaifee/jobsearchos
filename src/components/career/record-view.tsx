@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Ban, ClipboardCheck, FileUp, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
+import { Ban, ClipboardCheck, Download, FileUp, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
@@ -68,7 +68,15 @@ export function RecordView({
           Everything you have done, merged from your resumes and cover letters. It has no length limit and it is never
           sent anywhere. Nothing is added to it unless you choose to add it.
         </p>
-        <VersionsSheet versions={versions} latest={summary?.version ?? 0} />
+        <div className="flex shrink-0 gap-2">
+          {summary && (
+            <Button variant="outline" nativeButton={false} render={<a href="/api/career/export" download />}>
+              <Download aria-hidden />
+              Export
+            </Button>
+          )}
+          <VersionsSheet versions={versions} latest={summary?.version ?? 0} />
+        </div>
       </div>
 
       <Progress initial={status} />

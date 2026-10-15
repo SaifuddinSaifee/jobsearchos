@@ -23,6 +23,7 @@ import type { PageSettings } from "@/lib/documents/page-settings";
 import type { DocumentKind, DocumentOrigin, RecordChoice, VersionReason } from "@/lib/documents/types";
 import type { LlmCallStatus, RecordedAction, LlmStep } from "@/lib/llm/names";
 import type { IndexStatus } from "@/lib/resume/types";
+import type { GenerationSource, GenerationStatus, GenerationSteps, Requirement } from "@/lib/resume-writer/types";
 import type {
   CareerRecord,
   ProposalStatus,
@@ -489,6 +490,54 @@ export const contactSearches = pgTable(
 );
 
 /**
+ * A resume being written for a job, from asking for it to opening it in the editor. It runs in the same background
+ * worker as the other queues, in two parts with the user's review between them (see `src/lib/resume-writer/types.ts`).
+ * `requirements` is what the job asks for, lined up against the source, kept so the score panel can reuse it.
+ * `bullet_facts` says which record facts each bullet of the resume was written from, by editor block id. At most one
+ * generation per job is open (working or waiting for review) at a time; a finished one stays as history.
+ */
+export const resumeGenerations = pgTable(
+  "resume_generations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    /** The resume it is written into: set from the start when regenerating, else once it is first saved. */
+    documentId: uuid("document_id").references(() => documents.id),
+    status: text("status").$type<GenerationStatus>().notNull().default("queued"),
+    source: text("source").$type<GenerationSource>().notNull().default("record"),
+    /** The career record version it was matched against (null when written from the base resume). */
+    recordVersion: integer("record_version"),
+    baseVersionId: uuid("base_version_id").references(() => documentVersions.id),
+    requirements: jsonb("requirements").$type<Requirement[]>().notNull().default([]),
+    /** Go straight on to writing, without waiting for the user's review. */
+    skipReview: boolean("skip_review").notNull().default(false),
+    steps: jsonb("steps").$type<GenerationSteps>().notNull().default({}),
+    bulletFacts: jsonb("bullet_facts").$type<Record<string, string[]>>().notNull().default({}),
+    notes: jsonb("notes").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    /** Time spent working on it, matching plus writing, without the wait for the user's review. Null until a phase finishes. */
+    workMs: integer("work_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while it is being worked on. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("resume_generations_status_idx").on(t.status, t.createdAt),
+    index("resume_generations_job_idx").on(t.jobId, t.createdAt),
+    uniqueIndex("resume_generations_one_open_idx")
+      .on(t.jobId)
+      .where(sql`${t.status} in ('queued', 'matching', 'review', 'writing_queued', 'writing')`),
+  ],
+);
+
+export type ResumeGenerationRow = typeof resumeGenerations.$inferSelect;
+
+/**
  * Everything the user writes: resumes, cover letters and emails, stored as content (an editor document), not as files.
  * The base resume is the one with `is_base`. Deleting is soft (`deleted_at`). `legacy_past_resume_id` and
  * `outreach_email_id` tie a row to what it was made from, so the backfill can run again without duplicating.
@@ -756,6 +805,9 @@ export const llmCalls = pgTable(
     reasoningTokens: integer("reasoning_tokens"),
     costUsd: doublePrecision("cost_usd"),
     durationMs: integer("duration_ms").notNull(),
+    /** How often the client retried the request (rate limits, failures on the way), and the time spent between tries. Null on calls recorded before these were. */
+    retryCount: integer("retry_count"),
+    retryWaitMs: integer("retry_wait_ms"),
     traceId: text("trace_id"),
     jobId: uuid("job_id"),
     companyId: uuid("company_id"),

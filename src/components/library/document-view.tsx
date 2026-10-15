@@ -10,6 +10,7 @@ import { restoreVersionAction, updateMetaAction } from "@/app/(app)/library/acti
 import { RecordButton, RecordOfferCard } from "@/components/career/record-offer";
 import { DOCUMENT_OFFER_KEY } from "@/components/career/use-document-offer";
 import { ExportMenu } from "@/components/documents/export-menu";
+import { GeneratedStrip } from "@/components/resume-writer/generated-strip";
 import { EditorSessionProvider } from "@/components/documents/editor/session";
 import { IndexBadge } from "@/components/resume/index-badge";
 import { RESUME_INDEXES_KEY } from "@/components/resume/use-resume-indexes";
@@ -199,6 +200,14 @@ export function DocumentView({
 
       <div className={cn("grid items-start gap-6", !editable && "lg:grid-cols-[minmax(0,1fr)_16rem]")}>
         <div className="min-w-0 space-y-3">
+          {editable && doc.origin === "generated" && doc.jobId && (
+            <GeneratedStrip
+              jobId={doc.jobId}
+              jobLabel={doc.jobLabel}
+              writtenOn={versions.find((v) => v.reason === "generated")?.createdAt ?? null}
+              beforeRegenerate={async () => void (await flushRef.current?.())}
+            />
+          )}
           {editable && lastLocked && (
             <p className="flex items-center gap-2 rounded-lg border bg-muted/40 px-4 py-2.5 text-sm">
               <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

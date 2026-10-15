@@ -63,6 +63,20 @@ export async function baseDocumentId(db: Db): Promise<string | null> {
   return row?.id ?? null;
 }
 
+/**
+ * The resume a new draft for a job starts with: the one written for that job, if there is one, else the base resume.
+ * A resume written for the job is the one that matches what they asked for.
+ */
+export async function defaultDocumentId(jobId: string, db: Db): Promise<string | null> {
+  const [written] = await db
+    .select({ id: documents.id })
+    .from(documents)
+    .where(and(eq(documents.jobId, jobId), eq(documents.kind, "resume"), eq(documents.origin, "generated"), isNull(documents.deletedAt)))
+    .orderBy(desc(documents.createdAt))
+    .limit(1);
+  return written?.id ?? (await baseDocumentId(db));
+}
+
 const kindFor = (doc: Pick<DocumentRow, "isBase" | "jobId">, jobId: string): AttachmentOption["kind"] => (doc.isBase ? "base" : doc.jobId === jobId ? "job" : "past");
 
 /**

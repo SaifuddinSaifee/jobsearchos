@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { AskClaudeButton } from "./ask-claude";
 import { JobEditForm } from "./job-edit-form";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
+import { GenerateResumeButton } from "@/components/resume-writer/generate-button";
+import { JobDocuments } from "@/components/resume-writer/job-documents";
 import { JobLinkButtons } from "./table/job-links";
 import { StatusMenu } from "./table/status-menu";
 import { useNow } from "./use-now";
@@ -176,6 +178,7 @@ function Panel({
             build={() => toMarkdownFile(detailToMarkdownJob(detail!))}
           />
           <AskClaudeButton disabled={!detail} build={() => detailToMarkdownJob(detail!)} />
+          <GenerateResumeButton jobId={head.jobId} />
           <Link href={`/jobs/${head.jobId}/outreach`} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             <Mail />
             Email a contact
@@ -290,6 +293,10 @@ function PanelBody({
           onDirty={onDirty}
           onSaved={onNotesSaved}
         />
+      </Section>
+
+      <Section title="Documents">
+        <JobDocuments jobId={head.jobId} />
       </Section>
 
       {loading && !detail ? (

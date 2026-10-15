@@ -2,7 +2,7 @@
 
 A personal job-search workspace. Paste a job URL, get a structured job record, generate a tailored resume, cover letter and cold email, and track every application.
 
-[Together AI](https://www.together.ai) does all the LLM work: **MiniMax M3** writes, **GLM-5.3 Flash** extracts, scores and triages. The only local model is the embedding model used for past-resume retrieval (Stage 5).
+[Together AI](https://www.together.ai) does all the LLM work: **GLM-5.3** writes (at its highest reasoning effort), **Kimi K3** reviews what it wrote, and **GLM-5.3 Flash** extracts, scores and triages. No local model is needed today: the app no longer embeds resumes, and works from your career record instead.
 
 ## Status
 
@@ -10,10 +10,13 @@ A personal job-search workspace. Paste a job URL, get a structured job record, g
 | --- | --- | --- |
 | 0 | Foundations: Next.js app, Postgres, LLM client, file storage, app shell | Done |
 | 1 | Profile: resume upload and parsing, preferences, generation instructions, past resumes, versioned history | Done |
-| **2** | **New Application: paste a URL, fetch the page, structure it with the LLM** | **Next** |
-| 3–10 | Jobs dashboard, generation, retrieval, scoring, contacts and email, discovery, analytics | See [docs/PLAN.md](docs/PLAN.md) |
+| 2, 3 | New Application (paste a URL, get a structured job), jobs tracker, company directory | Done |
+| 4a | Library, editor and export, career record (you choose what goes into it) | Done |
+| 4 | Writing: a tailored resume for a job, on request | Resume done; cover letter and cold email next |
+| 7 | Outreach: find people and emails, send from your Gmail | Done |
+| 5, 6, 8-10 | Match score, discovery, analytics | See [docs/PRODUCT.md](docs/PRODUCT.md) and [docs/PLAN.md](docs/PLAN.md) |
 
-Nothing has been parsed with a real resume yet: the Stage 1 parsing path was built and unit-tested, but it needs a Together AI API key to run end to end (see setup step 3).
+What the app does today, and what comes next, is kept current in [docs/PRODUCT.md](docs/PRODUCT.md).
 
 ## Set up on Linux (Pop!_OS / Ubuntu)
 
@@ -34,13 +37,6 @@ sudo usermod -aG docker "$USER"     # then log out and back in
 ```
 
 You also need a **Together AI API key** ([api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)).
-
-Optional, only needed from Stage 5 (past-resume retrieval):
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen3-embedding:4b
-```
 
 ### 2. Get the code
 
@@ -176,7 +172,7 @@ tests/                Vitest tests
 
 - **Immutable history:** `profile_versions` rows can never be updated or deleted (a database trigger enforces it). Every save is a new version; restoring copies an old one forward.
 - **Files** are stored under `storage/` by SHA-256 and never overwritten. `storage/` is gitignored.
-- **Models** are Together model IDs in `.env`: `WRITER_MODEL` (MiniMax M3) writes; `EXTRACTION_MODEL` and `FAST_MODEL` (both GLM-5.3 Flash) extract, score and triage. See "Model routing" in [docs/PLAN.md](docs/PLAN.md).
+- **Models** are Together model IDs in `.env`: `WRITER_MODEL` (GLM-5.3) writes; `REVIEW_MODEL` (Kimi K3) reviews the writing; `EXTRACTION_MODEL` and `FAST_MODEL` (both GLM-5.3 Flash) extract, score and triage. See "Model routing" in [docs/PLAN.md](docs/PLAN.md).
 - **Privacy:** your data lives in local Postgres and on disk, but every LLM call sends its input (resume text, job pages) to the Together AI API.
 - `npm run dev` and `npm run build` use webpack (`--webpack`) because Turbopack crashed on the Windows machine this was started on. On Linux you can try plain `next dev` (Turbopack) and switch the scripts if it works.
 

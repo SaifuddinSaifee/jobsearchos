@@ -13,7 +13,9 @@ export const LLM_ACTIONS = [
   "read-career-source",
   "eval-resume",
   "eval-jobs",
+  "eval-resume-writer",
   "snapshot-job",
+  "generate-resume",
 ] as const;
 
 export const LLM_STEPS = [
@@ -26,7 +28,10 @@ export const LLM_STEPS = [
   "rank-contacts",
   "group-bullets",
   "classify-cover-paragraphs",
-  "generate-document",
+  "match-requirements",
+  "write-resume",
+  "review-resume",
+  "revise-resume",
 ] as const;
 
 export type LlmAction = (typeof LLM_ACTIONS)[number];

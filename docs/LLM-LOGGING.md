@@ -30,7 +30,7 @@ Before this, nothing was recorded: token counts were thrown away, so there was n
 
 ## How a call is recorded
 
-All chat calls go through one function, `chatCompletion` in [src/lib/llm/chat.ts](../src/lib/llm/chat.ts), reached through `chatStructured` ([structured.ts](../src/lib/llm/structured.ts)) or `TogetherProvider` ([generation.ts](../src/lib/llm/generation.ts)).
+All chat calls go through one function, `chatCompletion` in [src/lib/llm/chat.ts](../src/lib/llm/chat.ts), reached through `chatStructured` ([structured.ts](../src/lib/llm/structured.ts)).
 
 1. The call runs inside a named **step** span (`traceStep`).
 2. It goes out through the `openai` SDK pointed at Together ([openai.ts](../src/lib/llm/openai.ts)), which is instrumented by OpenInference. That instrumentation makes the `OpenAI Chat Completions` span with the prompt, reply, settings and token counts. Model listing for the Settings page stays on the Together SDK, because Together returns a bare array there.
@@ -60,17 +60,19 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | `find-contacts` | Queue: `processSearch` | `extract-posting-people`, `find-people-web`, `rank-contacts` |
 | `index-resume` | Queue: `processIndex` | `parse-resume` (only for an unstructured upload) |
 | `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |
+| `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`), `write-resume` (the draft, `WRITER_MODEL` at max effort, retried once if unreadable), `review-resume` (`REVIEW_MODEL`, retried after rate limits), `revise-resume` (`WRITER_MODEL`, when the review or code checks ask for edits) |
 | `upload-resume` | `POST /api/resume/parse` | `parse-resume` |
 | `fill-job-details` | Server action | `extract-additional-details` |
 | `research-company` | Server action | `research-company` |
 | `regroup-role` | Server action | `group-bullets` |
 | `eval-resume`, `eval-jobs`, `snapshot-job` | Scripts | the step under test |
+| `eval-resume-writer` | Script `eval:writer` | `match-requirements`, `write-resume`, `review-resume`, `revise-resume`, with the case and config as trace metadata |
 
 A call made outside any context still works but is filed under action `unknown`: find them with `select * from llm_calls where action = 'unknown'`.
 
 ## The `llm_calls` table
 
-Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_calls.sql`.
+Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_calls.sql` (retries added in `0023_llm_retries_work_ms.sql`).
 
 | Column | Notes |
 | --- | --- |
@@ -83,7 +85,8 @@ Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_cal
 | `finish_reason` | `stop`, `length`, ... |
 | `prompt_tokens`, `cached_tokens`, `completion_tokens`, `reasoning_tokens` | Null when the provider reported no usage (rejected, stopped or broken request). Reasoning tokens are part of the completion count |
 | `cost_usd` | Null when the model has no known price or no usage was reported |
-| `duration_ms` | Includes the SDK's own retries |
+| `duration_ms` | The call's latency, including the SDK's own retries and the waits between them |
+| `retry_count`, `retry_wait_ms` | How often the SDK retried the request (rate limits, failures on the way) and the time between tries. Counted by the client's `fetch` ([attempts.ts](../src/lib/llm/attempts.ts)). Null on calls recorded before 0023. A retry the caller makes itself (the writer's second draft, the review after a rate-limit wait) is a separate row |
 | `trace_id` | The Phoenix trace, null when tracing is off |
 | `job_id`, `company_id`, `document_id`, `document_version_id`, `proposal_id`, `search_id`, `queue_item_id` | What it was for. **Not foreign keys**: history outlives what it points at |
 
@@ -95,7 +98,7 @@ Indexes: `created_at`, and `(job_id, created_at)` where the job is set.
 
 A model with no entry is **unpriced**: its calls are recorded with a null cost and the page counts them and says they are left out of spend. Prices come from [ai-models-for-jso.md](ai-models-for-jso.md); check them against Together's pricing page before relying on the dollar figures.
 
-Checked with a live call: completion tokens are at least reasoning tokens (1933 vs 1177), so thinking is already billed inside completion and is not added again.
+Checked with live calls: completion tokens are reasoning tokens plus the visible answer (1933 vs 1177; on 2026-10-15, GLM-5.3 Flash 783 = 728 + about 55 and DeepSeek V4.1 Flash 744 = 674 + about 70), so thinking is already billed inside completion and is not added again.
 
 ## Phoenix tracing
 
@@ -132,7 +135,7 @@ Queries are in [src/lib/usage/metrics.ts](../src/lib/usage/metrics.ts); componen
 
 ## Scripts
 
-`eval:resume`, `eval:jobs` and `snapshot:job` run through `runLlmScript` ([script.ts](../src/lib/llm/script.ts)), which turns tracing on, runs the script, and flushes the usage records and traces and closes the database before exiting (otherwise the last records are lost and the process hangs). Their calls are recorded under `eval-resume`, `eval-jobs` and `snapshot-job`, with the effort and run number as trace metadata. These are real spend, so they appear on the page.
+`eval:resume`, `eval:jobs`, `eval:writer` and `snapshot:job` run through `runLlmScript` ([script.ts](../src/lib/llm/script.ts)), which turns tracing on, runs the script, and flushes the usage records and traces and closes the database before exiting (otherwise the last records are lost and the process hangs). Their calls are recorded under `eval-resume`, `eval-jobs` and `snapshot-job`, with the effort and run number as trace metadata. These are real spend, so they appear on the page. `eval:writer` is the exception: it records in the test database (`TEST_DATABASE_URL`) unless given `--dev-db`, so its many runs stay off the dev usage page; its report has the numbers, read back from those rows by run id. See [generate-resume.md](generate-resume.md), "Evaluating the writer".
 
 ## Privacy
 

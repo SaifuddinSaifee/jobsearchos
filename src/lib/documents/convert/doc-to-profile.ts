@@ -1,6 +1,7 @@
+import { splitOutsideBrackets } from "@/lib/career/normalize";
 import { emptyProfile, type Profile } from "@/lib/profile/schema";
 import type { DocJSON } from "../build";
-import { bulletTexts, children, headerOf, plainText, sectionsOf, textOf } from "../read";
+import { bulletTexts, children, firstOf, headerOf, plainText, sectionsOf, textOf } from "../read";
 import { CONTACT_SEP } from "./profile-to-doc";
 
 const PRESENT = /^(present|current|now|ongoing|today)$/i;
@@ -26,10 +27,42 @@ export function parseDates(text: string): { start: string; end: string; current:
 const looksLikePhone = (s: string) => /^[+()\d][\d\s().+-]{6,}$/.test(s);
 const looksLikeLink = (s: string) => /^(https?:\/\/|www\.)/i.test(s) || /^[\w-]+(\.[\w-]+)+\/\S*$/.test(s) || /(linkedin|github|gitlab|behance|medium)\./i.test(s);
 
-/** Splits the contact line on the separator and sorts the pieces by what they look like. */
-function parseContact(line: string, name: string): Profile["contact"] {
+/** One piece of the contact line: its text, and the address it links to when it is a link. */
+export type ContactPiece = { text: string; href: string | null };
+
+/**
+ * The contact line in pieces, split on the separator, each with the address of any link on it. A resume often shows a
+ * link as a label ("GitHub", "LinkedIn") with the address only in the link, so the text alone loses it.
+ */
+export function contactPieces(line: DocJSON | undefined): ContactPiece[] {
+  const pieces: ContactPiece[] = [{ text: "", href: null }];
+  for (const node of children(line)) {
+    if (node.type !== "text") continue;
+    const link = (node.marks ?? []).find((m) => m.type === "link");
+    const href = typeof link?.attrs?.href === "string" && link.attrs.href.trim() ? link.attrs.href.trim() : null;
+    (node.text ?? "").split(CONTACT_SEP.trim()).forEach((part, i) => {
+      if (i > 0) pieces.push({ text: "", href: null });
+      const piece = pieces[pieces.length - 1];
+      piece.text += part;
+      if (href && part.trim()) piece.href = href;
+    });
+  }
+  return pieces.map((p) => ({ text: p.text.trim(), href: p.href })).filter((p) => p.text || p.href);
+}
+
+/** Sorts the pieces of the contact line by what they are. A linked piece keeps its address, not its label. */
+function parseContact(pieces: ContactPiece[], name: string): Profile["contact"] {
   const contact = { ...emptyProfile().contact, name };
-  for (const raw of line.split(CONTACT_SEP).map((s) => s.trim()).filter(Boolean)) {
+  for (const { text: raw, href } of pieces) {
+    if (href && /^mailto:/i.test(href)) {
+      if (!contact.email) contact.email = href.replace(/^mailto:/i, "").split("?")[0];
+      continue;
+    }
+    // A label ("GitHub") stands for its address; text that is an address already is kept as written.
+    if (href && /^(https?:\/\/|www\.)/i.test(href)) {
+      contact.links.push(looksLikeLink(raw) ? raw : href);
+      continue;
+    }
     if (!contact.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) contact.email = raw;
     else if (!contact.phone && looksLikePhone(raw)) contact.phone = raw;
     else if (looksLikeLink(raw)) contact.links.push(raw);
@@ -53,7 +86,7 @@ const paragraphs = (section: DocJSON) =>
 export function docToProfile(doc: DocJSON): Profile {
   const profile = emptyProfile();
   const header = headerOf(doc);
-  if (header) profile.contact = parseContact(textOf(header, "headerContact"), textOf(header, "headerName"));
+  if (header) profile.contact = parseContact(contactPieces(firstOf(header, "headerContact")), textOf(header, "headerName"));
 
   for (const s of sectionsOf(doc)) {
     const kind = String(s.attrs?.kind ?? "custom");
@@ -78,7 +111,7 @@ export function docToProfile(doc: DocJSON): Profile {
         profile.projects.push({
           name: textOf(p, "projectName"),
           description: textOf(p, "projectDetail"),
-          technologies: tech ? tech.split(/\s*,\s*/).filter(Boolean) : [],
+          technologies: tech ? splitOutsideBrackets(tech) : [],
           bullets: bulletTexts(children(p).find((c) => c.type === "bulletList")),
           url: typeof href === "string" ? href : "",
         });
@@ -86,7 +119,7 @@ export function docToProfile(doc: DocJSON): Profile {
     } else if (kind === "skills") {
       for (const line of children(s).filter((c) => c.type === "skillsLine")) {
         const label = textOf(line, "skillsLabel");
-        const items = textOf(line, "skillsItems").split(/\s*,\s*/).filter(Boolean);
+        const items = splitOutsideBrackets(textOf(line, "skillsItems"));
         if (label.toLowerCase() === "technologies") profile.technologies.push(...items);
         else profile.skills.push({ category: label || "Skills", items });
       }

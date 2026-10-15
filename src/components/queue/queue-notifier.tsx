@@ -5,9 +5,11 @@ import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useCareerStatus } from "@/components/career/use-career-status";
 import { useSearches } from "@/components/outreach/use-searches";
+import { useActiveGenerations } from "@/components/resume-writer/use-active-generations";
 import { parseFailure } from "@/lib/career/failure";
 import type { CareerStatus } from "@/lib/career/review";
 import type { SearchItem } from "@/lib/outreach/types";
+import type { ActiveGeneration } from "@/lib/resume-writer/types";
 import { useQueue, useQueueTransitions, useStatusTransitions } from "./use-queue";
 
 /**
@@ -29,7 +31,10 @@ export function QueueNotifier() {
 
       if (saved.length === 1) {
         const item = saved[0].item;
-        toast.success(`Saved: ${item.label}`, { action: { label: "View", onClick: () => router.push(`/jobs?job=${item.jobId}`) } });
+        toast.success(`Saved: ${item.label}`, {
+          action: { label: "View", onClick: () => router.push(`/jobs?job=${item.jobId}`) },
+          cancel: { label: "Generate resume", onClick: () => router.push(`/jobs/${item.jobId}/resume`) },
+        });
       } else if (saved.length > 1) {
         toast.success(`${saved.length} jobs saved`, { action: { label: "Open Jobs", onClick: () => router.push("/jobs") } });
       }
@@ -69,6 +74,27 @@ export function QueueNotifier() {
     [pathname, router],
   );
   useStatusTransitions(searches, searchesLoaded, onSearchChange);
+
+  // Resumes being written: say when the match is ready to look at, when the resume is ready, or when it failed, unless
+  // you are already looking at that job's resume page (which shows it, and goes on to the editor by itself).
+  const { generations, isSuccess: generationsLoaded } = useActiveGenerations();
+  const onGenerationChange = useCallback(
+    (changes: { item: ActiveGeneration; from: string }[]) => {
+      for (const { item } of changes) {
+        const page = `/jobs/${item.jobId}/resume`;
+        if (pathname === page) continue;
+        if (item.status === "review") {
+          toast.message(`Review the match for ${item.jobLabel}`, { action: { label: "Review", onClick: () => router.push(page) }, duration: 15_000 });
+        } else if (item.status === "done" && item.documentId) {
+          toast.success(`Resume ready: ${item.jobLabel}`, { action: { label: "Open", onClick: () => router.push(`/library/${item.documentId}`) }, duration: 15_000 });
+        } else if (item.status === "failed") {
+          toast.error(`Could not write the resume for ${item.jobLabel}`, { description: item.error ?? undefined, action: { label: "Details", onClick: () => router.push(page) } });
+        }
+      }
+    },
+    [pathname, router],
+  );
+  useStatusTransitions(generations, generationsLoaded, onGenerationChange);
 
   // Career record: say when a source is ready for review (it is the one holding the rest back) or could not be read.
   // Not on the review page itself, which swaps the next source in on its own.
