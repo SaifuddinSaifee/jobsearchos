@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 
 process.env.DATABASE_URL ??= "postgres://unused";
@@ -171,11 +172,25 @@ describe("answers", () => {
     expect(schema.safeParse(answer({ roles: [{ role: "e1", bullets: [{ facts: ["f1", "f2", "f3"], text: "Some long enough text" }] }] })).success).toBe(false);
   });
 
-  it("refuses projects and certifications that were not offered", () => {
+  it("takes a project bullet written as bare text, and still shows the model the object", () => {
+    const schema = answerSchema(plan);
+    const project = plan.projects[0].alias;
+    const parsed = schema.safeParse({ summary: "PM.", roles: [], projects: [{ project, bullets: ["Built the billing prototype in a week", { text: "Shipped it to 40 merchants" }] }], skills: [], certifications: [] });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.projects[0].bullets).toEqual([{ text: "Built the billing prototype in a week" }, { text: "Shipped it to 40 merchants" }]);
+    const shown = JSON.stringify(z.toJSONSchema(schema));
+    expect(shown).toContain('"bullets":{"maxItems":2,"type":"array","items":{"type":"object","properties":{"text"');
+  });
+
+  it("drops projects and certifications that were not offered, instead of failing the whole draft", () => {
     const bare = planWriting({ ...record(), projects: [], certifications: [] }, job, withMap());
     const schema = answerSchema(bare);
     expect(schema.safeParse({ summary: "", roles: [], projects: [], skills: [], certifications: [] }).success).toBe(true);
-    expect(schema.safeParse({ summary: "", roles: [], projects: [{ project: "p1", bullets: [] }], skills: [], certifications: [] }).success).toBe(false);
+    const stray = { summary: "PM.", roles: [], projects: [{ project: "p1", bullets: [{ text: "Built a thing nobody offered" }] }], skills: [], certifications: ["c9"] };
+    expect(schema.safeParse(stray).success).toBe(true);
+    const w = readWriting(stray, bare);
+    expect(w.projects).toEqual([]);
+    expect(w.certifications).toEqual([]);
   });
 
   it("reads the answer into a resume: plan order, ids kept, wording tidied, most relevant first", () => {

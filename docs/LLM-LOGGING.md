@@ -60,7 +60,7 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | `find-contacts` | Queue: `processSearch` | `extract-posting-people`, `find-people-web`, `rank-contacts` |
 | `index-resume` | Queue: `processIndex` | `parse-resume` (only for an unstructured upload) |
 | `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |
-| `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`), `write-resume` (the draft, `WRITER_MODEL` at max effort, retried once if unreadable), `review-resume` (`REVIEW_MODEL`, retried after rate limits), `revise-resume` (`WRITER_MODEL`, when the review or code checks ask for edits) |
+| `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`), `write-resume` (the draft, `WRITER_MODEL` at high effort, retried once if unreadable, with one step less effort if cut off), `review-resume` (`REVIEW_MODEL`, retried after rate limits), `revise-resume` (`WRITER_MODEL`, when the review or code checks ask for edits; retried with less effort if cut off) |
 | `upload-resume` | `POST /api/resume/parse` | `parse-resume` |
 | `fill-job-details` | Server action | `extract-additional-details` |
 | `research-company` | Server action | `research-company` |

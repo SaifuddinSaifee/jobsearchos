@@ -36,13 +36,14 @@ const KIMI = "moonshotai/Kimi-K3";
 const DEEPSEEK = "deepseek-ai/DeepSeek-V4.1-Flash";
 
 type Config = { name: string; writer: string; effort: WriterConfig["effort"]; reviewer: string };
+/** A is the setup the app first shipped with; C is the app's default since these were compared (docs/generate-resume.md). */
 const CONFIGS: Record<string, Config> = {
   A: { name: "A", writer: GLM, effort: "max", reviewer: KIMI },
   B: { name: "B", writer: GLM, effort: "max", reviewer: DEEPSEEK },
   C: { name: "C", writer: GLM, effort: "high", reviewer: DEEPSEEK },
   D: { name: "D", writer: GLM_FLASH, effort: "max", reviewer: DEEPSEEK },
 };
-const describe = (c: Config) => `${c.name}: ${c.writer} at ${c.effort} effort writes, ${c.reviewer} reviews`;
+const describe = (c: Config) => `${c.name}: ${c.writer} at ${c.effort} effort writes, ${c.reviewer} reviews${c.name === "C" ? " (the app's default)" : ""}`;
 
 /** Asked when the config's reviewer still fails after its retries. GLM-5.3 does not think under a JSON schema, so it is asked by prompt. */
 const FALLBACK_REVIEWER = { model: GLM, jsonMode: "prompt", reasoningEffort: "high" } as const;

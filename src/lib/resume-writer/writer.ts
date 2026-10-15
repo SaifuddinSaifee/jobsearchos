@@ -16,8 +16,14 @@ import { answerSchema, bulletText, buildPrompt, checkWriting, readWriting, type 
 
 export type Writer = (plan: WritingPlan, job: JobInput, requirements: Requirement[], instructions?: GenerationInstructions | null) => Promise<{ written: WrittenResume; notes: string[] }>;
 
-/** The writer thinks as long as it can: the effort setting changes writing quality more than anything else we control. */
-export const WRITER_EFFORT = "max" as const;
+type Effort = NonNullable<StructuredOptions["reasoningEffort"]>;
+
+/**
+ * High, not max. Measured on five cases with `npm run eval:writer` (2026-10-15): at max GLM-5.3 thought for 12,000 to
+ * 32,000 tokens a draft and one call in five ran out of room, so a resume took about 8 minutes and $0.25 and sometimes
+ * failed; at high it took about 2 minutes and $0.06, never failed, and its resumes had no more code-check findings.
+ */
+export const WRITER_EFFORT: Effort = "high";
 /**
  * GLM-5.3 does not think under Together's structured outputs, whatever the effort (checked 2026-10-15: no reasoning
  * tokens with a JSON schema, about 1,100 at max effort without one), so the writer asks for its JSON in the prompt.
@@ -31,6 +37,30 @@ const WRITER_MAX_TOKENS = 32_000;
  * its live capacity, and the client's own quick retries (openai.ts) can all land inside one busy window.
  */
 export const REVIEW_WAITS_MS = [20_000, 40_000];
+
+/** One step less thinking, for a call that ran out of room thinking. */
+const LOWER_EFFORT: Partial<Record<string, Effort>> = { max: "high", high: "medium", medium: "low" };
+export const lowerEffort = (effort: Effort): Effort => LOWER_EFFORT[effort] ?? effort;
+/** A reply cut off at the output limit: at high effort, almost always the model's thinking ran on. */
+const isCutOff = (err: unknown) => /cut off \(max_tokens\)/i.test(err instanceof Error ? err.message : String(err));
+
+/**
+ * Asks up to `tries` times while `retry` says the error is worth another try. A reply cut off at the output limit is
+ * asked again with one step less effort, since asking the same way runs out of room the same way.
+ */
+async function askWithRetry<T>(effort: Effort, tries: number, retry: (err: unknown) => boolean, ask: (effort: Effort) => Promise<T>): Promise<{ value: T | null; error: unknown; attempts: number }> {
+  let error: unknown = null;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      return { value: await ask(effort), error: null, attempts: attempt };
+    } catch (err) {
+      error = err;
+      if (!retry(err)) return { value: null, error, attempts: attempt };
+      if (isCutOff(err)) effort = lowerEffort(effort);
+    }
+  }
+  return { value: null, error, attempts: tries };
+}
 
 const isRateLimited = (err: unknown) => /\b429\b|rate limit|too many requests/i.test(err instanceof Error ? err.message : String(err));
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -159,6 +189,7 @@ export function patchSchema(plan: WritingPlan, bulletIds: string[]) {
   return z.object({
     bullets: z.array(z.object({ id: z.enum(bulletIds.length ? (bulletIds as [string, ...string[]]) : ["none"]), text: z.string().min(10).max(plan.bulletChars + 60) })).optional(),
     summary: full.summary.optional(),
+    mention: full.mention,
     skills: full.skills.optional(),
     interests: full.interests,
   });
@@ -177,7 +208,7 @@ export function buildPatchPrompt(prompt: { system: string; user: string }, draft
     findings.length ? `FOUND BY CODE CHECKS\n${findings.map((f) => `- ${f.bullet} ${f.detail}`).join("\n")}` : "",
   ];
   return {
-    system: `${prompt.system}\n\nYou are now revising only the parts of your draft listed under TO REVISE. Make each edit in the review and fix each finding there, unless doing so would break a rule above. Answer with only those parts: under "bullets", each listed bullet by its id with its new text; "summary", "skills" or "interests" only when listed. Everything else stays as it is.`,
+    system: `${prompt.system}\n\nYou are now revising only the parts of your draft listed under TO REVISE. Make each edit in the review and fix each finding there, unless doing so would break a rule above. Answer with only those parts: under "bullets", each listed bullet by its id with its new text; "summary" (with "mention" when there is one), "skills" or "interests" only when listed. Everything else stays as it is.`,
     user: sections.filter(Boolean).join("\n\n"),
   };
 }
@@ -187,6 +218,7 @@ export function applyPatch(draft: WriterAnswer, items: BulletItem[], patch: Writ
   const answer: WriterAnswer = {
     ...draft,
     ...(targets.has("summary") && patch.summary ? { summary: patch.summary } : {}),
+    ...(targets.has("summary") && patch.mention ? { mention: patch.mention } : {}),
     ...(targets.has("skills") && patch.skills?.length ? { skills: patch.skills } : {}),
     ...(targets.has("interests") && patch.interests !== undefined ? { interests: patch.interests } : {}),
   };
@@ -204,7 +236,7 @@ export function applyPatch(draft: WriterAnswer, items: BulletItem[], patch: Writ
 }
 
 /**
- * The writer that asks the models: a draft at the highest effort (tried twice if the reply cannot be read), a review by
+ * The writer that asks the models: a draft (tried twice if the reply cannot be read, with less thinking if it ran out of room), a review by
  * the review model, and a revision when the review or the code checks ask for one. A failed review or revision keeps the
  * draft, with a note. `chat` and `reviewer` are injectable so tests never reach the network; `config` changes the models
  * and the revision for evaluation, and is left out by the app.
@@ -213,21 +245,14 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
   return async (plan, job, requirements, instructions) => {
     const schema = answerSchema(plan);
     const prompt = buildPrompt(plan, job, requirements, instructions);
-    const opts = { model: config.model ?? env().WRITER_MODEL, maxTokens: WRITER_MAX_TOKENS, reasoningEffort: config.effort ?? WRITER_EFFORT, jsonMode: WRITER_JSON };
+    const opts = { model: config.model ?? env().WRITER_MODEL, maxTokens: WRITER_MAX_TOKENS, reasoningEffort: config.effort ?? WRITER_EFFORT, jsonMode: WRITER_JSON } satisfies Partial<StructuredOptions>;
     const revision = config.revision ?? "always";
 
-    let draft: WriterAnswer | null = null;
-    let last: unknown;
-    let draftAttempts = 0;
-    for (let attempt = 0; attempt < 2 && !draft; attempt++) {
-      draftAttempts++;
-      try {
-        draft = await chat(schema, prompt, { ...opts, step: "write-resume" });
-      } catch (err) {
-        last = err;
-      }
-    }
-    if (!draft) throw new Error(`Could not write the resume with the model: ${last instanceof Error ? last.message : "unknown error"}`);
+    // Any failure is worth a second try; one cut off at the output limit is tried with less thinking.
+    const drafting = await askWithRetry(opts.reasoningEffort, 2, () => true, (reasoningEffort) => chat(schema, prompt, { ...opts, reasoningEffort, step: "write-resume" }));
+    const draft = drafting.value;
+    const draftAttempts = drafting.attempts;
+    if (!draft) throw new Error(`Could not write the resume with the model: ${drafting.error instanceof Error ? drafting.error.message : "unknown error"}`);
 
     const notes: string[] = [];
     const drafted = readWriting(draft, plan);
@@ -274,23 +299,26 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
       if (targets.length > 0) {
         const wanted = new Set(targets);
         const bulletIds = items.map((i) => i.id).filter((id) => wanted.has(id));
-        try {
-          const patch = await chat(patchSchema(plan, bulletIds), buildPatchPrompt(prompt, draft, items, material.filter((e) => wanted.has(e.target)), findings, targets), { ...opts, step: "revise-resume" });
-          written = applyPatch(draft, items, patch, plan, wanted);
+        const patching = await askWithRetry(opts.reasoningEffort, 2, isCutOff, (reasoningEffort) =>
+          chat(patchSchema(plan, bulletIds), buildPatchPrompt(prompt, draft, items, material.filter((e) => wanted.has(e.target)), findings, targets), { ...opts, reasoningEffort, step: "revise-resume" }),
+        );
+        if (patching.value) {
+          written = applyPatch(draft, items, patching.value, plan, wanted);
           outcome = "targeted";
-        } catch (err) {
-          console.error("[resume-writer] revision failed:", err instanceof Error ? err.message : err);
+        } else {
+          console.error("[resume-writer] revision failed:", patching.error instanceof Error ? patching.error.message : patching.error);
           notes.push("The revision after the review could not run, so this is the first draft.");
           outcome = "failed";
         }
       }
     } else if (review ? review.verdict === "revise" || review.edits.length > 0 : findings.length > 0) {
-      try {
-        const answer = await chat(schema, buildRevisePrompt(prompt, draft, items, review, findings), { ...opts, step: "revise-resume" });
-        written = readWriting(answer, plan);
+      // Only a revision cut off at the output limit is tried again (with less thinking); any other failure keeps the draft.
+      const revising = await askWithRetry(opts.reasoningEffort, 2, isCutOff, (reasoningEffort) => chat(schema, buildRevisePrompt(prompt, draft, items, review, findings), { ...opts, reasoningEffort, step: "revise-resume" }));
+      if (revising.value) {
+        written = readWriting(revising.value, plan);
         outcome = "full";
-      } catch (err) {
-        console.error("[resume-writer] revision failed:", err instanceof Error ? err.message : err);
+      } else {
+        console.error("[resume-writer] revision failed:", revising.error instanceof Error ? revising.error.message : revising.error);
         notes.push("The revision after the review could not run, so this is the first draft.");
         outcome = "failed";
       }

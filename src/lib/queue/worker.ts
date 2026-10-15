@@ -64,10 +64,10 @@ const INDEX_CONCURRENCY = 1;
 const INDEX_TIMEOUT_MS = 5 * 60_000;
 /** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
 const CAREER_TIMEOUT_MS = 5 * 60_000;
-/** One phase of writing a resume: matching the job against the record, or writing and fitting it. */
 /**
- * Writing is three calls to large models: the draft at the highest effort (about 3 minutes), the review (about 3) and the
- * revision (about 1), plus waits for rate limits. Measured at about 6.5 minutes, so it gets far longer than the rest.
+ * One phase of writing a resume: matching the job against the record, or writing it. Writing is three calls: the draft
+ * at high effort (about 1 to 2 minutes), the review (about 20 seconds) and the revision (under a minute), measured at
+ * about 2 minutes. The limit leaves room for a draft that runs out of room and is asked again, and for rate-limit waits.
  */
 const GENERATION_TIMEOUT_MS = 15 * 60_000;
 /** Resumes being matched or written at once, for different jobs. */

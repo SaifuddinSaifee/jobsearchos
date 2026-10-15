@@ -20,7 +20,7 @@ export function chatClient(): OpenAI {
     const apiKey = env().TOGETHER_AI_API_KEY;
     if (!apiKey) throw new Error("TOGETHER_AI_API_KEY is not set in .env");
     new OpenAIInstrumentation().manuallyInstrument(OpenAI);
-    // Together's rate limits shift with live capacity, and the larger models (Kimi K3) often answer "too many requests"
+    // Together's rate limits shift with live capacity, and the larger models (Kimi K3, once the reviewer) often answer "too many requests"
     // for a few seconds. The SDK waits as the reply says and tries again; two tries were not enough for those.
     client = new OpenAI({ apiKey, baseURL: "https://api.together.xyz/v1", maxRetries: MAX_RETRIES, fetch: countingFetch });
   }

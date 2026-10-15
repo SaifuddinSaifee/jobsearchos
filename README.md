@@ -2,7 +2,7 @@
 
 A personal job-search workspace. Paste a job URL, get a structured job record, generate a tailored resume, cover letter and cold email, and track every application.
 
-[Together AI](https://www.together.ai) does all the LLM work: **GLM-5.3** writes (at its highest reasoning effort), **Kimi K3** reviews what it wrote, and **GLM-5.3 Flash** extracts, scores and triages. No local model is needed today: the app no longer embeds resumes, and works from your career record instead.
+[Together AI](https://www.together.ai) does all the LLM work: **GLM-5.3** writes (at high reasoning effort), **DeepSeek V4.1 Flash** reviews what it wrote, and **GLM-5.3 Flash** extracts, scores and triages. No local model is needed today: the app no longer embeds resumes, and works from your career record instead.
 
 ## Status
 
@@ -172,7 +172,7 @@ tests/                Vitest tests
 
 - **Immutable history:** `profile_versions` rows can never be updated or deleted (a database trigger enforces it). Every save is a new version; restoring copies an old one forward.
 - **Files** are stored under `storage/` by SHA-256 and never overwritten. `storage/` is gitignored.
-- **Models** are Together model IDs in `.env`: `WRITER_MODEL` (GLM-5.3) writes; `REVIEW_MODEL` (Kimi K3) reviews the writing; `EXTRACTION_MODEL` and `FAST_MODEL` (both GLM-5.3 Flash) extract, score and triage. See "Model routing" in [docs/PLAN.md](docs/PLAN.md).
+- **Models** are Together model IDs in `.env`: `WRITER_MODEL` (GLM-5.3) writes; `REVIEW_MODEL` (DeepSeek V4.1 Flash) reviews the writing; `EXTRACTION_MODEL` and `FAST_MODEL` (both GLM-5.3 Flash) extract, score and triage. See "Model routing" in [docs/PLAN.md](docs/PLAN.md).
 - **Privacy:** your data lives in local Postgres and on disk, but every LLM call sends its input (resume text, job pages) to the Together AI API.
 - `npm run dev` and `npm run build` use webpack (`--webpack`) because Turbopack crashed on the Windows machine this was started on. On Linux you can try plain `next dev` (Turbopack) and switch the scripts if it works.
 

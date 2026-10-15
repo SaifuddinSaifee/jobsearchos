@@ -60,7 +60,7 @@ export const RUBRIC: Criterion[] = [
   {
     id: "summary",
     name: "Summary with a point of view",
-    five: "Says what kind of professional this is for this job, with the job's title and one concrete proof point, in two sentences at most.",
+    five: "Says what kind of professional this is for this job, with the job's title and one concrete proof point, in two sentences at most, plus the closing line the candidate asked for (relocation, remote, office days), which stays.",
     one: "A list of tools or adjectives; names the company or repeats its mission.",
   },
   {
@@ -113,6 +113,7 @@ The stance you review from:
 - The candidate's own lines (shown under each bullet as "from the record") are the truth and the voice to keep. The best edit often restores their wording, their names and their numbers.
 - Never ask for a number, a tool, a result or a claim that is not in the candidate's lines or in what they say they have.
 - Never ask to name the company or to quote its mission.
+- A closing line of the summary about a condition (relocating, office days) is there because the candidate asked for it. Never ask to remove or shorten it away.
 How to write the edits:
 - Each edit names one target (a bullet id, "summary" or "skills"), the criterion it serves, what is wrong, and exactly what to change. Give the replacement wording when you can.
 - Most important first. At most ${MAX_EDITS}. Leave out edits that only change taste.

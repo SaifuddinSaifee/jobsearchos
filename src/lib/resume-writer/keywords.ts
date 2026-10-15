@@ -97,6 +97,12 @@ export const stuffingCount = (s: Stuffing) => s.copied.length + s.overused.lengt
 const sentencesOf = (w: WrittenResume) => [w.summary, ...w.roles.flatMap((r) => r.bullets.map((b) => b.text)), ...w.projects.flatMap((p) => p.bullets.map((b) => b.text))];
 
 /** Looks for the signs of a resume written for a keyword scanner instead of a person. */
+/** A requirement whose own wording the resume may echo: a condition the user asked to mention, or experience or a skill the candidate has. */
+function echoAllowed(r: RequirementLike): boolean {
+  const use = requirementUse(r);
+  return use === "logistics" || ((use === "experience" || use === "skill") && (r.verdict === "met" || r.userHas));
+}
+
 export function checkStuffing(w: WrittenResume, job: Pick<JobInput, "aboutCompany" | "responsibilities" | "companyProfile">, requirements: RequirementLike[], terms: string[]): Stuffing {
   const units = sentencesOf(w).filter(Boolean);
   const normalized = units.map(normalizeText);
@@ -106,7 +112,9 @@ export function checkStuffing(w: WrittenResume, job: Pick<JobInput, "aboutCompan
     job.companyProfile?.about ?? "",
     job.companyProfile?.principles ?? "",
     ...job.responsibilities,
-    ...requirements.filter((r) => r.kind !== "keyword").map((r) => r.text),
+    // Not a condition (the summary's mention line restates it on purpose), and not experience or a skill the candidate
+    // has: saying "5+ years of product design experience" as the posting does is the keyword match a screen looks for.
+    ...requirements.filter((r) => r.kind !== "keyword" && !echoAllowed(r)).map((r) => r.text),
   ].filter(Boolean);
   const copied = [...new Set(units.flatMap((u) => copiedPhrases(u, sources)))].slice(0, 3);
 

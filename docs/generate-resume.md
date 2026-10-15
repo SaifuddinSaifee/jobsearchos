@@ -341,7 +341,7 @@ First results (2026-10-15, one run per config and case, so small differences are
 
 | Config | Writer, reviewer | Written | Mean cost | Mean time | Final resumes with a code-check finding |
 | --- | --- | --- | --- | --- | --- |
-| A (the app's default) | GLM-5.3 max, Kimi K3 | 5 of 5 | $0.25 | 8.0 min | 3 of 5 |
+| A (the default then) | GLM-5.3 max, Kimi K3 | 5 of 5 | $0.25 | 8.0 min | 3 of 5 |
 | B | GLM-5.3 max, DeepSeek V4.1 Flash | 4 of 5 | $0.26 | 10.4 min | 2 of 4 |
 | C | GLM-5.3 high, DeepSeek V4.1 Flash | 5 of 5 | $0.06 | 2.3 min | 2 of 5 |
 | D | GLM-5.3 Flash max, DeepSeek V4.1 Flash | 4 of 5 | $0.03 | 7.7 min | 1 of 4 |
@@ -359,4 +359,25 @@ First results (2026-10-15, one run per config and case, so small differences are
   at high effort the revision is already small. Final findings: 3 of 5 with `always`, 1 of 5 with `targeted`.
 - C's own numbers moved between the two runs (step 1: $0.059 and 138 s; step 2: $0.037 and 80 s), which is the size of
   the noise to expect.
-- The app's default is unchanged.
+- C became the app's default: see "Fifth pass".
+
+### Fifth pass: the defaults the eval chose, and what it found
+
+- **Defaults:** GLM-5.3 at `high` effort writes (`WRITER_EFFORT`), DeepSeek V4.1 Flash reviews (`REVIEW_MODEL`), in
+  `env.ts`, `.env` and `.env.example`.
+- **A call cut off at the output limit is asked again with one step less effort** (`askWithRetry`, `lowerEffort`): the
+  draft is tried twice for any failure, the revision only when cut off. Asking the same way runs out of room the same way.
+- **The mention has its own field.** The summary's "two sentences at most" crowded out the condition the user asked to
+  mention (the designer case missed its office days in all six runs). The writer now writes `mention`, required when there
+  is one, and code puts it after the summary (`withMention`) unless the summary already says it. The rubric and the
+  reviewer's stance keep it.
+- **A project or certification the model adds when none was offered is dropped**, not a failed draft (`oneOf` accepts any
+  text when there is nothing to choose from).
+- **A project bullet written as bare text is taken as its text** (`asObject` in `write.ts`). In the app, GLM-5.3 once
+  wrote project bullets as strings instead of `{ "text": ... }`, and the draft was thrown away and written again (about 2
+  minutes and $0.05). The schema shown in the prompt still asks for the object.
+- **The copied-wording check lets the resume echo** a condition the user asked to mention and the wording of experience
+  or a skill the candidate has ("5+ years of product design experience"); the company's own text, the responsibilities,
+  fields and ways of working are still checked.
+- **Verified** on the five cases with the new defaults (`--configs C`, step 1's matches): 5 of 5 written, $0.20 in all
+  ($0.03 to $0.05 each), 59 to 109 seconds each, both mentions written, no failed calls.

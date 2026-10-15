@@ -16,10 +16,14 @@ const EnvSchema = z.object({
   TOKEN_ENCRYPTION_KEY: z.string().optional(),
   // Optional: Prospeo finds people at a company and reveals their verified email (https://prospeo.io).
   PROSPEO_API_KEY: z.string().optional(),
-  /** Writing: resume, cover letter, cold email. Run at the highest reasoning effort. */
+  /** Writing: resume, cover letter, cold email. Run at high reasoning effort (see WRITER_EFFORT in resume-writer/writer.ts). */
   WRITER_MODEL: z.string().default("zai-org/GLM-5.3"),
-  /** Reviewing what the writer wrote, against a fixed set of criteria. A different model from the writer on purpose. */
-  REVIEW_MODEL: z.string().default("moonshotai/Kimi-K3"),
+  /**
+   * Reviewing what the writer wrote, against a fixed set of criteria. A different model from the writer on purpose.
+   * DeepSeek V4.1 Flash reviews in about 20 seconds for under a cent; Kimi K3 took about 3 minutes and $0.11 a review
+   * with no better resumes (`npm run eval:writer`, 2026-10-15).
+   */
+  REVIEW_MODEL: z.string().default("deepseek-ai/DeepSeek-V4.1-Flash"),
   /** Extraction, parsing, scoring, classification, summarization. */
   EXTRACTION_MODEL: z.string().default("zai-org/GLM-5.3-Flash"),
   /** High-volume triage (discovery prefilter). */

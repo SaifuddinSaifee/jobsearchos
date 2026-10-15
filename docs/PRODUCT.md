@@ -184,14 +184,14 @@ and ends in the editor.
   copied from the posting or the company's own text, a term used in more than three places, or a way of working named
   outright. If it finds one the writer is asked once more. The notes say which terms were worked in, and bullets and skills
   are ordered with what the job asks for first.
-- **Your words, edited, then reviewed.** The writer (GLM-5.3, thinking as long as it can) starts each bullet from your own
+- **Your words, edited, then reviewed.** The writer (GLM-5.3, thinking at high effort) starts each bullet from your own
   wording in the record and changes only what the job needs: the posting's spelling of a term, something you ticked, a
   cut, a reorder. It keeps your names and numbers and never adds a result you did not write ("so that the team..."). A
-  second model (Kimi K3) then reviews the draft like a hiring manager would, against ten criteria (faithful to the record,
+  second model (DeepSeek V4.1 Flash) then reviews the draft like a hiring manager would, against ten criteria (faithful to the record,
   sounds like you, specific, no invented results, answers the job, terms placed naturally, varied rhythm, a summary with a
   point of view, clean, skills), and the writer makes its edits. Code checks the same things and puts back to your own
-  words any bullet still rewritten beyond recognition. The notes show the review's score. It takes about seven minutes and
-  costs about $0.22 a resume.
+  words any bullet still rewritten beyond recognition. The notes show the review's score. It takes about two minutes and
+  costs about $0.04 to $0.06 a resume.
 - **Your wins, your interests, your conditions.** Achievements from the record (a hackathon win) are always on the
   resume. An interest the job asks about ("into fandom or fanfiction") is yours to tick, with a note for the specifics; it
   becomes one short **Interests** line and is never claimed if you did not tick it. A condition such as relocating can be

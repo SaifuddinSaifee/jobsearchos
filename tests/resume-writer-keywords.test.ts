@@ -200,6 +200,16 @@ describe("the checks on stuffing", () => {
     expect(checkStuffing(w, stuffJob, reqs, plan.terms).copied).toEqual(["the most entertaining storyteller in the world", "work closely with merchants to launch billing products worldwide"]);
   });
 
+  it("lets the resume echo a condition the user asked to mention and experience they have, but not what they lack", () => {
+    const own = [
+      { text: "Willing to relocate to San Francisco for this role", kind: "must" as const, verdict: "missing" as const, userHas: true, use: "logistics" as const },
+      { text: "5+ years of product design experience in consumer apps", kind: "must" as const, verdict: "met" as const, userHas: false, use: "experience" as const },
+      { text: "Deep experience running large scale growth experiments at scale", kind: "nice" as const, verdict: "missing" as const, userHas: false, use: "experience" as const },
+    ];
+    const w = resume("Designer with 5+ years of product design experience in consumer apps. Willing to relocate to San Francisco for this role.", ["Has deep experience running large scale growth experiments at scale"]);
+    expect(checkStuffing(w, stuffJob, own, []).copied).toEqual(["deep experience running large scale growth experiments at scale"]);
+  });
+
   it("finds a term used in too many places, and a way of working named outright", () => {
     const w = resume("Engineer with Kafka and Adaptability.", ["Moved Kafka consumers", "Tuned Kafka brokers", "Monitored Kafka lag", "Upgraded Kafka"]);
     const found = checkStuffing(w, stuffJob, reqs, plan.terms);

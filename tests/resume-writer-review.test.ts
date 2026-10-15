@@ -7,7 +7,7 @@ import { mergeProvenance } from "@/lib/career/schema";
 import { buildResumeDoc } from "@/lib/resume-writer/build";
 import { bulletItems, checkFaithful, missingMentions, namesIn, numbersIn, revertRewrites } from "@/lib/resume-writer/faithful";
 import { buildReviewPrompt, makeReviewer, meanScore, readReview, reviewNote, reviewSchema, RUBRIC, type Review, type Reviewer } from "@/lib/resume-writer/review";
-import { bulletText, buildPrompt, planWriting, readWriting, withoutCovered, type WriterAnswer } from "@/lib/resume-writer/write";
+import { answerSchema, bulletText, buildPrompt, planWriting, readWriting, withMention, withoutCovered, type WriterAnswer } from "@/lib/resume-writer/write";
 import { retryStats } from "@/lib/llm/attempts";
 import { buildPatchPrompt, buildRevisePrompt, disagreements, findingTargets, makeWriter, materialEdits, patchSchema, WRITER_EFFORT, type WriterTrace } from "@/lib/resume-writer/writer";
 import { job, record, withMap } from "./resume-writer-helpers";
@@ -105,8 +105,25 @@ describe("the plan for the writer", () => {
     expect(p.mentions).toEqual(["Willing to relocate to San Francisco"]);
     expect(p.users.map((u) => u.text)).not.toContain("Willing to relocate to San Francisco");
     const { user } = buildPrompt(p, job, relocate);
-    expect(user).toContain('MENTION BRIEFLY (one short closing sentence of the summary, in the candidate\'s words, for example "Open to relocating to San Francisco.")\nWilling to relocate to San Francisco');
+    expect(user).toContain('MENTION BRIEFLY (write "mention": one short sentence in the candidate\'s words, for example "Open to relocating to San Francisco." It closes the summary)\nWilling to relocate to San Francisco');
     expect(user.slice(user.indexOf("WHAT THE JOB ASKS FOR"), user.indexOf("THE CANDIDATE'S ROLES"))).not.toContain("relocate");
+
+    // Its own field, so the summary cannot crowd it out: required, and put after the summary in code.
+    const schema = answerSchema(p);
+    expect(schema.safeParse(answer(OWN)).success).toBe(false);
+    expect(schema.safeParse(answer(OWN, { mention: "Open to relocating to San Francisco." })).success).toBe(true);
+    expect(readWriting(answer(OWN, { mention: "Open to relocating to San Francisco" }), p).summary).toBe("Product manager who shipped billing to 2,000 merchants. Open to relocating to San Francisco.");
+    // Not twice, when the summary already says it.
+    const said = answer(OWN, { summary: "Product manager, open to relocating to San Francisco.", mention: "Happy to relocate to San Francisco." });
+    expect(readWriting(said, p).summary).toBe("Product manager, open to relocating to San Francisco.");
+    // Nothing to mention: whatever the model wrote there is dropped.
+    expect(readWriting(answer(OWN, { mention: "Open to relocating." }), plan).summary).toBe("Product manager who shipped billing to 2,000 merchants.");
+  });
+
+  it("closes the summary with the mention line", () => {
+    expect(withMention("Engineer who ships", "Open to relocating to Austin", ["Willing to relocate to Austin"])).toBe("Engineer who ships. Open to relocating to Austin.");
+    expect(withMention("", "Open to relocating to Austin.", ["Willing to relocate to Austin"])).toBe("Open to relocating to Austin.");
+    expect(withMention("Engineer who ships.", "", ["Willing to relocate to Austin"])).toBe("Engineer who ships.");
   });
 
   it("puts an interest the user ticked in one Interests line, and never one they did not give", () => {
@@ -206,12 +223,13 @@ describe("makeWriter: write, review, revise", () => {
     verdict: "revise",
   });
 
-  it("drafts at the highest effort with the writing model, and stops when the review needs nothing", async () => {
+  it("drafts at high effort with the writing model, and stops when the review needs nothing", async () => {
     const chat = vi.fn(async () => answer(OWN));
     const out = await makeWriter(chat as never, ready)(plan, job, reqs);
     expect(chat).toHaveBeenCalledOnce();
     expect((chat.mock.calls[0] as unknown[])[2]).toMatchObject({ step: "write-resume", reasoningEffort: WRITER_EFFORT, jsonMode: "prompt", model: expect.any(String) });
-    expect(WRITER_EFFORT).toBe("max");
+    // High, not max: max ran out of room on one call in five and took four times as long (docs/generate-resume.md).
+    expect(WRITER_EFFORT).toBe("high");
     expect(out.notes[0]).toBe("Review of the draft: 5.0 of 5. No edits needed.");
   });
 
@@ -220,7 +238,7 @@ describe("makeWriter: write, review, revise", () => {
     const out = await makeWriter(chat as never, asks)(plan, job, reqs);
     expect(chat).toHaveBeenCalledTimes(2);
     const [, input, opts] = chat.mock.calls[1] as [unknown, { system: string; user: string }, { step: string; reasoningEffort: string }];
-    expect(opts).toMatchObject({ step: "revise-resume", reasoningEffort: "max" });
+    expect(opts).toMatchObject({ step: "revise-resume", reasoningEffort: WRITER_EFFORT });
     expect(input.system).toContain("You are now revising your draft");
     expect(input.user).toContain("THE REVIEW\n- b2 [Sounds like the candidate]: Too terse. Do this: Say what the build cut enabled, from the record.");
     expect(input.user).toContain("YOUR DRAFT (in the answer format)");
@@ -280,6 +298,25 @@ describe("makeWriter: write, review, revise", () => {
     const out = await makeWriter(chat as never, asks)(plan, job, reqs);
     expect(out.written.roles[0].bullets[0].text).toBe(OWN);
     expect(out.notes.join(" ")).toContain("One bullet was put back to your own wording");
+  });
+
+  it("asks again with less thinking when a call runs out of room, and does not retry a revision for other errors", async () => {
+    const cutOff = new Error("Output was cut off (max_tokens); the input may be too long");
+    const chat = vi.fn().mockRejectedValueOnce(cutOff).mockResolvedValueOnce(answer(OWN)).mockRejectedValueOnce(cutOff).mockResolvedValueOnce(answer(OWN));
+    let trace: WriterTrace | null = null;
+    await makeWriter(chat as never, asks, async () => {}, { effort: "max", onTrace: (t) => (trace = t) })(plan, job, reqs);
+    const efforts = chat.mock.calls.map((c) => [(c[2] as { step: string }).step, (c[2] as { reasoningEffort: string }).reasoningEffort]);
+    expect(efforts).toEqual([
+      ["write-resume", "max"],
+      ["write-resume", "high"],
+      ["revise-resume", "max"],
+      ["revise-resume", "high"],
+    ]);
+    expect(trace).toMatchObject({ draftAttempts: 2, revision: "full" });
+
+    const broken = vi.fn().mockResolvedValueOnce(answer(OWN)).mockRejectedValueOnce(new Error("The model's output was not valid JSON"));
+    await makeWriter(broken as never, asks)(plan, job, reqs);
+    expect(broken).toHaveBeenCalledTimes(2);
   });
 
   it("fails with the reason when the draft cannot be written", async () => {

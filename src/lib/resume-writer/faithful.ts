@@ -133,15 +133,4 @@ export function revertRewrites(w: WrittenResume, plan: WritingPlan): { written: 
   return { written: next, reverted };
 }
 
-/**
- * The conditions the user asked to mention ("willing to relocate") that the summary does not mention. A condition counts
- * as mentioned when the summary has one of its longer words, or a word that starts the same way ("relocating" for
- * "relocate").
- */
-export function missingMentions(summary: string, mentions: string[]): string[] {
-  const said = normalizeText(summary).split(" ");
-  return mentions.filter((m) => {
-    const key = normalizeText(m).split(" ").filter((w) => w.length >= 6 && w !== "willing");
-    return key.length > 0 && !key.some((k) => said.some((w) => w.startsWith(k.slice(0, 6))));
-  });
-}
+export { missingMentions } from "./write";

@@ -140,7 +140,7 @@ export function makeMatcher(chat: typeof chatStructured = chatStructured): Match
     // One retry: the model sometimes returns text that is not valid JSON.
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 8000, step: "match-requirements" });
+        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 20000, step: "match-requirements" });
         const answers = readAnswer(result.answers, open, shown);
         const uses = readUses(result.uses, all);
         for (const [id, use] of uses) answers.set(id, { ...(answers.get(id) ?? { verdict: "missing", refs: [] }), use });

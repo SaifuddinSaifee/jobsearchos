@@ -28,6 +28,8 @@ const MAX_SKILLS_SHOWN = 80;
 const TEXTS_PER_FACT = 2;
 const WORDING_CHARS = 600;
 const MAX_SUMMARY_CHARS = 400;
+/** The closing line of the summary for the conditions the user asked to mention. */
+const MAX_MENTION_CHARS = 200;
 const MAX_INTERESTS_CHARS = 200;
 
 /**
@@ -260,8 +262,18 @@ export function planWriting(record: CareerRecord, job: Pick<JobInput, "title"> &
   };
 }
 
-/** A schema field that accepts only the given values, or nothing at all when there are none. */
-const oneOf = (values: string[]) => (values.length > 0 ? z.enum(values as [string, ...string[]]) : z.never());
+/**
+ * A schema field that accepts only the given values. With none (a candidate with no projects), any text is accepted and
+ * `readWriting` drops it: a model that adds a project anyway should not fail the whole draft.
+ */
+const oneOf = (values: string[]) => (values.length > 0 ? z.enum(values as [string, ...string[]]) : z.string());
+
+/**
+ * A bullet that only has text, also accepted as the bare text. The writer asks for its JSON in the prompt (GLM-5.3 does
+ * not think under structured outputs), which holds the model to the shape less strictly: once it wrote project bullets
+ * as plain strings, and the whole draft was thrown away and written again. The prompt's schema still shows the object.
+ */
+const asObject = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (typeof v === "string" ? { text: v } : v), schema);
 
 /** The schema for one call, built from the aliases sent, so the only ids the model can return are ones it was given. */
 export function answerSchema(plan: WritingPlan) {
@@ -270,18 +282,20 @@ export function answerSchema(plan: WritingPlan) {
   const text = z.string().min(10).max(plan.bulletChars + 60);
   return z.object({
     summary: z.string().max(MAX_SUMMARY_CHARS),
+    // Its own field, so the summary's two sentences cannot crowd it out: required when the user asked for a mention.
+    mention: z.string().max(MAX_MENTION_CHARS).optional(),
     roles: z.array(
       z.object({
         role: oneOf(plan.roles.map((r) => r.alias)),
         bullets: z.array(z.object({ facts: z.array(oneOf(factAliases)).min(1).max(2), text })).min(1).max(Math.max(...plan.roles.map((r) => r.budget), 1)),
       }),
     ),
-    projects: z.array(z.object({ project: oneOf(plan.projects.map((p) => p.alias)), bullets: z.array(z.object({ text })).max(2) })).max(MAX_PROJECTS),
+    projects: z.array(z.object({ project: oneOf(plan.projects.map((p) => p.alias)), bullets: z.array(asObject(z.object({ text }))).max(2) })).max(MAX_PROJECTS),
     skills: z.array(z.object({ category: z.string().min(2).max(40), items: z.array(oneOf(skillAliases)).min(1).max(14) })).max(5),
     certifications: z.array(oneOf(plan.certifications.map((c) => c.alias))).max(4),
     // Only read when the user gave interests; empty otherwise.
     interests: z.string().max(MAX_INTERESTS_CHARS).optional(),
-  });
+  }).refine((a) => plan.mentions.length === 0 || (a.mention ?? "").trim().length >= 10, { path: ["mention"], message: "Write the mention: the candidate asked for it" });
 }
 export type WriterAnswer = z.infer<ReturnType<typeof answerSchema>>;
 
@@ -389,7 +403,7 @@ export function readWriting(answer: WriterAnswer, plan: WritingPlan): WrittenRes
 
   const certs = answer.certifications.map((a) => plan.certifications.find((c) => c.alias === a)).filter((c): c is PlanCertification => !!c);
   return {
-    summary: tidy(answer.summary),
+    summary: withMention(tidy(answer.summary), answer.mention ?? "", plan.mentions),
     roles,
     projects,
     skills,
@@ -400,6 +414,27 @@ export function readWriting(answer: WriterAnswer, plan: WritingPlan): WrittenRes
     interests: plan.interests.length > 0 ? bulletText(answer.interests ?? "") : "",
     education: plan.education,
   };
+}
+
+/**
+ * The conditions the user asked to mention ("willing to relocate") that the summary does not mention. A condition counts
+ * as mentioned when the summary has one of its longer words, or a word that starts the same way ("relocating" for
+ * "relocate").
+ */
+export function missingMentions(summary: string, mentions: string[]): string[] {
+  const said = normalizeText(summary).split(" ");
+  return mentions.filter((m) => {
+    const key = normalizeText(m).split(" ").filter((w) => w.length >= 6 && w !== "willing");
+    return key.length > 0 && !key.some((k) => said.some((w) => w.startsWith(k.slice(0, 6))));
+  });
+}
+
+/** The summary closed by the mention line, unless there is nothing to mention or the summary already says it. */
+export function withMention(summary: string, mention: string, mentions: string[]): string {
+  const line = tidy(mention);
+  if (mentions.length === 0 || !line || missingMentions(summary, mentions).length === 0) return summary;
+  const end = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
+  return summary ? `${end(summary)} ${end(line)}` : end(line);
 }
 
 /** Phrases that read as written by a machine or a student, beyond the ones the cold-email rules already ban. */
@@ -426,7 +461,7 @@ Rules:
 - The terms under "JOB TERMS" are tools and skills the candidate has. Use each once, where it belongs. The first three may also go in the summary and the skills lines. Never repeat a term to please a keyword scanner, and never tack one onto a bullet it does not belong to. Write an acronym out once with its short form after it, then use the short form.
 - The field the company works in is context, not a skill. It may frame the summary in a few words ("consumer storytelling products") and appears nowhere else. A way of working under "SHOW, DO NOT NAME" is shown by what the candidate did and its name is never written. Never put either in the skills lines.
 - Never copy sentences from the posting or from the company's text, and never turn a responsibility line into "I do X".
-- The summary is two sentences at most, in plain words: what kind of professional the candidate is, said with the job's title as the posting words it, and one concrete proof point from the record (a number or a named result). It is not a list of tools, it does not name the company and it does not repeat its mission. Anything under "MENTION BRIEFLY" closes it in one short sentence.
+- The summary is two sentences at most, in plain words: what kind of professional the candidate is, said with the job's title as the posting words it, and one concrete proof point from the record (a number or a named result). It is not a list of tools, it does not name the company and it does not repeat its mission. What is under "MENTION BRIEFLY" goes in "mention", one short sentence in the candidate's words, which is put after the summary; do not say it in the summary too. With nothing there, leave "mention" empty.
 - Vary the length with importance. In each role, the one or two bullets that answer the job's most important requirements keep their full detail; the rest are one line. Vary how sentences start and how they are built: not every bullet is "Verb X, Y and Z, which...".
 - Lead each role with the bullets that matter most for this job, and put the skills the job asks for first on each skills line.
 - No first person, no filler, no long dashes, no run of three adjectives.
@@ -473,7 +508,7 @@ export function buildPrompt(plan: WritingPlan, job: JobInput, requirements: Requ
     `SKILLS (pick the ones that matter for this job, grouped under short category names)\n${plan.skills.map((s) => `${s.alias}: ${s.text}${s.category ? ` (${s.category})` : ""}`).join("\n")}${plan.users.filter((u) => u.skill).map((u) => `\n${u.alias}: ${u.skill}`).join("")}`,
     plan.certifications.length ? `CERTIFICATIONS (pick the relevant ones)\n${plan.certifications.map((c) => `${c.alias}: ${c.name}${c.issuer ? `, ${c.issuer}` : ""}`).join("\n")}` : "",
     plan.interests.length ? `INTERESTS (the candidate's own; write "interests" from these and their notes only)\n${plan.interests.map((i) => `${i.text}${i.note ? ` (their note: ${i.note})` : ""}`).join("\n")}` : "",
-    plan.mentions.length ? `MENTION BRIEFLY (one short closing sentence of the summary, in the candidate's words, for example "Open to relocating to San Francisco.")\n${plan.mentions.join("\n")}` : "",
+    plan.mentions.length ? `MENTION BRIEFLY (write "mention": one short sentence in the candidate's words, for example "Open to relocating to San Francisco." It closes the summary)\n${plan.mentions.join("\n")}` : "",
     plan.users.length ? `THE CANDIDATE SAYS THEY HAVE THIS\n${plan.users.map((u) => `${u.alias}: ${u.text}${u.note ? ` (their note: ${u.note})` : ""}`).join("\n")}` : "",
     `LENGTH\nAbout ${plan.totalBullets} bullets in all. The one or two bullets per role that answer the most important requirements may use up to ${plan.bulletChars} characters; the others stay under about ${SUPPORT_BULLET_CHARS}.${instructions?.tone ? ` Tone: ${instructions.tone}.` : ""}${instructions?.styleRules.trim() ? `\nThe candidate's own style rules: ${instructions.styleRules.trim()}` : ""}`,
   ];
