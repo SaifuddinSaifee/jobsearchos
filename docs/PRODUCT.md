@@ -143,11 +143,16 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
 
 Nothing is written when a job is saved. When you want a resume for a job, you ask for it, from the job's side panel
 (**Generate resume**), from the row menu, or from the **Generate resume** button on the "Saved" toast after a pasted
-link. It is written from your career record (or from your base resume while the record is empty), takes about a minute,
-and ends in the editor.
+link. It is written from your career record (or from your base resume while the record is empty). Matching the job
+against your record takes under a minute or two; writing, reviewing and revising takes a few minutes more. It ends in the
+editor.
 
 - **A page per job** (`/jobs/<job>/resume`), so it survives a reload and leaving. A sidebar card and toasts say when the
   match is ready to look at, when the resume is ready, or when it failed. **Stop** cancels it.
+- **Where the time goes.** The page lists each step with how long it took: reading, matching, the first draft, the review
+  (with its score), the review's edits (or "nothing needed"), and saving. The running step's time counts up, and a
+  total shows below, not counting the time you spend on the match. The same list stays on the page once the resume is
+  ready, has failed or was stopped.
 - **Match first.** Everything the job asks for (must haves, nice to haves, the posting's keywords and the company's
   values) is lined up against your record: **In your record**, **Partly in your record** or **Not in your record**, with
   the lines of your record behind each. Short terms like a tool name are found directly; the rest are judged by the AI,
@@ -156,23 +161,45 @@ and ends in the editor.
   apps"), a **way of working** ("Adaptability") or a **condition** ("willing to relocate"). That decides where it may go on
   the resume: skills go in bullets and the skills lines, a field is at most a few words in the summary, a way of working is
   shown by what you did and never named, and a condition is left off (it sits under **Not on the resume** and does not count
-  toward the match).
+  toward the match). It also names the 3 to 5 requirements the job is really about, marked **Core**: they count most when
+  the resume is written, and a way of working counts little.
+- **The title each role is written under.** A role your record tells more than one way (Fullstack Software Developer and
+  Product Manager for the same job) shows under **Write each role as**, with the recommended telling chosen: the one that
+  fits the job's title (a "Product Engineer" is an engineer) and proves the most of what the job asks for. Pick another and
+  the resume is written from that telling. A choice is remembered when the same job is written again.
+- **When your record disagrees with itself.** If one achievement is told with different numbers in different documents
+  (activation up 45% in most, 18% in one), **Your record says this more than one way** shows the versions with the numbers
+  in bold and recommends the one most of your documents give. The resume uses the one you pick and leaves the other out,
+  and your pick is remembered for every later resume.
 - **You are taken to be qualified.** Whatever the record does not fully show of the experience and skills the job asks for
   (its must haves and nice to haves) starts out ticked as **I have this**, because a record is usually shorter than what you
   have done. Untick what you would rather leave out, and add a note where it helps ("AWS certified, 2023"). Each ticked
-  item is worked into the resume, in a bullet under the role it fits or in the skills line, in plain terms with no
-  invented numbers, certifications or degrees. **Keywords are your pick** and start unticked, as do fields, ways of working,
+  item with a note is proven on the page: written as work you did, in a bullet under the role your note places it in, with
+  that role's real product and tools and the specifics of your note, with no invented numbers, certifications or degrees.
+  A ticked item with no note is listed in your skills, or named inside a bullet whose own lines show that work; it never
+  gets a bullet of its own or a place in the summary, and the screen says so under it ("Say where you did it and the
+  resume shows it as work"). A **Core** item opens a note field ("One line on how you do this makes the resume
+  more believable"), and **Add detail** does the same for anything already in your record. **Keywords are your pick** and start unticked, as do fields, ways of working,
   the company's values and conditions: tick the ones you want in. The footer shows "Your record covers 76%. With what you
   have: 100%", which updates as you tick. **Don't show this step again** skips the match screen from then on, and the
   experience and skills are then taken as yours without asking (a switch in Profile, under instructions, turns the screen
   back on).
 - **Written for the job.** The most recent roles, each under the title that fits the job. Only the facts you worded for that
   title are used (an engineering job gets your engineering facts, not your product ones; a role with nothing for that title
-  keeps all its wording so it is never missing), the bullets that answer the heaviest requirements first, reworded in the
-  posting's terms and keeping your numbers. One bullet tells one thing you did. Length follows importance: the bullets that
-  answer the top requirements carry the full detail and may run to four lines, the rest stay to one or two. Education is
+  keeps all its wording so it is never missing), chosen for what they answer of the job and how much they prove: a line
+  with a measured result is never lost to one that only names the right things, and of a fact's versions the one with the
+  result comes first. Each recent role opens with a bullet that proves one of the job's core requirements, a bullet leads
+  with its result where you gave one ("Increased activation by 45% by..."), and words that add tone but no evidence are cut.
+  One bullet tells one thing you did. Length follows importance: the bullets that answer the top requirements carry the
+  full detail and may run to three or four lines, the rest stay to one or two. The summary is up to four sentences: what you are,
+  with the job's title; your strongest measured result (chosen in code, one result per sentence); what you built that answers
+  the job's core; how you work. Education is
   one entry per school (repeats of the same school written different ways are one), without high school and board exams
-  once there is a degree; certifications and skills are cleaned of repeats and broken brackets. Projects that answer the
+  once there is a degree; certifications are cleaned of repeats. The skills section is written from your record by code, not
+  the model: your own categories (a catch-all like "Technologies" gives its skills to the categories they belong to; a small
+  category such as "Product & Media" is folded away), skills split mid-bracket or said twice left out, the job's skills
+  first in each line, about 36 in all, with what you ticked placed next to the skills it is like. A product area you worked
+  on ("Video streaming") is proven in a bullet, never listed as a skill. Projects that answer the
   job are included. Employers, titles, dates, schools and certifications are copied
   from your record, never written. Your Profile's tone, style rules and section limits are followed, and generic wording
   such as "passionate", "leverage" or "results-driven" is rewritten. Each bullet remembers which facts it came from.
@@ -182,20 +209,24 @@ and ends in the editor.
   terms it is asked to use are only the tools and skills you have (shown in your record, or ticked by you), each used once
   where it fits. After writing, the resume is checked in code for the signs of writing for a keyword scanner: wording
   copied from the posting or the company's own text, a term used in more than three places, or a way of working named
-  outright. If it finds one the writer is asked once more. The notes say which terms were worked in, and bullets and skills
-  are ordered with what the job asks for first.
+  outright. If it finds one the writer is asked once more. The notes say which terms were worked in, and skills are ordered
+  with what the job asks for first.
 - **Your words, edited, then reviewed.** The writer (GLM-5.3, thinking at high effort) starts each bullet from your own
   wording in the record and changes only what the job needs: the posting's spelling of a term, something you ticked, a
   cut, a reorder. It keeps your names and numbers and never adds a result you did not write ("so that the team..."). A
-  second model (DeepSeek V4.1 Flash) then reviews the draft like a hiring manager would, against ten criteria (faithful to the record,
-  sounds like you, specific, no invented results, answers the job, terms placed naturally, varied rhythm, a summary with a
-  point of view, clean, skills), and the writer makes its edits. Code checks the same things and puts back to your own
-  words any bullet still rewritten beyond recognition. The notes show the review's score. It takes about two minutes and
-  costs about $0.04 to $0.06 a resume.
+  second model (DeepSeek V4.1 Flash) then reviews the draft like a hiring manager would, against eleven criteria (faithful to the record,
+  sounds like you, specific, no invented results, proves what the job is about, answers the job, terms placed naturally,
+  varied rhythm, a summary with a point of view, clean, skills), and the writer makes the edits that matter. Code also flags a
+  job term worn as a label ("On realtime voice agents, ...") and anything you have with a note that no bullet shows. Code
+  checks the same things and puts back to your own words any bullet still rewritten beyond recognition, or one the
+  revision moved a tool into from other work. The notes show the review's score. A draft that runs too long is not thrown
+  away for a format slip; a stuck model call is cut off early and asked once more with less room; a job you stop is never
+  retried.
 - **Your wins, your interests, your conditions.** Achievements from the record (a hackathon win) are always on the
   resume. An interest the job asks about ("into fandom or fanfiction") is yours to tick, with a note for the specifics; it
   becomes one short **Interests** line and is never claimed if you did not tick it. A condition such as relocating can be
-  ticked as **Mention it**, and closes the summary in a short sentence.
+  ticked as **Mention it**, with a note on how you meet it, and closes the summary in a short sentence. Where the job is
+  ("Canada, Remote") is listed as a condition too.
 - **Links that work.** The name and contact line come from your Profile, then your resumes; a link shown as a label
   ("GitHub") keeps its address.
 - **Length is yours to set.** A resume written for a job is not squeezed to one page: its length follows the bullets above,
@@ -524,7 +555,7 @@ request from a job, with the company profile counted as part of the job:
   what is missing, a weighted keyword list including obvious inferred ones, and one click to work a gap or keyword into the
   resume, updating the score. It reuses the requirements already stored with each generated resume.
 
-User stories: *As a job seeker, I can generate a tailored resume for a job in about a minute, see how it matches what the job
+User stories: *As a job seeker, I can generate a tailored resume for a job in a few minutes, see how it matches what the job
 asks for, edit it, and write it again when I have added to my career record.*
 
 Spec: [generate-resume.md](generate-resume.md), [PLAN.md](PLAN.md) (Stage 4), [cold-email.md](cold-email.md).

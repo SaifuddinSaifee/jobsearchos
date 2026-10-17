@@ -23,7 +23,7 @@ import type { PageSettings } from "@/lib/documents/page-settings";
 import type { DocumentKind, DocumentOrigin, RecordChoice, VersionReason } from "@/lib/documents/types";
 import type { LlmCallStatus, RecordedAction, LlmStep } from "@/lib/llm/names";
 import type { IndexStatus } from "@/lib/resume/types";
-import type { GenerationSource, GenerationStatus, GenerationSteps, Requirement } from "@/lib/resume-writer/types";
+import type { GenerationChoices, GenerationSource, GenerationStatus, GenerationSteps, Requirement, ReviewOptions } from "@/lib/resume-writer/types";
 import type {
   CareerRecord,
   ProposalStatus,
@@ -511,6 +511,10 @@ export const resumeGenerations = pgTable(
     recordVersion: integer("record_version"),
     baseVersionId: uuid("base_version_id").references(() => documentVersions.id),
     requirements: jsonb("requirements").$type<Requirement[]>().notNull().default([]),
+    /** The telling of each role and the wording of each disputed number the user chose (or the recommended ones). */
+    choices: jsonb("choices").$type<GenerationChoices>().notNull().default({ framings: {}, wordings: {} }),
+    /** What the review screen offers besides the requirements: the tellings of each role, the numbers the record disagrees on. */
+    reviewOptions: jsonb("review_options").$type<ReviewOptions>().notNull().default({ roles: [], clashes: [] }),
     /** Go straight on to writing, without waiting for the user's review. */
     skipReview: boolean("skip_review").notNull().default(false),
     steps: jsonb("steps").$type<GenerationSteps>().notNull().default({}),

@@ -18,19 +18,61 @@ export const isGenerationWorking = (s: { status: GenerationStatus } | null | und
 export const isGenerationOpen = (s: { status: GenerationStatus } | null | undefined): boolean =>
   !!s && (OPEN_STATUSES as readonly string[]).includes(s.status);
 
-/** The named stages shown while it works, in order. */
-export const GENERATION_STEPS = ["read", "match", "write", "save"] as const;
+/** The named stages shown while it works, in order. Writing is three of them, so the time each takes can be seen. */
+export const GENERATION_STEPS = ["read", "match", "write", "review", "revise", "save"] as const;
 export type GenerationStepName = (typeof GENERATION_STEPS)[number];
 
 export const GENERATION_STEP_LABEL: Record<GenerationStepName, string> = {
   read: "Reading the job and your record",
   match: "Matching what the job asks for",
-  write: "Writing and reviewing the resume",
+  write: "Writing the first draft",
+  review: "Reviewing it as a hiring manager would",
+  revise: "Making the review's edits",
   save: "Saving it to your Library",
 };
 
-export type GenerationStepState = { status: "running" | "done" | "failed" | "skipped"; detail?: string };
+/** One step's state, with when it started and, once it ended, how long it took. */
+export type GenerationStepState = { status: "running" | "done" | "failed" | "skipped"; detail?: string; startedAt?: string; ms?: number };
 export type GenerationSteps = Partial<Record<GenerationStepName, GenerationStepState>>;
+
+/** A step starting now. */
+export const startStep = (now: Date = new Date()): GenerationStepState => ({ status: "running", startedAt: now.toISOString() });
+
+/** A step ending now, with how long it ran. A step that never ran (skipped) has no time. */
+export function endStep(step: GenerationStepState | undefined, status: Exclude<GenerationStepState["status"], "running">, detail?: string, now: Date = new Date()): GenerationStepState {
+  const started = step?.startedAt ? Date.parse(step.startedAt) : NaN;
+  return {
+    status,
+    ...(detail ? { detail } : {}),
+    ...(step?.startedAt ? { startedAt: step.startedAt } : {}),
+    ...(Number.isFinite(started) ? { ms: Math.max(0, now.getTime() - started) } : {}),
+  };
+}
+
+/** The steps with any still running marked as ended: for a generation that failed part way. */
+export const endRunning = (steps: GenerationSteps, status: "failed", now: Date = new Date()): GenerationSteps =>
+  Object.fromEntries(Object.entries(steps).map(([name, s]) => [name, s?.status === "running" ? endStep(s, status, undefined, now) : s]));
+
+/** How long a step took, or has taken so far by `now`; null when it has no time (not started, skipped, or an older run). */
+export function stepMs(step: GenerationStepState | undefined, now: number): number | null {
+  if (!step) return null;
+  if (typeof step.ms === "number") return step.ms;
+  if (step.status !== "running" || !step.startedAt) return null;
+  const started = Date.parse(step.startedAt);
+  return Number.isFinite(started) ? Math.max(0, now - started) : null;
+}
+
+/** The time all the steps took, or have taken so far: the work, without the wait for a worker or for the user's review. */
+export const stepsMs = (steps: GenerationSteps, now: number): number => GENERATION_STEPS.reduce((n, name) => n + (stepMs(steps[name], now) ?? 0), 0);
+
+/** "8s", "1m 05s", "1h 02m". */
+export function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
 
 /** Share of the steps that are no longer running, for a progress bar. */
 export function generationProgress(steps: GenerationSteps): number {
@@ -73,6 +115,20 @@ export const REQUIREMENT_USE_LABEL: Record<RequirementUse, string> = {
 
 /** How much a requirement counts toward the match. Must-haves count most, the company's own words least. */
 export const REQUIREMENT_WEIGHT: Record<RequirementKind, number> = { must: 5, nice: 2, keyword: 2, company: 1 };
+/** What one of the few things a job is really about counts, whatever list it came from. */
+export const CORE_WEIGHT = 8;
+/** What a must-have that is a way of working counts ("Comfortable with ambiguity"): it is shown, never the point of a bullet. */
+export const TRAIT_WEIGHT = 2;
+
+/**
+ * How much a requirement counts, once matching has said what it is: the job's core counts most, a way of working little,
+ * and the rest by the list it came from.
+ */
+export function requirementWeight(r: Pick<Requirement, "kind" | "use" | "core">): number {
+  if (r.core && r.kind !== "company" && r.use !== "logistics") return CORE_WEIGHT;
+  if (r.use === "trait") return Math.min(TRAIT_WEIGHT, REQUIREMENT_WEIGHT[r.kind]);
+  return REQUIREMENT_WEIGHT[r.kind];
+}
 
 /**
  * One thing the job asks for, lined up against the source the resume is written from. `refs` are ids of record items
@@ -91,7 +147,51 @@ export type Requirement = {
   note: string;
   /** What it is. Missing on a generation made before this was recorded: see `requirementUse`. */
   use?: RequirementUse;
+  /** One of the few things the job is really about (full-stack depth for a full-stack job), as matching read it. */
+  core?: boolean;
 };
+
+/**
+ * What the user chose on the review screen, by record id: the telling of each role to write from (`framings`, role id
+ * to framing id) and, for a fact whose wordings give different numbers, the wording to use (`wordings`, fact id to
+ * wording id).
+ */
+export type GenerationChoices = { framings: Record<string, string>; wordings: Record<string, string> };
+export const emptyChoices = (): GenerationChoices => ({ framings: {}, wordings: {} });
+
+/** A role told more than one way in the record (engineering and product, say), with the telling recommended for the job. */
+export type RoleOption = { roleId: string; label: string; framings: { id: string; title: string }[]; recommended: string };
+
+/** One way the record gives a number, with how many of the user's versions of the line say it. */
+export type ClashOption = { wordingId: string; text: string; numbers: string[]; count: number };
+
+/**
+ * A fact whose wordings give different numbers for the same thing ("activation" up 45% in one, 18% in another), with
+ * the wording recommended and why.
+ */
+export type NumberClash = { factId: string; where: string; measure: string; options: ClashOption[]; recommended: string; reason: string };
+
+/** What the review screen offers besides the requirements: the telling of each role, and the numbers the record disagrees on. */
+export type ReviewOptions = { roles: RoleOption[]; clashes: NumberClash[] };
+export const emptyReviewOptions = (): ReviewOptions => ({ roles: [], clashes: [] });
+
+/**
+ * The user's choices kept only where they pick among what was offered: a known role and one of its tellings, a known
+ * clash and one of its wordings. Anything else falls back to what was there before.
+ */
+export function acceptChoices(input: GenerationChoices, options: ReviewOptions, before: GenerationChoices): GenerationChoices {
+  const framings = { ...before.framings };
+  for (const role of options.roles) {
+    const picked = input.framings[role.roleId];
+    if (picked && role.framings.some((f) => f.id === picked)) framings[role.roleId] = picked;
+  }
+  const wordings = { ...before.wordings };
+  for (const clash of options.clashes) {
+    const picked = input.wordings[clash.factId];
+    if (picked && clash.options.some((o) => o.wordingId === picked)) wordings[clash.factId] = picked;
+  }
+  return { framings, wordings };
+}
 
 /**
  * What a requirement is. Before the model has said, the job's technologies are skills, other keywords are fields and
@@ -105,8 +205,8 @@ export function requirementUse(r: Pick<Requirement, "kind" | "use">): Requiremen
 /** What a resume needs to start from the review screen's defaults. */
 export type Qualifiable = Pick<Requirement, "kind" | "verdict" | "userHas" | "use">;
 
-/** Whether a requirement counts toward the match: conditions such as relocation do not. */
-const counted = (r: Pick<Requirement, "use">) => r.use !== "logistics";
+/** Whether a requirement counts toward the match: conditions such as relocation and the company's own values (tone, not something to have) do not. */
+const counted = (r: Pick<Requirement, "use"> & Partial<Pick<Requirement, "kind">>) => r.use !== "logistics" && r.kind !== "company";
 
 /** What the user answered for one requirement on the review screen. */
 export type ReviewAnswer = { id: string; userHas: boolean; note: string };
@@ -120,6 +220,9 @@ export type GenerationItem = {
   source: GenerationSource;
   recordVersion: number | null;
   requirements: Requirement[];
+  /** What the user chose on the review screen, and what it offered. */
+  choices: GenerationChoices;
+  reviewOptions: ReviewOptions;
   skipReview: boolean;
   steps: GenerationSteps;
   notes: string[];
@@ -169,8 +272,8 @@ export function assumeQualified<T extends Qualifiable>(requirements: T[]): T[] {
   });
 }
 
-/** Share of the requirements' weight the source answers: met counts in full, partial for half, and whatever the user says they have in full. 0 to 1. Conditions such as relocation are not counted. */
-export function matchScore(requirements: Pick<Requirement, "weight" | "verdict" | "userHas" | "use">[]): number {
+/** Share of the requirements' weight the source answers: met counts in full, partial for half, and whatever the user says they have in full. 0 to 1. Conditions such as relocation and the company's values are not counted. */
+export function matchScore(requirements: (Pick<Requirement, "weight" | "verdict" | "userHas" | "use"> & Partial<Pick<Requirement, "kind">>)[]): number {
   const list = requirements.filter(counted);
   const total = list.reduce((n, r) => n + r.weight, 0);
   if (total === 0) return 0;

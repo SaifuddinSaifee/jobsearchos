@@ -26,7 +26,6 @@ const answer: WriterAnswer = {
     { role: "e2", bullets: [{ facts: ["f4"], text: "Built reporting tools in SQL for the finance team" }] },
   ],
   projects: [{ project: "p1", bullets: [{ text: "Designed a double-entry ledger with SQL" }] }],
-  skills: [{ category: "Data", items: ["s1"] }],
   certifications: ["c1"],
 };
 
@@ -51,7 +50,11 @@ describe("buildResumeDoc", () => {
     expect(profile.projects[0].name).toBe("Ledger toy");
     expect(profile.education[0].institution).toBe("State University");
     expect(profile.certifications[0].name).toContain("AWS Solutions Architect");
-    expect(profile.skills).toEqual([{ category: "Data", items: ["SQL"] }]);
+    // Written by code from the record, under the candidate's own categories.
+    expect(profile.skills).toEqual([
+      { category: "Databases", items: ["SQL"] },
+      { category: "Design", items: ["Figma"] },
+    ]);
   });
 
   it("remembers the facts each bullet was written from, by block id", () => {

@@ -29,6 +29,7 @@ export const LLM_STEPS = [
   "group-bullets",
   "classify-cover-paragraphs",
   "match-requirements",
+  "read-requirements",
   "write-resume",
   "review-resume",
   "revise-resume",

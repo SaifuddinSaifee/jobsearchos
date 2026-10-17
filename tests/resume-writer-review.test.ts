@@ -5,9 +5,9 @@ vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 import { mergeProvenance } from "@/lib/career/schema";
 import { buildResumeDoc } from "@/lib/resume-writer/build";
-import { bulletItems, checkFaithful, missingMentions, namesIn, numbersIn, revertRewrites } from "@/lib/resume-writer/faithful";
+import { bulletItems, checkFaithful, labelIn, missingMentions, namesIn, numbersIn, revertRewrites, unproven } from "@/lib/resume-writer/faithful";
 import { buildReviewPrompt, makeReviewer, meanScore, readReview, reviewNote, reviewSchema, RUBRIC, type Review, type Reviewer } from "@/lib/resume-writer/review";
-import { answerSchema, bulletText, buildPrompt, planWriting, readWriting, withMention, withoutCovered, type WriterAnswer } from "@/lib/resume-writer/write";
+import { answerSchema, bulletText, buildPrompt, planWriting, readWriting, withMention, type WriterAnswer } from "@/lib/resume-writer/write";
 import { retryStats } from "@/lib/llm/attempts";
 import { buildPatchPrompt, buildRevisePrompt, disagreements, findingTargets, makeWriter, materialEdits, patchSchema, WRITER_EFFORT, type WriterTrace } from "@/lib/resume-writer/writer";
 import { job, record, withMap } from "./resume-writer-helpers";
@@ -44,8 +44,7 @@ const answer = (first: string, over: Partial<WriterAnswer> = {}): WriterAnswer =
     { role: "e1", bullets: [{ facts: ["f1"], text: first }, { facts: ["f2"], text: "Cut build times by 40%" }] },
     { role: "e2", bullets: [{ facts: ["f4"], text: "Wrote internal reporting tools in SQL" }] },
   ],
-  projects: [],
-  skills: [{ category: "Data", items: ["s1"] }],
+  projects: plan.projects.slice(0, 1).map((p) => ({ project: p.alias, bullets: [{ text: p.description }] })),
   certifications: [],
   ...over,
 });
@@ -108,10 +107,11 @@ describe("the plan for the writer", () => {
     expect(user).toContain('MENTION BRIEFLY (write "mention": one short sentence in the candidate\'s words, for example "Open to relocating to San Francisco." It closes the summary)\nWilling to relocate to San Francisco');
     expect(user.slice(user.indexOf("WHAT THE JOB ASKS FOR"), user.indexOf("THE CANDIDATE'S ROLES"))).not.toContain("relocate");
 
-    // Its own field, so the summary cannot crowd it out: required, and put after the summary in code.
+    // Its own field, so the summary cannot crowd it out, put after the summary in code. Left out, it does not throw the
+    // draft away: the code checks find it missing and the revision writes it.
     const schema = answerSchema(p);
-    expect(schema.safeParse(answer(OWN)).success).toBe(false);
-    expect(schema.safeParse(answer(OWN, { mention: "Open to relocating to San Francisco." })).success).toBe(true);
+    expect(schema.safeParse(answer(OWN)).success).toBe(true);
+    expect(missingMentions(readWriting(answer(OWN), p).summary, p.mentions)).toEqual(["Willing to relocate to San Francisco"]);
     expect(readWriting(answer(OWN, { mention: "Open to relocating to San Francisco" }), p).summary).toBe("Product manager who shipped billing to 2,000 merchants. Open to relocating to San Francisco.");
     // Not twice, when the summary already says it.
     const said = answer(OWN, { summary: "Product manager, open to relocating to San Francisco.", mention: "Happy to relocate to San Francisco." });
@@ -148,13 +148,9 @@ describe("the plan for the writer", () => {
     expect(missingMentions("Engineer who ships.", ["You're willing to relocate to San Francisco"])).toEqual(["You're willing to relocate to San Francisco"]);
   });
 
-  it("ends every bullet the same way, and drops a skill a fuller one covers", () => {
+  it("ends every bullet the same way", () => {
     expect(bulletText("- Built the billing service.")).toBe("Built the billing service");
     expect(bulletText("Built it in Node.js")).toBe("Built it in Node.js");
-    expect(withoutCovered([{ category: "Languages", items: ["TypeScript", "TypeScript/JavaScript", "Python"] }, { category: "Cloud", items: ["AWS", "AWS (EC2, S3)"] }])).toEqual([
-      { category: "Languages", items: ["TypeScript/JavaScript", "Python"] },
-      { category: "Cloud", items: ["AWS (EC2, S3)"] },
-    ]);
   });
 
   it("starts each fact from the wording that says the most of what the job asks for", () => {
@@ -300,23 +296,29 @@ describe("makeWriter: write, review, revise", () => {
     expect(out.notes.join(" ")).toContain("One bullet was put back to your own wording");
   });
 
-  it("asks again with less thinking when a call runs out of room, and does not retry a revision for other errors", async () => {
+  it("asks a draft again with less thinking and less room when it runs out, and never asks a revision twice", async () => {
     const cutOff = new Error("Output was cut off (max_tokens); the input may be too long");
     const chat = vi.fn().mockRejectedValueOnce(cutOff).mockResolvedValueOnce(answer(OWN)).mockRejectedValueOnce(cutOff).mockResolvedValueOnce(answer(OWN));
     let trace: WriterTrace | null = null;
     await makeWriter(chat as never, asks, async () => {}, { effort: "max", onTrace: (t) => (trace = t) })(plan, job, reqs);
-    const efforts = chat.mock.calls.map((c) => [(c[2] as { step: string }).step, (c[2] as { reasoningEffort: string }).reasoningEffort]);
-    expect(efforts).toEqual([
-      ["write-resume", "max"],
-      ["write-resume", "high"],
-      ["revise-resume", "max"],
-      ["revise-resume", "high"],
+    const calls = chat.mock.calls.map((c) => [(c[2] as { step: string }).step, (c[2] as { reasoningEffort: string }).reasoningEffort, (c[2] as { maxTokens: number }).maxTokens]);
+    // A stuck revision keeps the reviewed draft: asking again cost as much as the first try and gave nothing.
+    expect(calls).toEqual([
+      ["write-resume", "max", 24_000],
+      ["write-resume", "high", 16_000],
+      ["revise-resume", "max", 16_000],
     ]);
-    expect(trace).toMatchObject({ draftAttempts: 2, revision: "full" });
+    expect(trace).toMatchObject({ draftAttempts: 2, revision: "failed" });
 
     const broken = vi.fn().mockResolvedValueOnce(answer(OWN)).mockRejectedValueOnce(new Error("The model's output was not valid JSON"));
     await makeWriter(broken as never, asks)(plan, job, reqs);
     expect(broken).toHaveBeenCalledTimes(2);
+  });
+
+  it("never asks again after the user stopped the job", async () => {
+    const stopped = vi.fn().mockRejectedValue(new Error("Stopped"));
+    await expect(makeWriter(stopped as never, ready)(plan, job, reqs)).rejects.toThrow(/Stopped/);
+    expect(stopped).toHaveBeenCalledTimes(1);
   });
 
   it("fails with the reason when the draft cannot be written", async () => {
@@ -423,5 +425,44 @@ describe("retryStats", () => {
   it("counts the tries after the first and the time between them", () => {
     expect(retryStats({ starts: [0, 100, 1000], ends: [50, 150, 1200] })).toEqual({ retryCount: 2, retryWaitMs: 900 });
     expect(retryStats({ starts: [], ends: [] })).toEqual({ retryCount: 0, retryWaitMs: 0 });
+  });
+});
+
+describe("claims shown as work", () => {
+  it("finds a job term worn as a label in front of a bullet", () => {
+    expect(labelIn("On realtime voice agents, built real-time captioning that saved transcripts", ["Realtime voice agents"])).toBe("realtime voice agents");
+    expect(labelIn("In 2023, rebuilt onboarding", ["Realtime voice agents"])).toBeNull();
+    expect(labelIn("Built real-time captioning over LiveKit", ["Realtime voice agents"])).toBeNull();
+  });
+
+  it("finds what the user has, with a note, that no bullet shows; a claim with no note may stay in the skills lines", () => {
+    const user = (requirementId: string, text: string, skills: string[] = [], note = "their detail") => ({ alias: requirementId, requirementId, text, note, skills, bare: note === "", weight: 5 });
+    const item = (text: string, users: ReturnType<typeof user>[] = []) => ({ id: "b1", where: "Acme", text, sources: [], users, context: [], at: { kind: "role" as const, entry: 0, bullet: 0 } });
+    const voice = user("r1", "Realtime voice agents");
+    const rails = user("r2", "Rails and TypeScript experience", ["Rails", "TypeScript"]);
+    const search = user("r3", "Agentic search", ["Agentic search"]);
+    const bare = user("r4", "Kafka", ["Kafka"], "");
+    expect(unproven([item("Built real-time captioning", [voice]), item("Rebuilt the billing API in Rails")], [voice, rails, search, bare]).map((u) => u.requirementId)).toEqual(["r3"]);
+  });
+
+  it("scores the job's core and what the candidate says they have", () => {
+    expect(RUBRIC.map((c) => c.id)).toContain("proof");
+  });
+});
+
+describe("keeping a revision within reach", () => {
+  it("does not take a Title Case subtitle for names the bullet must keep", () => {
+    const item = { id: "b1", where: "Gather.io", text: "Built a SaaS that collects documents from external parties", sources: ["SaaS Platform for Document Collection and Workflow Automation"], users: [], context: [], at: { kind: "project" as const, entry: 0, bullet: 0 } };
+    expect(checkFaithful([item], []).filter((f) => f.kind === "lost-names")).toEqual([]);
+    const named = { ...item, sources: ["Built pipelines with Attio, Crisp, Productboard and Userlist"], text: "Built pipelines for the sales team" };
+    expect(checkFaithful([named], []).map((f) => f.kind)).toContain("lost-names");
+  });
+
+  it("tells the reviewer and the reviser the length a bullet must keep", () => {
+    const plan = planWriting(record(), job, withMap());
+    const w = readWriting(answer(OWN), plan);
+    const items = bulletItems(w, plan);
+    expect(buildReviewPrompt(w, items, plan, job, withMap(), []).user).toContain(`may use up to ${plan.bulletChars} characters`);
+    expect(buildRevisePrompt(buildPrompt(plan, job, withMap()), answer(OWN), items, null, []).system).toContain("cut that bullet's least important clause");
   });
 });

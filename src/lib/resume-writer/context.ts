@@ -65,6 +65,9 @@ export function buildRequirements(job: JobInput): Requirement[] {
   const tools = take("keyword", notStated(job.technologies), MAX_PER_KIND.keyword, "skill");
   take("keyword", notStated(job.keywords), MAX_PER_KIND.keyword - tools, "domain");
   take("company", profileLines(job.companyProfile?.principles ?? ""), MAX_PER_KIND.company, "domain");
+  // Where the job is, as a condition the user can ask to mention (with how they meet it), unless one already says it.
+  const place = clean(job.location ?? "");
+  if (place && !out.some((r) => containsPhrase(normalizeText(r.text), normalizeText(place)))) take("must", [`Location: ${place}`], 1, "logistics");
 
   return out.map((r, i) => ({ ...r, id: `r${i + 1}` }));
 }

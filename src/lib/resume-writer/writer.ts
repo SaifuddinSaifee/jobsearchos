@@ -1,20 +1,24 @@
 import { z } from "zod";
 import { normalizeText } from "@/lib/career/normalize";
 import { env } from "@/lib/env";
+import { isStopped } from "@/lib/llm/abort";
 import { chatStructured, type StructuredOptions } from "@/lib/llm/structured";
 import type { GenerationInstructions } from "@/lib/profile/schema";
 import { containsPhrase, type JobInput } from "./context";
-import { bulletItems, checkFaithful, missingMentions, revertRewrites, type BulletItem, type Finding } from "./faithful";
-import { checkStuffing, coverageNotes, keywordCoverage, stuffingNotes } from "./keywords";
-import { modelReviewer, reviewNote, RUBRIC, type Review, type Reviewer } from "./review";
+import { bareClaimFindings, bulletItems, checkFaithful, droppedStrong, mergedResults, missingMentions, revertAddedNames, revertRewrites, unproven, type BulletItem, type Finding } from "./faithful";
+import { checkStuffing, copiedPhrases, coverageNotes, keywordCoverage, stuffingNotes } from "./keywords";
+import { meanScore, modelReviewer, reviewNote, RUBRIC, type Review, type Reviewer } from "./review";
 import type { Requirement } from "./types";
-import { answerSchema, bulletText, buildPrompt, checkWriting, readWriting, type WriterAnswer, type WritingPlan, type WrittenResume } from "./write";
+import { answerSchema, bulletText, buildPrompt, checkWriting, MAX_SUMMARY_CHARS, readWriting, type WriterAnswer, type WritingPlan, type WrittenResume } from "./write";
 
 // Writes the resume in three calls: the writer drafts it from the candidate's own lines, a different model reviews the
 // draft against fixed criteria (review.ts), and the writer revises it with that review and what the code checks found.
 // Code then puts back to the candidate's own words any bullet still rewritten out of all recognition.
 
-export type Writer = (plan: WritingPlan, job: JobInput, requirements: Requirement[], instructions?: GenerationInstructions | null) => Promise<{ written: WrittenResume; notes: string[] }>;
+/** A stage of writing starting or ending, so the page can show where it is and how long each part took. */
+export type WriterStage = (stage: "write" | "review" | "revise", status: "running" | "done" | "failed" | "skipped", detail?: string) => Promise<void> | void;
+
+export type Writer = (plan: WritingPlan, job: JobInput, requirements: Requirement[], instructions?: GenerationInstructions | null, onStage?: WriterStage) => Promise<{ written: WrittenResume; notes: string[] }>;
 
 type Effort = NonNullable<StructuredOptions["reasoningEffort"]>;
 
@@ -29,8 +33,23 @@ export const WRITER_EFFORT: Effort = "high";
  * tokens with a JSON schema, about 1,100 at max effort without one), so the writer asks for its JSON in the prompt.
  */
 const WRITER_JSON = "prompt" as const;
-/** Thinking counts against the output limit, so the writer gets plenty. */
-const WRITER_MAX_TOKENS = 32_000;
+/**
+ * Thinking counts against the output limit. A finished draft is about 1,500 tokens and the drafts that worked thought for
+ * 6,000 to 22,000; one that thinks past this is stuck, and at 32,000 such a draft cost $0.15 for nothing. This keeps the
+ * cost of a stuck draft down while leaving room for every draft that has worked.
+ */
+const WRITER_MAX_TOKENS = 24_000;
+/** A draft tried again after it ran out of room thinks less, and is given less room: asked the same way, it runs out the same way. */
+const RETRY_MAX_TOKENS = 16_000;
+/**
+ * A revision makes a few edits to a finished draft: at high effort it thinks for 2,000 to 4,000 tokens. One that thinks
+ * past this is stuck between edits it cannot all make (a review asking for more detail in bullets already at their
+ * length), and is better stopped early so the reviewed draft is kept: twice 32,000 tokens of thinking took eleven minutes
+ * and ran the writing phase out of time.
+ */
+const REVISE_MAX_TOKENS = 16_000;
+/** What every revision is told about length, so an edit that adds words does not push a bullet past its limit. */
+const KEEP_LENGTH = "Keep every bullet within the lengths under LENGTH: when an edit adds words to a bullet, cut that bullet's least important clause so it still fits.";
 
 /**
  * Waits before the review is tried again after a rate-limit refusal. Together's limits for the review model shift with
@@ -45,18 +64,29 @@ export const lowerEffort = (effort: Effort): Effort => LOWER_EFFORT[effort] ?? e
 const isCutOff = (err: unknown) => /cut off \(max_tokens\)/i.test(err instanceof Error ? err.message : String(err));
 
 /**
- * Asks up to `tries` times while `retry` says the error is worth another try. A reply cut off at the output limit is
- * asked again with one step less effort, since asking the same way runs out of room the same way.
+ * Asks up to `tries` times while `retry` says the error is worth another try, and never after the user stopped the job.
+ * A reply cut off at the output limit is asked again with one step less effort and `retryMaxTokens` of room, since
+ * asking the same way runs out of room the same way.
  */
-async function askWithRetry<T>(effort: Effort, tries: number, retry: (err: unknown) => boolean, ask: (effort: Effort) => Promise<T>): Promise<{ value: T | null; error: unknown; attempts: number }> {
+async function askWithRetry<T>(
+  effort: Effort,
+  maxTokens: number,
+  tries: number,
+  retry: (err: unknown) => boolean,
+  ask: (effort: Effort, maxTokens: number) => Promise<T>,
+  retryMaxTokens = maxTokens,
+): Promise<{ value: T | null; error: unknown; attempts: number }> {
   let error: unknown = null;
   for (let attempt = 1; attempt <= tries; attempt++) {
     try {
-      return { value: await ask(effort), error: null, attempts: attempt };
+      return { value: await ask(effort, maxTokens), error: null, attempts: attempt };
     } catch (err) {
       error = err;
-      if (!retry(err)) return { value: null, error, attempts: attempt };
-      if (isCutOff(err)) effort = lowerEffort(effort);
+      if (isStopped(err) || !retry(err)) return { value: null, error, attempts: attempt };
+      if (isCutOff(err)) {
+        effort = lowerEffort(effort);
+        maxTokens = Math.min(maxTokens, retryMaxTokens);
+      }
     }
   }
   return { value: null, error, attempts: tries };
@@ -70,12 +100,40 @@ export function codeFindings(w: WrittenResume, items: BulletItem[], plan: Writin
   const stuffing = checkStuffing(w, job, requirements, plan.terms);
   return [
     ...checkFaithful(items, plan.terms),
+    ...unproven(items, plan.users).map((u) => ({ bullet: "resume", kind: "unproven" as const, detail: `does not show "${u.text}" in any bullet; prove it as work in the role where it fits` })),
+    ...bareClaimFindings(w, items, plan.users),
+    ...mergedResults(w.summary, plan).map((sentence) => ({ bullet: "summary", kind: "merged" as const, detail: `joins results from different lines in one sentence: "${sentence}"; give one result per sentence` })),
+    ...droppedStrong(w, items),
+    ...tooLong(w, items, plan),
+    ...(plan.projects.length > 0 && w.projects.length === 0 ? [{ bullet: "resume", kind: "left-out" as const, detail: "has no projects; include the ones that answer the job, by their p ids" }] : []),
+    ...repeatedInSummary(w, items).map((run) => ({ bullet: "summary", kind: "repeated" as const, detail: `repeats a bullet word for word: "${run}"; say the result in a clause of your own` })),
     ...(w.interests === "" && plan.interests.length > 0 ? [{ bullet: "resume", kind: "missing-mention" as const, detail: "leaves out the Interests line the candidate asked for" }] : []),
     ...missingMentions(w.summary, plan.mentions).map((m) => ({ bullet: "summary", kind: "missing-mention" as const, detail: `does not mention, as the candidate asked: "${m}"` })),
     ...checkWriting(w).map((phrase) => ({ bullet: "resume", kind: "generic" as const, detail: `uses the generic phrase "${phrase}"` })),
     ...stuffing.copied.map((c) => ({ bullet: "resume", kind: "copied" as const, detail: `copies the posting's wording: "${c}"` })),
     ...stuffing.overused.map((t) => ({ bullet: "resume", kind: "overused" as const, detail: `uses "${t}" in too many places` })),
     ...stuffing.bare.map((t) => ({ bullet: "resume", kind: "named-trait" as const, detail: `names the way of working "${t}" instead of showing it` })),
+  ];
+}
+
+/** Words in a row the summary may share with a bullet: a name and a number ("500K+ daily events at 99.9% uptime"), not a sentence. */
+const REPEAT_RUN = 9;
+
+/** Runs of the summary copied from a bullet: a summary that repeats the page tells the reader nothing new. */
+export function repeatedInSummary(w: WrittenResume, items: BulletItem[]): string[] {
+  return copiedPhrases(w.summary, items.map((i) => i.text), REPEAT_RUN);
+}
+
+/** How far past its limit a bullet may run before it is flagged: a few words, not a clause. */
+const LENGTH_SLACK = 40;
+
+/** Bullets and a summary past their length. Read without a limit, so a long one is shortened by the revision, not thrown away. */
+export function tooLong(w: WrittenResume, items: BulletItem[], plan: WritingPlan): Finding[] {
+  return [
+    ...(w.summary.length > MAX_SUMMARY_CHARS ? [{ bullet: "summary", kind: "too-long" as const, detail: `is ${w.summary.length} characters; keep it under ${MAX_SUMMARY_CHARS} by cutting its least important clause` }] : []),
+    ...items
+      .filter((i) => i.text.length > plan.bulletChars + LENGTH_SLACK)
+      .map((i) => ({ bullet: i.id, kind: "too-long" as const, detail: `is ${i.text.length} characters; keep it under ${plan.bulletChars} by cutting its least important clause` })),
   ];
 }
 
@@ -92,14 +150,14 @@ export function buildRevisePrompt(prompt: { system: string; user: string }, draf
     findings.length ? `FOUND BY CODE CHECKS\n${findings.map((f) => `- ${f.bullet} ${f.detail}`).join("\n")}` : "",
   ];
   return {
-    system: `${prompt.system}\n\nYou are now revising your draft. Make each edit in the review and fix each finding, unless doing so would break a rule above. Change nothing else: keep every other bullet, its wording and its fact ids exactly as they are. Answer with the whole resume in the same format.`,
+    system: `${prompt.system}\n\nYou are now revising your draft. Make each edit in the review and fix each finding, unless doing so would break a rule above. ${KEEP_LENGTH} Change nothing else: keep every other bullet, its wording and its fact ids exactly as they are. Answer with the whole resume in the same format.`,
     user: sections.filter(Boolean).join("\n\n"),
   };
 }
 
 /** How the writer revises after the review. */
 export type RevisionMode =
-  /** Revise the whole resume whenever the review asks for any edit or a code check found anything (the default). */
+  /** Revise the whole resume when the review asks for a material edit or a code check found anything (the default). */
   | "always"
   /** Skip the revision when no code check found anything and the review asks for no material edit; else rewrite only the flagged parts. */
   | "targeted";
@@ -128,7 +186,7 @@ export type WriterTrace = {
   /** The review's edits that count as material (see `materialEdits`). */
   materialEdits: number;
   revision: "full" | "targeted" | "skipped" | "failed";
-  /** The parts rewritten by a targeted revision: bullet ids, "summary", "skills", "interests". */
+  /** The parts rewritten by a targeted revision: bullet ids, "summary", "interests". */
   targets: string[];
   /** Where the review and the code checks disagree (see `disagreements`). */
   disagreements: string[];
@@ -137,8 +195,8 @@ export type WriterTrace = {
   reverted: number;
 };
 
-/** Criteria where any edit is material: the ones about what the resume claims, not how it reads. */
-const HARD_CRITERIA = new Set(["faithful", "outcomes", "specific"]);
+/** Criteria where any edit is material: the ones about what the resume claims and proves, not how it reads. */
+const HARD_CRITERIA = new Set(["faithful", "outcomes", "specific", "proof"]);
 
 /** The review's edits that matter: any edit on what the resume claims, and any edit on a criterion scored 3 or less. */
 export function materialEdits(review: Review): Review["edits"] {
@@ -160,7 +218,7 @@ export function findingTargets(f: Finding, w: WrittenResume, items: BulletItem[]
   return [...(has(w.summary) ? ["summary"] : []), ...items.filter((i) => has(i.text)).map((i) => i.id)];
 }
 
-const FAITHFUL_KINDS = new Set<Finding["kind"]>(["new-number", "added-outcome", "lost-names", "rewritten"]);
+const FAITHFUL_KINDS = new Set<Finding["kind"]>(["new-number", "added-outcome", "lost-names", "added-names", "rewritten"]);
 
 /**
  * Where the review and the code checks disagree: the review calls the draft ready while the checks found something, it
@@ -187,10 +245,9 @@ export function disagreements(review: Review, findings: Finding[], targetsOf: (f
 export function patchSchema(plan: WritingPlan, bulletIds: string[]) {
   const full = answerSchema(plan).shape;
   return z.object({
-    bullets: z.array(z.object({ id: z.enum(bulletIds.length ? (bulletIds as [string, ...string[]]) : ["none"]), text: z.string().min(10).max(plan.bulletChars + 60) })).optional(),
+    bullets: z.array(z.object({ id: z.enum(bulletIds.length ? (bulletIds as [string, ...string[]]) : ["none"]), text: z.string().min(10) })).optional(),
     summary: full.summary.optional(),
     mention: full.mention,
-    skills: full.skills.optional(),
     interests: full.interests,
   });
 }
@@ -208,7 +265,7 @@ export function buildPatchPrompt(prompt: { system: string; user: string }, draft
     findings.length ? `FOUND BY CODE CHECKS\n${findings.map((f) => `- ${f.bullet} ${f.detail}`).join("\n")}` : "",
   ];
   return {
-    system: `${prompt.system}\n\nYou are now revising only the parts of your draft listed under TO REVISE. Make each edit in the review and fix each finding there, unless doing so would break a rule above. Answer with only those parts: under "bullets", each listed bullet by its id with its new text; "summary" (with "mention" when there is one), "skills" or "interests" only when listed. Everything else stays as it is.`,
+    system: `${prompt.system}\n\nYou are now revising only the parts of your draft listed under TO REVISE. Make each edit in the review and fix each finding there, unless doing so would break a rule above. ${KEEP_LENGTH} Answer with only those parts: under "bullets", each listed bullet by its id with its new text; "summary" (with "mention" when there is one) or "interests" only when listed. Everything else stays as it is.`,
     user: sections.filter(Boolean).join("\n\n"),
   };
 }
@@ -219,7 +276,6 @@ export function applyPatch(draft: WriterAnswer, items: BulletItem[], patch: Writ
     ...draft,
     ...(targets.has("summary") && patch.summary ? { summary: patch.summary } : {}),
     ...(targets.has("summary") && patch.mention ? { mention: patch.mention } : {}),
-    ...(targets.has("skills") && patch.skills?.length ? { skills: patch.skills } : {}),
     ...(targets.has("interests") && patch.interests !== undefined ? { interests: patch.interests } : {}),
   };
   // Read from the same roles as the draft, so every bullet sits where its item says.
@@ -242,17 +298,26 @@ export function applyPatch(draft: WriterAnswer, items: BulletItem[], patch: Writ
  * and the revision for evaluation, and is left out by the app.
  */
 export function makeWriter(chat: typeof chatStructured = chatStructured, reviewer: Reviewer = modelReviewer, wait: (ms: number) => Promise<void> = sleep, config: Partial<WriterConfig> = {}): Writer {
-  return async (plan, job, requirements, instructions) => {
+  return async (plan, job, requirements, instructions, onStage = () => {}) => {
     const schema = answerSchema(plan);
     const prompt = buildPrompt(plan, job, requirements, instructions);
     const opts = { model: config.model ?? env().WRITER_MODEL, maxTokens: WRITER_MAX_TOKENS, reasoningEffort: config.effort ?? WRITER_EFFORT, jsonMode: WRITER_JSON } satisfies Partial<StructuredOptions>;
     const revision = config.revision ?? "always";
 
-    // Any failure is worth a second try; one cut off at the output limit is tried with less thinking.
-    const drafting = await askWithRetry(opts.reasoningEffort, 2, () => true, (reasoningEffort) => chat(schema, prompt, { ...opts, reasoningEffort, step: "write-resume" }));
+    // Any failure is worth a second try; one cut off at the output limit is tried with less thinking and less room.
+    const drafting = await askWithRetry(
+      opts.reasoningEffort,
+      WRITER_MAX_TOKENS,
+      2,
+      () => true,
+      (reasoningEffort, maxTokens) => chat(schema, prompt, { ...opts, reasoningEffort, maxTokens, step: "write-resume" }),
+      RETRY_MAX_TOKENS,
+    );
     const draft = drafting.value;
     const draftAttempts = drafting.attempts;
     if (!draft) throw new Error(`Could not write the resume with the model: ${drafting.error instanceof Error ? drafting.error.message : "unknown error"}`);
+    await onStage("write", "done", draftAttempts > 1 ? "on the second try" : undefined);
+    await onStage("review", "running");
 
     const notes: string[] = [];
     const drafted = readWriting(draft, plan);
@@ -288,6 +353,8 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
       }
     }
     if (!review) notes.push("The review could not run, so this is the first draft with only the code checks applied.");
+    const mean = review ? meanScore(review) : null;
+    await onStage("review", review ? "done" : "failed", review ? (mean === null ? undefined : `${mean.toFixed(1)} of 5`) : "the draft goes on with the code checks");
 
     const targetsOf = (f: Finding) => findingTargets(f, drafted, items);
     const material = review ? materialEdits(review) : [];
@@ -297,10 +364,11 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
     if (revision === "targeted") {
       targets = [...new Set([...material.map((e) => e.target), ...findings.flatMap(targetsOf)])];
       if (targets.length > 0) {
+        await onStage("revise", "running");
         const wanted = new Set(targets);
         const bulletIds = items.map((i) => i.id).filter((id) => wanted.has(id));
-        const patching = await askWithRetry(opts.reasoningEffort, 2, isCutOff, (reasoningEffort) =>
-          chat(patchSchema(plan, bulletIds), buildPatchPrompt(prompt, draft, items, material.filter((e) => wanted.has(e.target)), findings, targets), { ...opts, reasoningEffort, step: "revise-resume" }),
+        const patching = await askWithRetry(opts.reasoningEffort, REVISE_MAX_TOKENS, 1, () => false, (reasoningEffort, maxTokens) =>
+          chat(patchSchema(plan, bulletIds), buildPatchPrompt(prompt, draft, items, material.filter((e) => wanted.has(e.target)), findings, targets), { ...opts, maxTokens, reasoningEffort, step: "revise-resume" }),
         );
         if (patching.value) {
           written = applyPatch(draft, items, patching.value, plan, wanted);
@@ -311,9 +379,14 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
           outcome = "failed";
         }
       }
-    } else if (review ? review.verdict === "revise" || review.edits.length > 0 : findings.length > 0) {
-      // Only a revision cut off at the output limit is tried again (with less thinking); any other failure keeps the draft.
-      const revising = await askWithRetry(opts.reasoningEffort, 2, isCutOff, (reasoningEffort) => chat(schema, buildRevisePrompt(prompt, draft, items, review, findings), { ...opts, reasoningEffort, step: "revise-resume" }));
+    } else if (material.length > 0 || findings.length > 0) {
+      await onStage("revise", "running");
+      // Only when the review asks for something that matters or a code check found something: an edit of taste alone is
+      // not worth a second pass over the whole page. Asked once: a revision that fails, even one cut off at its limit,
+      // keeps the reviewed draft (twice 32,000 tokens of thinking once cost $0.31 and gave nothing).
+      const revising = await askWithRetry(opts.reasoningEffort, REVISE_MAX_TOKENS, 1, () => false, (reasoningEffort, maxTokens) =>
+        chat(schema, buildRevisePrompt(prompt, draft, items, review, findings), { ...opts, maxTokens, reasoningEffort, step: "revise-resume" }),
+      );
       if (revising.value) {
         written = readWriting(revising.value, plan);
         outcome = "full";
@@ -324,9 +397,16 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
       }
     }
     const revised = outcome === "full" || outcome === "targeted";
+    const edits = material.length + findings.length;
+    await onStage("revise", revised ? "done" : outcome === "failed" ? "failed" : "skipped", revised ? `${edits} ${edits === 1 ? "change" : "changes"} asked for` : outcome === "failed" ? "kept the reviewed draft" : "nothing needed");
     if (review) notes.unshift(reviewNote(review, revised));
 
-    const safe = revertRewrites(written, plan);
+    // A tool or job term the revision moved into a line about other work goes back out, before anything else is checked.
+    const named = revertAddedNames(written, drafted, plan);
+    if (named.reverted.length > 0) {
+      notes.push(`${named.reverted.length === 1 ? "One bullet was" : `${named.reverted.length} bullets were`} put back as drafted, because the revision named a tool or term ${named.reverted.length === 1 ? "its" : "their"} own lines do not.`);
+    }
+    const safe = revertRewrites(named.written, plan);
     if (safe.reverted.length > 0) {
       notes.push(`${safe.reverted.length === 1 ? "One bullet was" : `${safe.reverted.length} bullets were`} put back to your own wording, because the model rewrote ${safe.reverted.length === 1 ? "it" : "them"} beyond recognition.`);
     }
@@ -342,7 +422,7 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
       targets,
       disagreements: review ? disagreements(review, findings, targetsOf) : [],
       finalFindings: codeFindings(safe.written, bulletItems(safe.written, plan), plan, job, requirements),
-      reverted: safe.reverted.length,
+      reverted: safe.reverted.length + named.reverted.length,
     });
     const generic = checkWriting(safe.written);
     const unsaid = missingMentions(safe.written.summary, plan.mentions);

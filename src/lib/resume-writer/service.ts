@@ -6,8 +6,10 @@ import { changeStatus } from "@/lib/jobs/tracker";
 import { getLatest, saveVersion } from "@/lib/profile/service";
 import { reviewsRequirements } from "@/lib/profile/schema";
 import {
+  acceptChoices,
   OPEN_STATUSES,
   type ActiveGeneration,
+  type GenerationChoices,
   type GenerationItem,
   type JobDocument,
   type JobResumeState,
@@ -42,6 +44,8 @@ export const toItem = (r: ResumeGenerationRow): GenerationItem => ({
   source: r.source,
   recordVersion: r.recordVersion,
   requirements: r.requirements,
+  choices: r.choices,
+  reviewOptions: r.reviewOptions,
   skipReview: r.skipReview,
   steps: r.steps,
   notes: r.notes,
@@ -142,25 +146,28 @@ export async function startGeneration(
 }
 
 /**
- * The user's answers on the review screen: what they have, with an optional note, and whether to skip this screen from
- * now on. Moves the generation on to writing and the job to Preparing (returning what Undo needs).
+ * The user's answers on the review screen: what they have, with an optional note, the telling of each role and the
+ * number to use where the record disagrees, and whether to skip this screen from now on. Moves the generation on to
+ * writing and the job to Preparing (returning what Undo needs).
  */
 export async function saveReview(
   id: string,
-  input: { answers: ReviewAnswer[]; skipReviewNextTime?: boolean },
+  input: { answers: ReviewAnswer[]; choices?: GenerationChoices; skipReviewNextTime?: boolean },
   db: Db = defaultDb(),
 ): Promise<{ generation: ResumeGenerationRow; previous: PreviousState[] }> {
   const row = await getGenerationRow(id, db);
   if (!row || row.status !== "review") throw new GenerationError("This resume is not waiting for review.", "state");
   const answers = new Map(input.answers.map((a) => [a.id, a]));
+  // A note is kept with what the user has, and on what the record already shows (detail that makes it believable).
   const requirements = row.requirements.map((r) => {
     const a = answers.get(r.id);
-    return a ? { ...r, userHas: a.userHas, note: a.userHas ? a.note.trim().slice(0, MAX_NOTE_CHARS) : "" } : r;
+    return a ? { ...r, userHas: a.userHas, note: a.userHas || r.verdict === "met" ? a.note.trim().slice(0, MAX_NOTE_CHARS) : "" } : r;
   });
+  const choices = input.choices ? acceptChoices(input.choices, row.reviewOptions, row.choices) : row.choices;
 
   const [generation] = await db
     .update(resumeGenerations)
-    .set({ status: "writing_queued", requirements, updatedAt: new Date() })
+    .set({ status: "writing_queued", requirements, choices, updatedAt: new Date() })
     .where(and(eq(resumeGenerations.id, id), eq(resumeGenerations.status, "review")))
     .returning();
   if (!generation) throw new GenerationError("This resume is not waiting for review.", "state");

@@ -381,3 +381,188 @@ First results (2026-10-15, one run per config and case, so small differences are
   fields and ways of working are still checked.
 - **Verified** on the five cases with the new defaults (`--configs C`, step 1's matches): 5 of 5 written, $0.20 in all
   ($0.03 to $0.05 each), 59 to 109 seconds each, both mentions written, no failed calls.
+
+### Sixth pass: the right material, proven claims, and the user's choices
+
+A real resume for "Product Engineer (AI / Full-Stack)" (trace `2f99b5649d99128f4aaa9bf1f2a40e4b`, Oct 15) scored 66.5 of
+100 with an outside reviewer, against 77.5 for a resume another agent wrote from the same career record. The gap was
+mostly decided before the writer ran: it was given the wrong material. The plan and the reasoning are in
+[generate-better-resume.md](generate-better-resume.md).
+
+**Choosing the material (code):**
+- **The angle of a title comes from its last word** (`guessAngle`, `src/lib/career/match.ts`): "Product Engineer" is an
+  engineer, "Product Designer" a designer. Before, "product" matched first, so every role was written from its product
+  telling ("Product Manager"), and the writer never saw the engineering wordings that carried the strongest results
+  (45% activation, 80% fewer manual workflows, 3x traffic). This also fixes the angle guessed when a document is imported.
+- **The telling of a role is chosen on evidence too** (`pickFraming`, `recommendFraming`): the job's angle, the closest
+  title, and the share of the best telling's evidence (the weight of the requirements its facts answer plus the proof in
+  its wordings).
+- **Proof counts** (`proofStrength`, `proof.ts`): numbers, measured changes, result verbs and named tools. Facts are
+  ranked by requirement weight plus proof, a role's two strongest facts are always offered, and of a fact's wordings the
+  one with the result comes first.
+- **The job's core** (`core` on a requirement): the match call names the 3 to 5 requirements the job is about. They
+  weigh 8, a must-have that is a way of working weighs 2 (`requirementWeight`).
+- **The writer's bullet order is kept.** Code used to sort a role's bullets by summed weight, which put a bullet citing
+  two facts above the one that answered the job's first ask.
+- **A claim names every technology it says** (`skillTerms`): "Rails and TypeScript experience" gives both, where only
+  the longest name was kept and Rails was lost.
+- **The company's values are never claims**: they set the tone and have no "I have this" toggle, and no longer count
+  toward the match.
+- The review gets 24,000 output tokens (it used 13,000 of 16,000 once).
+
+**Writing and review (prompts):**
+- **Prove every claim**: each thing the user says they have is written as work, in the role it fits, with that role's
+  real product and tools and the user's note. A claim is never only in the skills lines, and never a label ("On realtime
+  voice agents, built..."). A bullet that proves a claim may use the words of its role's other lines (`allowedWords`).
+  Code flags a label (`labelIn`) and a claim no bullet shows (`unproven`).
+- Result first where the candidate gives one; words that add tone and no evidence are cut; the first bullet of each
+  recent role proves a `[Core]` requirement; project bullets do not repeat the technologies line.
+- Summary of up to three sentences (title, strongest result, how the candidate works), up to 520 characters; bullets up
+  to 320 characters.
+- The rubric gains **proof** ("Proves what the job is about"), counted as material; the summary, voice and rhythm
+  criteria were brought in line.
+
+**The review screen (`choices`, `review_options` on `resume_generations`, migration `0024_review_choices`):**
+- **Write each role as**: each recent role told more than one way, with the recommended telling chosen.
+- **Your record says this more than one way** (`clashes.ts`): a fact whose wordings give different measured changes for
+  the same thing (a share or a multiple; counts are left out, and a line that only adds a number is not a disagreement).
+  The recommended one is what most of the fact's wordings say; on a tie, the chosen telling's. The picked wording leads
+  and the ones with the other number are left out. On the real record this finds exactly two: activation 45% against
+  18%, and API response time 66.7% against 150%.
+- A chosen telling is kept for the same job; a settled number is kept for every job (`reviewChoices`, `acceptChoices`).
+- **Core** items carry a badge and an open note field; **Add detail** puts a note on what the record already shows, and
+  a note there makes it a claim the writer proves.
+- **Where the job is** becomes a condition the user can ask to mention, with a note on how they meet it.
+
+The resume written for the same job after this pass goes to the same outside reviewer; the result will be added here.
+
+### Seventh pass: claims with and without detail, a fuller resume, and a writer that stops running out of room
+
+**After Resume 4 (Oct 15).** The outside reviewer scored the next resume 69.0. Tracing it showed most of its new problems
+came from the review and from rules added in the sixth pass:
+- **A claim with no note** (ticked, nothing written) is `bare` on `PlanUser`. It goes to the skills section, or inside a
+  bullet whose own lines show that work. It never gets a bullet of its own or a place in the summary, and never takes a
+  fact's place (`bareClaimFindings`). `unproven` applies only to claims with a note. The review screen says so under a
+  ticked item with no note.
+- **The reviewer may not invent content.** Replacement wording comes from the bullet's own lines or the note of a claim
+  it cites. A revised bullet that gains a tool or job term its sources do not have goes back to the draft
+  (`addedNames`, `revertAddedNames`): "Claude Code" had been moved into a line about the product's own logging layer.
+  The reviewer also sees the posting's responsibilities, the length limits, and that the project's technologies line is
+  printed above its bullets.
+- **The summary's lead result is chosen in code** (`summaryProof`): of the facts that state a measured result
+  (`STRONG_PROOF`), the one that best answers the core, narrowed to its strongest clause (`strongestClause`), since a
+  line joined by a semicolon holds two results. A summary sentence whose numbers come from two lines is flagged
+  (`mergedResults`). A role that leaves out its strongest result while a bullet proves less is flagged
+  (`droppedStrong`).
+- **Intentionally fuller**, at the user's request: bullets that answer the core may run to 440 characters, the others
+  about 260; the summary is up to four sentences (720 characters); the posting's own short phrases are used for the
+  candidate's matching work. A project bullet loses a bracketed list of the project's own technologies
+  (`withoutRepeatedStack`).
+
+**Cost and failures (Oct 16).** In two days, 5 of 13 GLM-5.3 calls failed: three ran out of room thinking, two were
+thrown away over format. They cost $0.60, more than the $0.55 of the calls that worked. A draft's thinking had grown with
+each rule added: about 6,000 tokens, then 10,800, 16,900, 21,900, and finally past the 32,000 limit (trace
+`969e0185f614dce7857a11cb58894c57`, $0.15 and no resume). The answer itself is about 1,500 tokens. Splitting the draft
+into one call per section was considered and set aside for now: the page would lose its single view (repeats across
+roles, claims placed in the weaker role). Instead:
+- **The skills section is written by code** (`skills.ts`, `composeSkills`), so the writer no longer chooses and groups
+  30 to 40 skills out of 80. The candidate's own categories are tidied:
+  - a skill split mid-bracket ("LLM APIs (OpenAI") is left out;
+  - a repeat, or a skill a longer one already says ("AWS" next to "AWS (EC2, S3, Lambda)"), is listed once;
+  - "Frameworks" joins "Frameworks & Libraries";
+  - a catch-all ("Skills", "Technologies") gives its skills to the categories they match, and keeps the rest, last;
+  - a small category next to bigger ones keeps only the named tools the job asks for (so "Product & Media" is gone).
+
+  Each line puts the job's skills first, then the candidate's own order, up to about 36 in all. Claims go next to the
+  skills they are like. A product area ("Video streaming") is never a skill (`isNamed`). The review scores the section
+  but cannot edit it.
+- **The writer's rules are half as long**:
+  - the system prompt went from about 9,500 to 4,500 characters;
+  - overlapping rules were merged;
+  - what code decides or checks is said once or not at all.
+
+  The substance is kept: edit the candidate's words, result first, prove claims, the posting's language, a full
+  summary.
+- **A format slip no longer throws a draft away.** The answer schema is lenient:
+  - ids are plain strings, and `readWriting` ignores ids that were never offered;
+  - a bullet tied to nothing is dropped;
+  - lists are cut to size;
+  - a missing mention or list is not an error.
+
+  A bullet or summary past its length is flagged (`tooLong`) for the revision to shorten.
+- **A stuck call costs less, and is never repeated as it was:**
+  - the draft gets 24,000 tokens, which covers every draft that has worked;
+  - one that runs out is asked again at lower effort with 16,000;
+  - a revision is asked once, and a failed one keeps the reviewed draft;
+  - the revision runs only when the review asks for a material edit or a code check found something.
+- **A stopped job is never retried**, and a stream ended by a stop reads "Stopped" in the trace, no longer "not valid
+  JSON" (`chat.ts`).
+
+On the real record the prompt is now about 4,500 characters of rules plus 19,800 of material. Of the material, 9,200 is
+roles, 3,700 projects and 2,300 requirements. The skills section reads:
+- **AI & Automation:** AI Agents, Claude Code, Codex, MCP and more
+- **Frameworks & Libraries:** React.js, Rails, Next.js and more
+- **Development Practices:** API Development, Agentic Coding and more
+- **Programming Languages:** TypeScript/JavaScript, Python, SQL and more
+- **Cloud & DevOps:** Terraform, Docker, Kubernetes and more
+- **Technologies:** Slack, Mixpanel, LogRocket and more
+
+The next regeneration of the Great Question job checks the targets:
+- a draft's thinking under 15,000 tokens;
+- a run under $0.10 and 3 minutes;
+- no format failures.
+
+If thinking stays above about 20,000, the next steps are a draft at medium effort, then one call per role.
+
+**After the first run on this pass (Oct 16, trace `e75ef1e21673b31134088b8af2cf23a1`).**
+
+| | Before | This run |
+|---|---|---|
+| Draft thinking | 20,000 | 12,600 tokens, 126 s, $0.069 (target met) |
+| Format failures | | none |
+| Review | | cut off at 24,000 tokens, its first failure; the revision ran on the code findings alone |
+| Writing phase | about $0.18 | about $0.17, 5.3 minutes |
+| Matching | | 98 s, 15,000 tokens of thinking |
+
+What the run showed, and what changed:
+- **The reviewer saw only two source lines per bullet.** For a project that is the description and one wording, so
+  it took true lines ("customer validation plan", "50+ edge-case test suite") for invented. It said the lines were
+  truncated, and thought itself out of room reconciling them. It now sees every line (`renderDraft`).
+- **A review cut off is no longer lost.** It has 32,000 tokens, still at most $0.04 on DeepSeek. A reply cut at the
+  limit keeps its scores and every edit it finished (`salvage` on `chatStructured`, `closeCutJson`, `salvageReview`).
+  On this run's review that keeps all 11 scores and the two finished edits. GLM-5.3 as the reviewer was considered and
+  set aside: it would review its own writing, cost about 4 times as much, run 2 to 3 times slower, and need its JSON
+  asked for in the prompt.
+- **The 3x traffic and 150% conversion result was left out.** A bullet chosen to carry "agentic search" took its
+  place. Each role's strongest measured results, as many as it has bullets for (two at most), are now marked `[keep]`
+  in the prompt (`PlanFact.keep`). `droppedStrong` checks each of them and aims at the weakest bullet that does not
+  prove a claim with a note.
+- **The summary copied bullet 1.** It was given the whole line as its proof. It now gets only the result clause
+  (`resultClause`: "Increased user activation by 45% by owning the customer-facing onboarding redesign") and is told to
+  say it in a clause of its own. A summary that shares nine or more words in a row with a bullet is flagged
+  (`repeatedInSummary`). The 720-character limit is in the prompt, where it was only checked before.
+- **Job terms kept their capitals mid-sentence** ("the Video streaming from desktop feature"). A term for an area of
+  work is written in lowercase inside a sentence (`inSentenceCase`); names and acronyms keep theirs.
+- **The revision was asked to prove "5+ years"** in a bullet. Claims about years are no longer `unproven` findings;
+  the dates show them.
+- **Matching runs in parallel** (`makeMatcher`):
+  - one call per 6 open requirements, all shown the same record items as before;
+  - alongside them, one call on the requirements alone (`read-requirements`) for what each is and which are the core.
+  - Matching takes as long as the slowest call. A failed reading leaves the requirements as the posting gave them, with
+    no core; a failed match still fails the match.
+
+**A regression the lenient schema caused (Oct 16, trace `4ef61d5a6d04ece2f9fd8fb40250932d`).**
+
+The run itself went well:
+- matching took 18 s, in five calls at the same time, against 98 s before;
+- the whole run took 4.3 minutes and $0.14, with no failures.
+
+But the resume had no projects and no certifications. The writer had chosen three of each, then named them ("Job Search
+OS", "AWS Certified AI Practitioner") instead of giving their ids. The strict schema used to refuse that. The lenient
+one let it through, and `readWriting`, which looked them up by id only, dropped every one without a word. Now:
+- a project, certification or role is found by its id, or else by its name (`offered`);
+- a partial match needs the whole name, or two of its words;
+- the schema lists the ids again for projects and certifications;
+- a resume with no projects, when the record offers some, is flagged (`left-out`), so the revision puts them back.
+
+Replayed through the fixed code, that run's answer gives all three projects and all three certifications.

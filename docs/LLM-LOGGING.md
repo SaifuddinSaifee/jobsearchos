@@ -35,10 +35,10 @@ All chat calls go through one function, `chatCompletion` in [src/lib/llm/chat.ts
 1. The call runs inside a named **step** span (`traceStep`).
 2. It goes out through the `openai` SDK pointed at Together ([openai.ts](../src/lib/llm/openai.ts)), which is instrumented by OpenInference. That instrumentation makes the `OpenAI Chat Completions` span with the prompt, reply, settings and token counts. Model listing for the Settings page stays on the Together SDK, because Together returns a bare array there.
 3. The reply is streamed and joined. The stream ends with a usage-only chunk (`stream_options.include_usage`), which gives prompt, completion, cached and reasoning tokens.
-4. Validation happens **inside** the call (the `read` callback of `chatStructured`). A reply that cost tokens but is cut off, not JSON or off schema is therefore recorded as a failed call, with its tokens.
+4. Validation happens **inside** the call (the `read` callback of `chatStructured`). A reply that cost tokens but is cut off, not JSON or off schema is therefore recorded as a failed call, with its tokens. The one exception is a caller that passes `salvage`: a reply cut off at the limit is closed after its last complete value (`closeCutJson`), and if the caller can use that part and it passes the schema, the call is recorded as `ok` with finish reason `length`. Only the resume review does this (its scores and finished edits stand alone).
 5. In a `finally`, `recordLlmCall` ([usage.ts](../src/lib/llm/usage.ts)) writes the row. It is fire and forget: it never throws and the model call never waits for it, so a slow or down database cannot break or stall a call. A lost record is logged as `[llm] usage record failed`.
 
-Outcome is one of `ok`, `error`, or `stopped` (the user skipped a background job and its request was cancelled; this is not counted as a failure).
+Outcome is one of `ok`, `error`, or `stopped` (the user skipped a background job and its request was cancelled; this is not counted as a failure). A stream that ends quietly because of the stop throws `Stopped` before its reply is read, so the trace says the call was stopped rather than that its JSON was broken.
 
 ### Context
 
@@ -60,7 +60,7 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | `find-contacts` | Queue: `processSearch` | `extract-posting-people`, `find-people-web`, `rank-contacts` |
 | `index-resume` | Queue: `processIndex` | `parse-resume` (only for an unstructured upload) |
 | `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |
-| `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`), `write-resume` (the draft, `WRITER_MODEL` at high effort, retried once if unreadable, with one step less effort if cut off), `review-resume` (`REVIEW_MODEL`, retried after rate limits), `revise-resume` (`WRITER_MODEL`, when the review or code checks ask for edits; retried with less effort if cut off) |
+| `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`: one call per 6 open requirements, all at the same time) and `read-requirements` (alongside them: what each requirement is and which are the job's core), `write-resume` (the draft, `WRITER_MODEL` at high effort, 24,000 tokens, retried once if unreadable, with one step less effort and 16,000 tokens if cut off), `review-resume` (`REVIEW_MODEL`, 32,000 tokens, retried after rate limits; a cut-off review keeps its finished part), `revise-resume` (`WRITER_MODEL`, when the review asks for a material edit or a code check found something; asked once). A stopped job is never retried |
 | `upload-resume` | `POST /api/resume/parse` | `parse-resume` |
 | `fill-job-details` | Server action | `extract-additional-details` |
 | `research-company` | Server action | `research-company` |

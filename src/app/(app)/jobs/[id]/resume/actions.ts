@@ -25,6 +25,8 @@ const Id = z.uuid();
 const Answers = z
   .array(z.object({ id: z.string().regex(/^r\d{1,3}$/), userHas: z.boolean(), note: z.string().max(500) }))
   .max(100);
+const RecordIds = z.record(z.string().max(64), z.string().max(64));
+const Choices = z.object({ framings: RecordIds, wordings: RecordIds }).optional();
 
 /**
  * Asks for a resume for a job (or for it to be written again, into the same resume). Returns what Undo needs when the
@@ -38,10 +40,17 @@ export async function startGenerationAction(jobId: string, regenerate = false) {
   });
 }
 
-/** The user's answers on the review screen. Moves on to writing, and the job to Preparing (returning what Undo needs). */
-export async function saveReviewAction(generationId: string, answers: unknown, skipReviewNextTime = false) {
+/**
+ * The user's answers on the review screen, with the telling of each role and the numbers they picked. Moves on to
+ * writing, and the job to Preparing (returning what Undo needs).
+ */
+export async function saveReviewAction(generationId: string, answers: unknown, skipReviewNextTime = false, choices?: unknown) {
   return run(async () => {
-    const { previous } = await saveReview(Id.parse(generationId), { answers: Answers.parse(answers), skipReviewNextTime: z.boolean().parse(skipReviewNextTime) });
+    const { previous } = await saveReview(Id.parse(generationId), {
+      answers: Answers.parse(answers),
+      choices: Choices.parse(choices),
+      skipReviewNextTime: z.boolean().parse(skipReviewNextTime),
+    });
     kickWorker();
     return { previous };
   });

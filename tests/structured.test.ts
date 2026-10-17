@@ -7,7 +7,7 @@ const record = vi.fn();
 vi.mock("@/lib/llm/usage", () => ({ recordLlmCall: record, flushLlmCalls: async () => {} }));
 
 process.env.DATABASE_URL ??= "postgres://unused";
-const { chatStructured } = await import("@/lib/llm/structured");
+const { chatStructured, closeCutJson } = await import("@/lib/llm/structured");
 const { withAbortSignal } = await import("@/lib/llm/abort");
 const { withLlmContext } = await import("@/lib/llm/context");
 
@@ -30,6 +30,15 @@ beforeEach(() => {
   record.mockReset();
 });
 
+describe("closeCutJson", () => {
+  it("closes JSON cut part way after its last complete value", () => {
+    expect(closeCutJson('{"a":[{"x":1},{"x":2')).toEqual({ a: [{ x: 1 }] });
+    expect(closeCutJson('{"a":[{"x":"}{]"},{"x":"half')).toEqual({ a: [{ x: "}{]" }] });
+    expect(closeCutJson('{"s":[1,2],"e":[{"t":"b1"}],"v":"re')).toEqual({ s: [1, 2], e: [{ t: "b1" }] });
+    expect(closeCutJson('{"a":"no value closed yet')).toBeNull();
+  });
+});
+
 describe("chatStructured", () => {
   it("returns validated output and sends the schema on the extraction model", async () => {
     create.mockResolvedValue(reply('{"name":"Ada"}'));
@@ -48,6 +57,30 @@ describe("chatStructured", () => {
     const controller = new AbortController();
     await withAbortSignal(controller.signal, () => chatStructured(Schema, input, opts));
     expect(create.mock.calls[0][1]).toEqual({ signal: controller.signal });
+  });
+
+  it("keeps what a reply cut off at the limit finished, when the caller can use part of it", async () => {
+    const Listed = z.object({ items: z.array(z.object({ n: z.number() })), done: z.boolean() });
+    const cut = '{"items":[{"n":1},{"n":2},{"n":';
+    create.mockResolvedValue(reply(cut, "length"));
+    await expect(chatStructured(Listed, input, { ...opts, salvage: (partial) => ({ done: false, ...(partial as object) }) })).resolves.toEqual({ items: [{ n: 1 }, { n: 2 }], done: false });
+    // Without a way to use part of it, or when nothing usable was written, it fails as before.
+    create.mockResolvedValue(reply(cut, "length"));
+    await expect(chatStructured(Listed, input, opts)).rejects.toThrow(/cut off/);
+    create.mockResolvedValue(reply('{"items":[{"n":', "length"));
+    await expect(chatStructured(Listed, input, { ...opts, salvage: () => null })).rejects.toThrow(/cut off/);
+  });
+
+  it("says a stream that ended quietly because the job was stopped was stopped, not that its JSON was broken", async () => {
+    const controller = new AbortController();
+    create.mockImplementation(async () =>
+      (async function* () {
+        yield { choices: [{ finish_reason: null, delta: { content: '{"na' } }] };
+        controller.abort();
+      })(),
+    );
+    await expect(withAbortSignal(controller.signal, () => chatStructured(Schema, input, opts))).rejects.toThrow(/^Stopped$/);
+    expect(record.mock.calls[0][0]).toMatchObject({ status: "stopped", error: "Stopped" });
   });
 
   it("records how often the client retried a call and how long it waited between tries", async () => {

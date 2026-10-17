@@ -9,11 +9,12 @@ import { assumeQualified, matchScore, requirementUse } from "@/lib/resume-writer
 import { askedFor, buildPrompt, planWriting, readWriting } from "@/lib/resume-writer/write";
 import { job, record, withMap } from "./resume-writer-helpers";
 
-const withTech = { ...job, technologies: ["Kafka", "SQL", "Kubernetes"] };
+const withTech = { ...job, location: "", technologies: ["Kafka", "SQL", "Kubernetes"] };
 
 describe("assumeQualified", () => {
   const base = buildRequirements({
     ...job,
+    location: "",
     requirements: { required: ["A must", "B must", "Willing to relocate to San Francisco"], preferred: ["C nice"] },
     technologies: ["Kafka"],
     keywords: ["Books apps"],
@@ -133,7 +134,6 @@ describe("keyword coverage", () => {
       summary: "Product manager who ran SQL reporting.",
       roles: [{ role: "e1", bullets: [{ facts: ["f1"], text: "Launched self-serve billing for 2,000 merchants" }] }],
       projects: [],
-      skills: [],
       certifications: [],
     },
     plan,
@@ -151,7 +151,9 @@ describe("keyword coverage", () => {
   });
 
   it("separates the terms used from the ones left out", () => {
-    const c = keywordCoverage(written, plan.terms);
+    // Kubernetes, ticked with no note, is in the skills section the code writes; without it, it is left out.
+    expect(keywordCoverage(written, plan.terms).present).toEqual(["SQL", "Kubernetes"]);
+    const c = keywordCoverage({ ...written, skills: [] }, plan.terms);
     expect(c.present).toEqual(["SQL"]);
     expect(c.missing).toEqual(["Kubernetes"]);
   });
@@ -188,7 +190,7 @@ describe("the checks on stuffing", () => {
   }));
   const plan = planWriting(record(), stuffJob, reqs);
   const resume = (summary: string, bullets: string[]) =>
-    readWriting({ summary, roles: [{ role: "e1", bullets: bullets.map((text) => ({ facts: ["f1"], text })) }], projects: [], skills: [], certifications: [] }, plan);
+    readWriting({ summary, roles: [{ role: "e1", bullets: bullets.map((text) => ({ facts: ["f1"], text })) }], projects: [], certifications: [] }, plan);
 
   it("is quiet for a resume in the candidate's own words", () => {
     const w = resume("Senior engineer who builds billing systems.", ["Built billing on Kafka for 2,000 merchants"]);
@@ -246,13 +248,13 @@ describe("the writer's use of the job's terms", () => {
     expect(user).toContain("SHOW, DO NOT NAME\nAdaptability");
     expect(user).not.toMatch(/relocate/);
     expect(system).toContain("You are an editor, not a writer");
-    expect(system).toContain("Never add a number. Never invent a certification, a degree");
-    expect(system).toContain("Never add a result, a purpose or a benefit the candidate did not write");
-    expect(system).toContain("A named thing is never replaced by a category");
-    expect(system).toContain("does not name the company and it does not repeat its mission");
-    expect(system).toContain("Never copy sentences from the posting");
-    expect(system).toContain("never tack one onto a bullet it does not belong to");
-    expect(system).toContain("Never join separate achievements");
+    expect(system).toContain("Never add a number, or a result, purpose or benefit the candidate did not write");
+    expect(system).toContain("Never invent an employer, title, degree, certification, interest or hobby");
+    expect(system).toContain("never replace a name with a category");
+    expect(system).toContain("never the company's name or mission");
+    expect(system).toContain("Never copy its sentences");
+    expect(system).toContain("Never move one into a line about other work");
+    expect(system).toContain("One achievement per bullet");
   });
 
   it("asks for what was done in the candidate's words, not a copy of the posting", () => {

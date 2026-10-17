@@ -23,6 +23,12 @@ export type StructuredOptions = {
   jsonMode?: "schema" | "prompt";
   /** Called with the call's token counts, when the provider reports them. */
   onUsage?: (usage: Usage) => void;
+  /**
+   * What to make of a reply cut off at the output limit, instead of failing: given the JSON read so far (closed off
+   * after its last complete value, `closeCutJson`), return the value to validate, or null to fail as usual. For a reply
+   * whose parts each stand alone, such as a review's scores and edits, where most of it is worth more than none.
+   */
+  salvage?: (partial: unknown) => unknown | null;
 };
 
 /**
@@ -69,6 +75,10 @@ ${JSON.stringify(jsonSchema)}`;
         if (usage) opts.onUsage?.(usage);
 
         if (finishReason === "length") {
+          const partial = opts.salvage ? closeCutJson(byPrompt ? stripFences(content).slice(Math.max(0, stripFences(content).indexOf("{"))) : stripFences(content)) : null;
+          const saved = partial === null ? null : opts.salvage!(partial);
+          const parsed = saved === null ? null : schema.safeParse(saved);
+          if (parsed?.success) return parsed.data;
           throw new Error("Output was cut off (max_tokens); the input may be too long");
         }
 
@@ -86,6 +96,43 @@ ${JSON.stringify(jsonSchema)}`;
       },
     },
   );
+}
+
+/**
+ * JSON cut off part way, closed after its last complete value: `{"a":[{"x":1},{"x":` reads as `{"a":[{"x":1}]}`. A
+ * value cut inside a string, or a key with no value yet, is dropped with whatever led to it. Null when nothing whole
+ * was written.
+ */
+export function closeCutJson(text: string): unknown | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  // Where the text could end, with the brackets still open there.
+  let cut: { at: number; open: string[] } | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") {
+      stack.pop();
+      // A value that closes inside an array is whole; one inside an object is whole when its key came with it.
+      cut = { at: i + 1, open: [...stack] };
+      if (stack.length === 0) break;
+    }
+  }
+  if (!cut) return null;
+  const closers = cut.open.reverse().map((b) => (b === "{" ? "}" : "]")).join("");
+  try {
+    return JSON.parse(text.slice(0, cut.at) + closers);
+  } catch {
+    return null;
+  }
 }
 
 /** The JSON object in a reply asked for by prompt: inside fences, or between the first "{" and the last "}". */

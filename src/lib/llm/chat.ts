@@ -65,6 +65,8 @@ export async function chatCompletion<T>(params: ChatParams, meta: ChatMeta<T>): 
         if (choice.finish_reason) finishReason = choice.finish_reason;
       }
       reply = { content, finishReason, usage };
+      // A stream cut by a stop can end quietly with what it had so far: say so, rather than reading it as a broken reply.
+      if (signal?.aborted) throw new Error("Stopped");
       return meta.read ? meta.read(reply) : reply;
     } catch (err) {
       status = signal?.aborted ? "stopped" : "error";

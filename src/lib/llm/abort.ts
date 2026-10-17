@@ -13,3 +13,8 @@ export function withAbortSignal<T>(signal: AbortSignal, fn: () => Promise<T>): P
 export function currentAbortSignal(): AbortSignal | undefined {
   return store.getStore();
 }
+
+/** Whether a failed call failed because the running job was stopped: such a call is never tried again. */
+export function isStopped(err: unknown): boolean {
+  return currentAbortSignal()?.aborted === true || (err instanceof Error && err.message === "Stopped");
+}

@@ -29,6 +29,7 @@ export const STEP_LABELS: Record<LlmStep, string> = {
   "group-bullets": "Group bullets",
   "classify-cover-paragraphs": "Classify cover letter",
   "match-requirements": "Match job requirements",
+  "read-requirements": "Read what the job asks for",
   "write-resume": "Write the resume",
   "review-resume": "Review the resume",
   "revise-resume": "Revise the resume after review",

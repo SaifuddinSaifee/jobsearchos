@@ -109,6 +109,10 @@ describe("guessAngle", () => {
     ["Growth Marketer", "Marketing"],
     ["Account Executive", "Sales"],
     ["Technical Program Manager", "Program"],
+    ["Product Engineer (AI / Full-Stack)", "Engineering"],
+    ["Senior Product Manager, Workflow Automation", "Product"],
+    ["Engineering Manager", "Engineering"],
+    ["Software Engineer - Product", "Engineering"],
     ["Wizard", ""],
   ])("%s is %s", (title, angle) => {
     expect(guessAngle(title)).toBe(angle);

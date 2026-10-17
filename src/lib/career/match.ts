@@ -101,7 +101,16 @@ const ANGLES: [string, RegExp][] = [
   ["Engineering", /\b(engineer|engineering|developer|programmer|software|swe|sde|architect|devops|sre)\b/i],
 ];
 
-/** A first guess at the angle a title was written for, so the user can confirm or change it. */
+const angleOf = (text: string) => ANGLES.find(([, re]) => re.test(text))?.[0] ?? "";
+
+/**
+ * A first guess at the angle a title was written for, so the user can confirm or change it. The last word of a title
+ * says what the job is and the words before it what it is about, so they are read first: a "Product Engineer" is an
+ * engineer, a "Product Designer" a designer. A note after a comma, a dash or in brackets ("(AI / Full-Stack)",
+ * ", Search") is left out.
+ */
 export function guessAngle(title: string): string {
-  return ANGLES.find(([, re]) => re.test(title))?.[0] ?? "";
+  const head = title.split(/\s[-|]\s|[,(]/)[0].trim();
+  const words = head.split(/\s+/).filter(Boolean);
+  return angleOf(words.slice(-1).join(" ")) || angleOf(words.slice(-2).join(" ")) || angleOf(head) || angleOf(title);
 }

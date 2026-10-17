@@ -33,7 +33,7 @@ import type { Matcher } from "@/lib/resume-writer/match";
 import type { WriterAnswer } from "@/lib/resume-writer/write";
 import { readWriting } from "@/lib/resume-writer/write";
 import { makeWriter, type Writer } from "@/lib/resume-writer/writer";
-import { counter, profileWith } from "./career-helpers";
+import { counter, fact, profileWith } from "./career-helpers";
 import { resetDb, testDb } from "./helpers";
 import { record as sampleRecord, job as sampleJob } from "./resume-writer-helpers";
 
@@ -77,7 +77,6 @@ const answer = (): WriterAnswer => ({
     { role: "e2", bullets: [{ facts: ["f4"], text: "Built reporting tools in SQL for the finance team" }] },
   ],
   projects: [],
-  skills: [{ category: "Data", items: ["s1"] }],
   certifications: ["c1"],
 });
 
@@ -314,12 +313,34 @@ describe("review and writing", () => {
     expect(done.notes.join(" ")).not.toMatch(/page/i);
   });
 
+  it("records when each step started and how long it took, writing's stages as the writer reports them", async () => {
+    const { matched } = await reviewed();
+    expect(matched.steps.match).toMatchObject({ status: "done", startedAt: expect.any(String), ms: expect.any(Number) });
+    await saveReview(matched.id, { answers: [] }, db);
+    const staged: Writer = async (plan, _job, _reqs, _instructions, onStage) => {
+      await onStage?.("write", "done");
+      await onStage?.("review", "running");
+      await onStage?.("review", "done", "4.2 of 5");
+      await onStage?.("revise", "skipped", "nothing needed");
+      return { written: readWriting(answer(), plan), notes: [] };
+    };
+    const done = (await runNext({ writer: staged }))!;
+    for (const name of ["read", "match", "write", "review", "save"] as const) {
+      expect(done.steps[name]).toMatchObject({ status: "done", ms: expect.any(Number) });
+    }
+    expect(done.steps.review?.detail).toBe("4.2 of 5");
+    // A step that never ran has no time.
+    expect(done.steps.revise).toEqual({ status: "skipped", detail: "nothing needed" });
+  });
+
   it("fails with the reason when the writing model fails", async () => {
     const { matched } = await reviewed();
     await saveReview(matched.id, { answers: [] }, db);
     const row = await runNext({ writer: makeWriter(vi.fn().mockRejectedValue(new Error("boom")) as never) });
     expect(row).toMatchObject({ status: "failed", error: "Could not write the resume with the model: boom" });
     expect(await db.select().from(documents)).toHaveLength(0);
+    // The step it failed in keeps the time it ran.
+    expect(row!.steps.write).toMatchObject({ status: "failed", ms: expect.any(Number) });
   });
 });
 
@@ -420,5 +441,66 @@ describe("the worker", () => {
     controller.abort();
     await done;
     expect((await db.select().from(resumeGenerations).where(eq(resumeGenerations.id, second.generation.id)))[0].status).toBe("stopped");
+  });
+});
+
+describe("choices on the review screen", () => {
+  /** The sample record with one achievement told with different numbers in different documents. */
+  const withClash = () => {
+    const rec = sampleRecord();
+    rec.employers[0].roles[0].facts.push(
+      fact("fact9", [
+        ["w9a", "Increased user activation by 45% by rebuilding onboarding"],
+        ["w9b", "Increased user activation by 45%, cutting time-to-value"],
+        ["w9c", "Boosted feature activation rate by 18%"],
+      ]),
+    );
+    return rec;
+  };
+  async function matched(jobId?: string) {
+    const id = jobId ?? (await seedJob()).jobId;
+    await startGeneration(id, {}, db);
+    return { jobId: id, row: (await runNext())! };
+  }
+  beforeEach(async () => {
+    await saveRecordVersion({ record: withClash(), reason: "edit" }, db);
+    await saveProfile({ profile: { ...emptyProfile(), contact: { name: "Sam Example", email: "sam@example.com", phone: "", location: "Remote", links: [] } } }, db);
+  });
+
+  it("offers the tellings of a role and the numbers the record disagrees on, with the recommended ones", async () => {
+    const { row } = await matched();
+    expect(row.reviewOptions.roles).toEqual([
+      { roleId: "roleA", label: "Acme", framings: [{ id: "fEng", title: "Software Engineer" }, { id: "fPm", title: "Product Manager" }], recommended: "fPm" },
+    ]);
+    expect(row.reviewOptions.clashes).toMatchObject([{ factId: "fact9", where: "Acme", recommended: "w9a", reason: "2 of your 3 versions of this line say it this way." }]);
+    // The recommended number is chosen from the start, so a resume written with the review off uses it too.
+    expect(row.choices).toEqual({ framings: {}, wordings: { fact9: "w9a" } });
+  });
+
+  it("saves the user's picks, keeps only what was offered, and writes from them", async () => {
+    const { row } = await matched();
+    const { generation } = await saveReview(row.id, { answers: [], choices: { framings: { roleA: "fEng", roleZ: "fX" }, wordings: { fact9: "w9c", fact1: "w1" } } }, db);
+    expect(generation.choices).toEqual({ framings: { roleA: "fEng" }, wordings: { fact9: "w9c" } });
+
+    const seen = vi.fn<Writer>(async (...args) => writer(...args));
+    await runNext({ writer: seen });
+    const plan = seen.mock.calls[0][0];
+    expect(plan.roles[0].title).toBe("Software Engineer");
+    // The picked number leads, and the versions that give the other number are left out.
+    expect(plan.roles[0].facts.find((f) => f.factId === "fact9")!.texts).toEqual(["Boosted feature activation rate by 18%"]);
+  });
+
+  it("carries a settled number to the next resume for any job, and a chosen telling to the same job", async () => {
+    const first = await matched();
+    await saveReview(first.row.id, { answers: [], choices: { framings: { roleA: "fEng" }, wordings: { fact9: "w9c" } } }, db);
+    await runNext();
+
+    const other = await matched((await seedJob2()).jobId);
+    expect(other.row.choices).toEqual({ framings: {}, wordings: { fact9: "w9c" } });
+    await stopGeneration(other.row.id, db);
+
+    await startGeneration(first.jobId, { regenerate: true }, db);
+    const again = (await runNext())!;
+    expect(again.choices).toEqual({ framings: { roleA: "fEng" }, wordings: { fact9: "w9c" } });
   });
 });

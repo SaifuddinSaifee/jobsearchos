@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { revertStatusAction } from "@/app/(app)/jobs/actions";
 import { saveReviewAction, startGenerationAction, stopGenerationAction } from "@/app/(app)/jobs/[id]/resume/actions";
 import type { PreviousState } from "@/lib/jobs/types";
-import type { ReviewAnswer } from "@/lib/resume-writer/types";
+import type { GenerationChoices, ReviewAnswer } from "@/lib/resume-writer/types";
 import { JOB_RESUME_KEY } from "./use-job-resume";
 
 /** Prefix of the sidebar's list of resumes being written. */
@@ -63,10 +63,10 @@ export function useResumeActions(jobId: string) {
   }
 
   /** Sends the review answers and goes on to writing. */
-  async function submitReview(generationId: string, answers: ReviewAnswer[], skipReviewNextTime: boolean): Promise<boolean> {
+  async function submitReview(generationId: string, answers: ReviewAnswer[], skipReviewNextTime: boolean, choices?: GenerationChoices): Promise<boolean> {
     setBusy("review");
     try {
-      const res = await saveReviewAction(generationId, answers, skipReviewNextTime);
+      const res = await saveReviewAction(generationId, answers, skipReviewNextTime, choices);
       if (!res.ok) {
         toast.error(res.error);
         await refresh();
