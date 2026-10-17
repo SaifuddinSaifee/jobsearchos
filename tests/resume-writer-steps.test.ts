@@ -47,7 +47,10 @@ describe("the writer's stages", () => {
   const plan = planWriting(record(), job, withMap([{ verdict: "met", refs: ["fact1"] }]));
   const answer: WriterAnswer = {
     summary: "Product manager who shipped billing.",
-    roles: [{ role: "e1", bullets: [{ facts: ["f1"], text: "Launched self-serve billing for 2,000 merchants" }] }],
+    roles: [
+      { role: "e1", bullets: [{ facts: ["f1"], text: "Launched self-serve billing for 2,000 merchants" }] },
+      { role: "e2", bullets: [{ facts: ["f4"], text: "Wrote internal reporting tools in SQL" }] },
+    ],
     projects: plan.projects.slice(0, 1).map((p) => ({ project: p.alias, bullets: [{ text: p.description }] })),
     certifications: [],
   };

@@ -4,8 +4,8 @@ import { env } from "@/lib/env";
 import { isStopped } from "@/lib/llm/abort";
 import { chatStructured, type StructuredOptions } from "@/lib/llm/structured";
 import type { GenerationInstructions } from "@/lib/profile/schema";
-import { containsPhrase, type JobInput } from "./context";
-import { bareClaimFindings, bulletItems, checkFaithful, droppedStrong, mergedResults, missingMentions, revertAddedNames, revertRewrites, unproven, type BulletItem, type Finding } from "./faithful";
+import { clip, containsPhrase, type JobInput } from "./context";
+import { bareClaimFindings, bulletItems, checkFaithful, droppedStrong, mergedResults, missingMentions, revertAddedNames, revertRewrites, twoStories, unbackedInSummary, unproven, withoutRepeats, type BulletItem, type Finding } from "./faithful";
 import { checkStuffing, copiedPhrases, coverageNotes, keywordCoverage, stuffingNotes } from "./keywords";
 import { meanScore, modelReviewer, reviewNote, RUBRIC, type Review, type Reviewer } from "./review";
 import type { Requirement } from "./types";
@@ -33,21 +33,15 @@ export const WRITER_EFFORT: Effort = "high";
  * tokens with a JSON schema, about 1,100 at max effort without one), so the writer asks for its JSON in the prompt.
  */
 const WRITER_JSON = "prompt" as const;
+// The output limits, thinking included, are settings (`WRITER_MAX_TOKENS`, `WRITER_FALLBACK_MAX_TOKENS`,
+// `REVISE_MAX_TOKENS` in env.ts). A finished draft is about 1,500 tokens; drafts that worked thought for 6,000 to 22,000,
+// but on the same prompt GLM-5.3 at high effort sometimes thinks on past any limit (one run in three on Oct 16).
 /**
- * Thinking counts against the output limit. A finished draft is about 1,500 tokens and the drafts that worked thought for
- * 6,000 to 22,000; one that thinks past this is stuck, and at 32,000 such a draft cost $0.15 for nothing. This keeps the
- * cost of a stuck draft down while leaving room for every draft that has worked.
+ * The effort a draft is written again with after it ran out of room. Not medium: on Oct 16 a medium retry ran out of
+ * room too, so a stuck draft cost $0.19 and gave nothing. At low effort GLM-5.3 thinks very little, so the draft is
+ * written: plainer than a high-effort one, it is then reviewed and revised as usual, and marked as a fallback.
  */
-const WRITER_MAX_TOKENS = 24_000;
-/** A draft tried again after it ran out of room thinks less, and is given less room: asked the same way, it runs out the same way. */
-const RETRY_MAX_TOKENS = 16_000;
-/**
- * A revision makes a few edits to a finished draft: at high effort it thinks for 2,000 to 4,000 tokens. One that thinks
- * past this is stuck between edits it cannot all make (a review asking for more detail in bullets already at their
- * length), and is better stopped early so the reviewed draft is kept: twice 32,000 tokens of thinking took eleven minutes
- * and ran the writing phase out of time.
- */
-const REVISE_MAX_TOKENS = 16_000;
+export const FALLBACK_EFFORT: Effort = "low";
 /** What every revision is told about length, so an edit that adds words does not push a bullet past its limit. */
 const KEEP_LENGTH = "Keep every bullet within the lengths under LENGTH: when an edit adds words to a bullet, cut that bullet's least important clause so it still fits.";
 
@@ -57,39 +51,36 @@ const KEEP_LENGTH = "Keep every bullet within the lengths under LENGTH: when an 
  */
 export const REVIEW_WAITS_MS = [20_000, 40_000];
 
-/** One step less thinking, for a call that ran out of room thinking. */
-const LOWER_EFFORT: Partial<Record<string, Effort>> = { max: "high", high: "medium", medium: "low" };
-export const lowerEffort = (effort: Effort): Effort => LOWER_EFFORT[effort] ?? effort;
 /** A reply cut off at the output limit: at high effort, almost always the model's thinking ran on. */
 const isCutOff = (err: unknown) => /cut off \(max_tokens\)/i.test(err instanceof Error ? err.message : String(err));
 
 /**
  * Asks up to `tries` times while `retry` says the error is worth another try, and never after the user stopped the job.
- * A reply cut off at the output limit is asked again with one step less effort and `retryMaxTokens` of room, since
- * asking the same way runs out of room the same way.
+ * A reply cut off at the output limit is asked again at `FALLBACK_EFFORT` with `fallbackMaxTokens` of room, since asking
+ * the same way runs out of room the same way. Says which attempt worked and at what effort.
  */
 async function askWithRetry<T>(
   effort: Effort,
   maxTokens: number,
   tries: number,
   retry: (err: unknown) => boolean,
-  ask: (effort: Effort, maxTokens: number) => Promise<T>,
-  retryMaxTokens = maxTokens,
-): Promise<{ value: T | null; error: unknown; attempts: number }> {
+  ask: (effort: Effort, maxTokens: number, attempt: number) => Promise<T>,
+  fallbackMaxTokens = maxTokens,
+): Promise<{ value: T | null; error: unknown; attempts: number; effort: Effort }> {
   let error: unknown = null;
   for (let attempt = 1; attempt <= tries; attempt++) {
     try {
-      return { value: await ask(effort, maxTokens), error: null, attempts: attempt };
+      return { value: await ask(effort, maxTokens, attempt), error: null, attempts: attempt, effort };
     } catch (err) {
       error = err;
-      if (isStopped(err) || !retry(err)) return { value: null, error, attempts: attempt };
+      if (isStopped(err) || !retry(err)) return { value: null, error, attempts: attempt, effort };
       if (isCutOff(err)) {
-        effort = lowerEffort(effort);
-        maxTokens = Math.min(maxTokens, retryMaxTokens);
+        effort = FALLBACK_EFFORT;
+        maxTokens = Math.min(maxTokens, fallbackMaxTokens);
       }
     }
   }
-  return { value: null, error, attempts: tries };
+  return { value: null, error, attempts: tries, effort };
 }
 
 const isRateLimited = (err: unknown) => /\b429\b|rate limit|too many requests/i.test(err instanceof Error ? err.message : String(err));
@@ -103,16 +94,40 @@ export function codeFindings(w: WrittenResume, items: BulletItem[], plan: Writin
     ...unproven(items, plan.users).map((u) => ({ bullet: "resume", kind: "unproven" as const, detail: `does not show "${u.text}" in any bullet; prove it as work in the role where it fits` })),
     ...bareClaimFindings(w, items, plan.users),
     ...mergedResults(w.summary, plan).map((sentence) => ({ bullet: "summary", kind: "merged" as const, detail: `joins results from different lines in one sentence: "${sentence}"; give one result per sentence` })),
+    ...unbackedInSummary(w, items, plan).map((name) => ({ bullet: "summary", kind: "unbacked" as const, detail: `names "${name}", which no bullet shows; take it out of the summary (the skills section lists it)` })),
+    ...twoStories(items).map(({ item, clauses }) => ({
+      bullet: item.id,
+      kind: "two-stories" as const,
+      detail: `tells two separate results ("${clip(clauses[0], 60)}" and "${clip(clauses[1], 60)}"); keep the one that matters for this job, or make it two bullets citing the same fact within the role's bullet count`,
+    })),
     ...droppedStrong(w, items),
     ...tooLong(w, items, plan),
-    ...(plan.projects.length > 0 && w.projects.length === 0 ? [{ bullet: "resume", kind: "left-out" as const, detail: "has no projects; include the ones that answer the job, by their p ids" }] : []),
+    ...leftOut(w, plan),
     ...repeatedInSummary(w, items).map((run) => ({ bullet: "summary", kind: "repeated" as const, detail: `repeats a bullet word for word: "${run}"; say the result in a clause of your own` })),
     ...(w.interests === "" && plan.interests.length > 0 ? [{ bullet: "resume", kind: "missing-mention" as const, detail: "leaves out the Interests line the candidate asked for" }] : []),
-    ...missingMentions(w.summary, plan.mentions).map((m) => ({ bullet: "summary", kind: "missing-mention" as const, detail: `does not mention, as the candidate asked: "${m}"` })),
+    // A mention in the header answers the conditions; only one that closes the summary is looked for there.
+    ...(w.mention ? [] : missingMentions(w.summary, plan.mentions)).map((m) => ({ bullet: "summary", kind: "missing-mention" as const, detail: `does not mention, as the candidate asked: "${m}"` })),
     ...checkWriting(w).map((phrase) => ({ bullet: "resume", kind: "generic" as const, detail: `uses the generic phrase "${phrase}"` })),
     ...stuffing.copied.map((c) => ({ bullet: "resume", kind: "copied" as const, detail: `copies the posting's wording: "${c}"` })),
     ...stuffing.overused.map((t) => ({ bullet: "resume", kind: "overused" as const, detail: `uses "${t}" in too many places` })),
     ...stuffing.bare.map((t) => ({ bullet: "resume", kind: "named-trait" as const, detail: `names the way of working "${t}" instead of showing it` })),
+  ];
+}
+
+/**
+ * What a draft leaves out that a resume needs: the summary, a role (code kept it from the record's own lines), or a
+ * project code chose for the job. Each goes to the revision to write; none of them fails the run, since a draft that cost a
+ * minute or more of thinking is worth fixing rather than throwing away.
+ */
+export function leftOut(w: WrittenResume, plan: WritingPlan): Finding[] {
+  return [
+    ...(w.summary.trim() === "" ? [{ bullet: "summary", kind: "left-out" as const, detail: "is empty; write the summary" }] : []),
+    ...w.roles.filter((r) => r.fromRecord).map((r) => ({ bullet: "resume", kind: "left-out" as const, detail: `leaves out ${r.plan.title || "the role"} at ${r.plan.employer} (${r.plan.alias}); write its bullets from its facts` })),
+    // Code chose the projects for this job (at most three), so each is meant to be on the page: left to the writer, a
+    // draft kept one and dropped the two with an accuracy number and a test suite.
+    ...plan.projects
+      .filter((p) => !w.projects.some((x) => x.plan === p))
+      .map((p) => ({ bullet: "resume", kind: "left-out" as const, detail: `leaves out the project ${p.name} (${p.alias}); include it with one or two bullets from its lines` })),
   ];
 }
 
@@ -176,6 +191,8 @@ export type WriterConfig = {
 /** What happened inside one run of the writer. */
 export type WriterTrace = {
   draftAttempts: number;
+  /** The draft was written at `FALLBACK_EFFORT` after a first one ran out of room. */
+  fallback: boolean;
   /** What the code checks found in the draft. */
   findings: Finding[];
   review: Review | null;
@@ -301,25 +318,36 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
   return async (plan, job, requirements, instructions, onStage = () => {}) => {
     const schema = answerSchema(plan);
     const prompt = buildPrompt(plan, job, requirements, instructions);
-    const opts = { model: config.model ?? env().WRITER_MODEL, maxTokens: WRITER_MAX_TOKENS, reasoningEffort: config.effort ?? WRITER_EFFORT, jsonMode: WRITER_JSON } satisfies Partial<StructuredOptions>;
+    const limits = env();
+    const opts = { model: config.model ?? limits.WRITER_MODEL, maxTokens: limits.WRITER_MAX_TOKENS, reasoningEffort: config.effort ?? WRITER_EFFORT, jsonMode: WRITER_JSON } satisfies Partial<StructuredOptions>;
     const revision = config.revision ?? "always";
 
-    // Any failure is worth a second try; one cut off at the output limit is tried with less thinking and less room.
+    // Any failure is worth a second try; one cut off at the output limit is tried at low effort, with less room.
     const drafting = await askWithRetry(
       opts.reasoningEffort,
-      WRITER_MAX_TOKENS,
+      limits.WRITER_MAX_TOKENS,
       2,
       () => true,
-      (reasoningEffort, maxTokens) => chat(schema, prompt, { ...opts, reasoningEffort, maxTokens, step: "write-resume" }),
-      RETRY_MAX_TOKENS,
+      (reasoningEffort, maxTokens, attempt) =>
+        chat(schema, prompt, {
+          ...opts,
+          reasoningEffort,
+          maxTokens,
+          step: "write-resume",
+          traceAttributes: { "resume.attempt": attempt, "resume.fallback": reasoningEffort !== opts.reasoningEffort },
+        }),
+      limits.WRITER_FALLBACK_MAX_TOKENS,
     );
     const draft = drafting.value;
     const draftAttempts = drafting.attempts;
+    const fallback = !!draft && drafting.effort !== opts.reasoningEffort;
     if (!draft) throw new Error(`Could not write the resume with the model: ${drafting.error instanceof Error ? drafting.error.message : "unknown error"}`);
-    await onStage("write", "done", draftAttempts > 1 ? "on the second try" : undefined);
+    await onStage("write", "done", fallback ? "fallback: the first ran too long, written with less thinking" : draftAttempts > 1 ? "on the second try" : undefined);
     await onStage("review", "running");
 
-    const notes: string[] = [];
+    const notes: string[] = fallback
+      ? ["The first draft thought for too long and was stopped, so this one was written with less thinking (a fallback draft). It was reviewed and revised as usual; read it with that in mind, or write it again."]
+      : [];
     const drafted = readWriting(draft, plan);
     const items = bulletItems(drafted, plan);
     const findings = codeFindings(drafted, items, plan, job, requirements);
@@ -367,7 +395,7 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
         await onStage("revise", "running");
         const wanted = new Set(targets);
         const bulletIds = items.map((i) => i.id).filter((id) => wanted.has(id));
-        const patching = await askWithRetry(opts.reasoningEffort, REVISE_MAX_TOKENS, 1, () => false, (reasoningEffort, maxTokens) =>
+        const patching = await askWithRetry(opts.reasoningEffort, limits.REVISE_MAX_TOKENS, 1, () => false, (reasoningEffort, maxTokens) =>
           chat(patchSchema(plan, bulletIds), buildPatchPrompt(prompt, draft, items, material.filter((e) => wanted.has(e.target)), findings, targets), { ...opts, maxTokens, reasoningEffort, step: "revise-resume" }),
         );
         if (patching.value) {
@@ -384,7 +412,7 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
       // Only when the review asks for something that matters or a code check found something: an edit of taste alone is
       // not worth a second pass over the whole page. Asked once: a revision that fails, even one cut off at its limit,
       // keeps the reviewed draft (twice 32,000 tokens of thinking once cost $0.31 and gave nothing).
-      const revising = await askWithRetry(opts.reasoningEffort, REVISE_MAX_TOKENS, 1, () => false, (reasoningEffort, maxTokens) =>
+      const revising = await askWithRetry(opts.reasoningEffort, limits.REVISE_MAX_TOKENS, 1, () => false, (reasoningEffort, maxTokens) =>
         chat(schema, buildRevisePrompt(prompt, draft, items, review, findings), { ...opts, maxTokens, reasoningEffort, step: "revise-resume" }),
       );
       if (revising.value) {
@@ -399,19 +427,25 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
     const revised = outcome === "full" || outcome === "targeted";
     const edits = material.length + findings.length;
     await onStage("revise", revised ? "done" : outcome === "failed" ? "failed" : "skipped", revised ? `${edits} ${edits === 1 ? "change" : "changes"} asked for` : outcome === "failed" ? "kept the reviewed draft" : "nothing needed");
-    if (review) notes.unshift(reviewNote(review, revised));
+    // After the fallback note, which matters more.
+    if (review) notes.splice(fallback ? 1 : 0, 0, reviewNote(review, revised));
 
     // A tool or job term the revision moved into a line about other work goes back out, before anything else is checked.
     const named = revertAddedNames(written, drafted, plan);
     if (named.reverted.length > 0) {
-      notes.push(`${named.reverted.length === 1 ? "One bullet was" : `${named.reverted.length} bullets were`} put back as drafted, because the revision named a tool or term ${named.reverted.length === 1 ? "its" : "their"} own lines do not.`);
+      notes.push(`${named.reverted.length === 1 ? "One bullet was" : `${named.reverted.length} bullets were`} put back as drafted or to your own wording, because ${named.reverted.length === 1 ? "it" : "they"} named a tool or term ${named.reverted.length === 1 ? "its" : "their"} own lines do not.`);
     }
-    const safe = revertRewrites(named.written, plan);
-    if (safe.reverted.length > 0) {
-      notes.push(`${safe.reverted.length === 1 ? "One bullet was" : `${safe.reverted.length} bullets were`} put back to your own wording, because the model rewrote ${safe.reverted.length === 1 ? "it" : "them"} beyond recognition.`);
+    const rewritten = revertRewrites(named.written, plan);
+    if (rewritten.reverted.length > 0) {
+      notes.push(`${rewritten.reverted.length === 1 ? "One bullet was" : `${rewritten.reverted.length} bullets were`} put back to your own wording, because the model rewrote ${rewritten.reverted.length === 1 ? "it" : "them"} beyond recognition.`);
     }
+    // Last: a bullet that says what one above it says, however it got there, is left out.
+    const repeats = withoutRepeats(rewritten.written);
+    if (repeats.dropped > 0) notes.push(`${repeats.dropped === 1 ? "One bullet was" : `${repeats.dropped} bullets were`} left out for repeating another.`);
+    const safe = { written: repeats.written, reverted: rewritten.reverted };
     config.onTrace?.({
       draftAttempts,
+      fallback,
       findings,
       review,
       reviewedBy,
@@ -425,7 +459,8 @@ export function makeWriter(chat: typeof chatStructured = chatStructured, reviewe
       reverted: safe.reverted.length + named.reverted.length,
     });
     const generic = checkWriting(safe.written);
-    const unsaid = missingMentions(safe.written.summary, plan.mentions);
+    // A mention in the header answers the conditions; only one meant to close the summary is looked for there.
+    const unsaid = safe.written.mention ? [] : missingMentions(safe.written.summary, plan.mentions);
     return {
       written: safe.written,
       notes: [

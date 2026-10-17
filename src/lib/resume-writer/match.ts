@@ -2,7 +2,7 @@ import { z } from "zod";
 import { jaccard, normalizeText, tokens } from "@/lib/career/normalize";
 import { isStopped } from "@/lib/llm/abort";
 import { chatStructured } from "@/lib/llm/structured";
-import { containsPhrase, type SourceItem } from "./context";
+import { containsPhrase, mentionsTerm, type SourceItem } from "./context";
 import { REQUIREMENT_USES, requirementWeight, VERDICTS, type Requirement, type RequirementUse, type Verdict } from "./types";
 
 export { matchScore } from "./types";
@@ -222,6 +222,7 @@ const describe = (item: SourceItem) => `${item.label}: ${sentence(item.text)}`;
  */
 export async function matchRequirements(requirements: Requirement[], items: SourceItem[], matcher: Matcher = modelMatcher): Promise<Requirement[]> {
   const byRef = new Map(items.map((i) => [i.ref, i]));
+  const told = items.filter((i) => i.kind !== "skill").map((i) => i.normalized);
   const free = freeMatches(requirements, items);
   const open = requirements.filter((r) => !free.has(r.id));
   const answers = await matcher(open, items, requirements);
@@ -231,14 +232,17 @@ export async function matchRequirements(requirements: Requirement[], items: Sour
     const answer: MatchAnswer = refs ? { verdict: "met", refs } : (answers.get(r.id) ?? { verdict: "missing", refs: [] });
     const use = answers.get(r.id)?.use ?? r.use;
     const core = answers.get(r.id)?.core ?? r.core ?? false;
+    const shown = answer.refs.map((ref) => byRef.get(ref)).filter((i): i is SourceItem => !!i);
     return {
       ...r,
       use,
       core,
+      // Only a skill points at it and no line of the record names it: the record lists it but never tells of it.
+      skillsOnly: answer.verdict !== "missing" && shown.length > 0 && shown.every((i) => i.kind === "skill") && !told.some((t) => mentionsTerm(t, r.text)),
       weight: requirementWeight({ kind: r.kind, use, core }),
       verdict: answer.verdict,
       refs: answer.refs,
-      evidence: answer.refs.map((ref) => byRef.get(ref)).filter((i): i is SourceItem => !!i).map(describe),
+      evidence: shown.map(describe),
     };
   });
 }

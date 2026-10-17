@@ -149,6 +149,11 @@ export type Requirement = {
   use?: RequirementUse;
   /** One of the few things the job is really about (full-stack depth for a full-stack job), as matching read it. */
   core?: boolean;
+  /**
+   * Shown by the record only through its skills list: no role, project or certification says it ("MCP"). The skills
+   * section shows it, and the review screen asks whether there is work to tell about it.
+   */
+  skillsOnly?: boolean;
 };
 
 /**

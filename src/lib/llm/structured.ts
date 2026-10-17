@@ -29,6 +29,8 @@ export type StructuredOptions = {
    * whose parts each stand alone, such as a review's scores and edits, where most of it is worth more than none.
    */
   salvage?: (partial: unknown) => unknown | null;
+  /** Attributes for the call's span in the trace, such as which attempt this is. Phoenix only. */
+  traceAttributes?: Record<string, string | number | boolean>;
 };
 
 /**
@@ -70,6 +72,7 @@ ${JSON.stringify(jsonSchema)}`;
     },
     {
       step: opts.step,
+      attributes: opts.traceAttributes,
       // Checked inside the call, so a reply that cost tokens but cannot be used is recorded as a failed call with them.
       read: ({ content, finishReason, usage }): z.infer<T> => {
         if (usage) opts.onUsage?.(usage);

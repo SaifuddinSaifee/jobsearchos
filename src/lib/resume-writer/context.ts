@@ -26,6 +26,18 @@ export function containsPhrase(normalizedText: string, normalizedPhrase: string)
   return ` ${normalizedText} `.includes(` ${normalizedPhrase} `);
 }
 
+/**
+ * Whether a normalized text mentions a term: the whole term, or for a term of several words one of its longer words
+ * ("analytics" for "Product analytics", in a line about Mixpanel funnels). A term of one word ("MCP", "Rails") has to
+ * be there as written.
+ */
+export function mentionsTerm(normalizedText: string, term: string): boolean {
+  const key = normalizeText(term);
+  if (!key) return false;
+  if (containsPhrase(normalizedText, key)) return true;
+  return key.includes(" ") && key.split(" ").some((w) => w.length >= 5 && containsPhrase(normalizedText, w));
+}
+
 /** The short lines of a Markdown profile field: list items, or lines of plain text. Headings and long prose are left out. */
 export function profileLines(markdown: string): string[] {
   return markdown

@@ -1,6 +1,6 @@
 import { normalizeText } from "@/lib/career/normalize";
-import { clip, containsPhrase } from "./context";
-import { namesIn, numbersIn } from "./proof";
+import { clip, containsPhrase, mentionsTerm } from "./context";
+import { isMeasured, namesIn, numbersIn } from "./proof";
 import type { PlanUser, WritingPlan, WrittenBullet, WrittenResume } from "./write";
 import { tidy } from "./write";
 
@@ -53,6 +53,8 @@ export type FindingKind =
   | "unproven"
   | "bare-claim"
   | "merged"
+  | "unbacked"
+  | "two-stories"
   | "dropped-strong"
   | "too-long"
   | "repeated"
@@ -134,6 +136,31 @@ export function mergedResults(summary: string, plan: WritingPlan): string[] {
     });
 }
 
+
+/**
+ * The tools and job terms the summary names that the page never shows: no bullet has them, no project lists them and
+ * no note of the candidate's gives them. "React and TypeScript frontends over Python and Rails API services" claimed
+ * Rails with nothing under it. Their place is the skills section, which the summary does not need to repeat.
+ */
+export function unbackedInSummary(w: WrittenResume, items: BulletItem[], plan: WritingPlan): string[] {
+  if (!w.summary.trim()) return [];
+  const shown = normalizeText([...items.map((i) => i.text), ...w.projects.flatMap((p) => p.plan.technologies), ...plan.users.map((u) => u.note)].join(" "));
+  const said = normalizeText(w.summary);
+  const named = [...plan.terms.filter((t) => containsPhrase(said, normalizeText(t))), ...namesIn(w.summary.replace(EXPANSION, "$1"))];
+  const out = named.filter((n) => !mentionsTerm(shown, n));
+  // A name inside a term already listed ("Rails" in "Ruby on Rails") is the same claim.
+  return [...new Set(out)].filter((n, _, all) => !all.some((o) => o !== n && containsPhrase(normalizeText(o), normalizeText(n))));
+}
+
+/**
+ * Bullets that tell two separate results, joined by a semicolon: "Achieved 3x traffic growth by leading the migration
+ * ...; reduced support tickets by 36% with a RAG chatbot". Each is a story of its own, and together neither reads.
+ */
+export function twoStories(items: BulletItem[]): { item: BulletItem; clauses: string[] }[] {
+  return items
+    .map((item) => ({ item, clauses: item.text.split(/;\s+/).filter(isMeasured) }))
+    .filter((x) => x.clauses.length >= 2);
+}
 
 /**
  * Where a role leaves out one of the results marked to keep while a bullet proves less, aimed at that bullet: the weakest
@@ -251,24 +278,73 @@ export function checkFaithful(items: BulletItem[], terms: string[]): Finding[] {
   return findings;
 }
 
+/** Two bullets this alike say the same thing: the share of the shorter one's words the other has. */
+const REPEAT_SHARE = 0.8;
+
+/** Whether two bullets say the same thing: most of the shorter one's words are in the other. */
+export function sayTheSame(a: string, b: string): boolean {
+  const [short, long] = words(a).length <= words(b).length ? [a, b] : [b, a];
+  return overlap(short, new Set(words(long))) >= REPEAT_SHARE;
+}
+
 /**
- * The resume with any bullet the model rewrote out of all recognition put back to the candidate's own first wording.
- * A bullet that works in something the user said they have is left alone: that one is meant to say something new.
+ * The candidate's own wording a bullet goes back to: of its lines, the one it is closest to that does not repeat another
+ * bullet of the same entry. Null when every one would: the bullet is then dropped rather than said twice.
+ */
+function ownWording(item: BulletItem, siblings: string[]): string | null {
+  // A project's description is its subtitle, printed above its bullets, so it is never a bullet's own words.
+  const wordings = item.at.kind === "role" || item.sources.length === 1 ? item.sources : item.sources.slice(1);
+  const said = new Set(words(item.text));
+  return wordings.filter((s) => !siblings.some((o) => sayTheSame(s, o))).sort((a, b) => overlap(b, said) - overlap(a, said))[0] ?? null;
+}
+
+/** Where a bullet sits, as a key for dropping it once the loop over the resume is done. */
+const slot = (at: BulletItem["at"]) => `${at.kind}:${at.entry}:${at.bullet}`;
+
+/** The resume without the bullets at the given slots. */
+function withoutSlots(w: WrittenResume, dropped: Set<string>): WrittenResume {
+  if (dropped.size === 0) return w;
+  return {
+    ...w,
+    roles: w.roles.map((r, e) => ({ ...r, bullets: r.bullets.filter((_, i) => !dropped.has(`role:${e}:${i}`)) })),
+    projects: w.projects.map((p, e) => ({ ...p, bullets: p.bullets.filter((_, i) => !dropped.has(`project:${e}:${i}`)) })),
+  };
+}
+
+/** The resume with any bullet that says what an earlier one in the same role or project says left out. */
+export function withoutRepeats(w: WrittenResume): { written: WrittenResume; dropped: number } {
+  let dropped = 0;
+  const once = <B extends { text: string }>(bullets: B[]) =>
+    bullets.filter((b, i) => {
+      const repeat = bullets.slice(0, i).some((e) => sayTheSame(e.text, b.text));
+      if (repeat) dropped++;
+      return !repeat;
+    });
+  const written = { ...w, roles: w.roles.map((r) => ({ ...r, bullets: once(r.bullets) })), projects: w.projects.map((p) => ({ ...p, bullets: once(p.bullets) })) };
+  return { written, dropped };
+}
+
+/**
+ * The resume with any bullet the model rewrote out of all recognition put back to the candidate's own words: the
+ * wording it is closest to, and never one that repeats a bullet already in the same entry. With no such wording the
+ * bullet is dropped: put back to a project's first line, a rewritten bullet once repeated the bullet above it. A bullet
+ * that works in something the user said they have is left alone: that one is meant to say something new.
  */
 export function revertRewrites(w: WrittenResume, plan: WritingPlan): { written: WrittenResume; reverted: string[] } {
   const reverted: string[] = [];
+  const dropped = new Set<string>();
   const items = bulletItems(w, plan);
   const next: WrittenResume = { ...w, roles: w.roles.map((r) => ({ ...r, bullets: [...r.bullets] })), projects: w.projects.map((p) => ({ ...p, bullets: [...p.bullets] })) };
   for (const item of items) {
     if (item.users.length > 0 || item.sources.length === 0) continue;
     if (overlap(item.text, allowedWords(item, plan.terms)) >= REVERT_FLOOR) continue;
-    const own = item.at.kind === "role" ? item.sources[0] : item.sources.find((s, i) => i > 0 || item.sources.length === 1);
-    if (!own) continue;
     const list = item.at.kind === "role" ? next.roles[item.at.entry].bullets : next.projects[item.at.entry].bullets;
-    list[item.at.bullet] = { ...list[item.at.bullet], text: tidy(own) };
+    const own = ownWording(item, list.filter((_, i) => i !== item.at.bullet).map((b) => b.text));
+    if (own) list[item.at.bullet] = { ...list[item.at.bullet], text: tidy(own) };
+    else dropped.add(slot(item.at));
     reverted.push(item.id);
   }
-  return { written: next, reverted };
+  return { written: withoutSlots(next, dropped), reverted };
 }
 
 /**
@@ -278,23 +354,35 @@ export function revertRewrites(w: WrittenResume, plan: WritingPlan): { written: 
  */
 export function revertAddedNames(w: WrittenResume, drafted: WrittenResume, plan: WritingPlan): { written: WrittenResume; reverted: string[] } {
   const reverted: string[] = [];
-  const key = (i: BulletItem) => `${i.where}|${i.sources.join("|")}`;
-  const before = new Map(bulletItems(drafted, plan).map((i) => [key(i), i]));
+  // The bullets of one project all have the same lines, so the nth of them is matched with the draft's nth.
+  const keyed = (items: BulletItem[]) => {
+    const seen = new Map<string, number>();
+    return items.map((i) => {
+      const base = `${i.where}|${i.sources.join("|")}`;
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      return [`${base}|${n}`, i] as const;
+    });
+  };
+  const before = new Map(keyed(bulletItems(drafted, plan)));
+  const dropped = new Set<string>();
   const next: WrittenResume = { ...w, roles: w.roles.map((r) => ({ ...r, bullets: [...r.bullets] })), projects: w.projects.map((p) => ({ ...p, bullets: [...p.bullets] })) };
-  for (const item of bulletItems(w, plan)) {
+  for (const [key, item] of keyed(bulletItems(w, plan))) {
     if (item.sources.length === 0) continue;
     const extra = addedNames(item, plan.terms);
     if (extra.length === 0) continue;
-    const was = before.get(key(item));
-    let text: string | null = null;
-    if (was && was.text !== item.text && addedNames(was, plan.terms).length === 0) text = was.text;
-    else if (item.users.length === 0 && extra.some((n) => plan.terms.includes(n))) text = item.at.kind === "role" ? item.sources[0] : (item.sources.find((_, i) => i > 0) ?? null);
-    if (!text) continue;
+    const was = before.get(key);
     const list = item.at.kind === "role" ? next.roles[item.at.entry].bullets : next.projects[item.at.entry].bullets;
-    list[item.at.bullet] = { ...list[item.at.bullet], text: tidy(text) };
+    if (was && was.text !== item.text && addedNames(was, plan.terms).length === 0) {
+      list[item.at.bullet] = { ...list[item.at.bullet], text: tidy(was.text) };
+    } else if (item.users.length === 0 && extra.some((n) => plan.terms.includes(n))) {
+      const own = ownWording(item, list.filter((_, i) => i !== item.at.bullet).map((b) => b.text));
+      if (own) list[item.at.bullet] = { ...list[item.at.bullet], text: tidy(own) };
+      else dropped.add(slot(item.at));
+    } else continue;
     reverted.push(item.id);
   }
-  return { written: next, reverted };
+  return { written: withoutSlots(next, dropped), reverted };
 }
 
 export { missingMentions } from "./write";

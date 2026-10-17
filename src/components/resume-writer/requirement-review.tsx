@@ -91,7 +91,7 @@ export function RequirementReview({
               <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h4>
               {key === "logistics" && (
                 <p className="text-xs text-muted-foreground">
-                  Conditions of the job, not experience. They do not count toward the match. Tick one to mention it in a short line at the end of the summary, and say how you meet it.
+                  Conditions of the job, not experience. They do not count toward the match. Tick one to state it in the resume&apos;s header, next to your contact details, and say how you meet it.
                 </p>
               )}
               {key === "company" && <p className="text-xs text-muted-foreground">The company&apos;s own words. They set the tone of the resume and are never claimed as yours.</p>}
@@ -234,8 +234,11 @@ function RequirementRow({ r, answer, onChange }: { r: Requirement; answer: Answe
   const logistics = r.use === "logistics";
   const company = r.kind === "company";
   const core = !!r.core && !logistics && !company;
-  // Detail on what the record already shows makes the resume more believable; for the job's core the field is open.
-  const [adding, setAdding] = useState(core || answer.note !== "");
+  // Only the skills list has it: the record names it but never tells of work with it, so the resume can only list it.
+  const listedOnly = !!r.skillsOnly && r.verdict === "met" && !logistics && !company;
+  // Detail on what the record already shows makes the resume more believable; for the job's core, and for what only the
+  // skills list has, the field is open.
+  const [adding, setAdding] = useState(core || listedOnly || answer.note !== "");
   const chip = logistics
     ? answer.userHas
       ? { label: "Mentioned", className: "text-primary" }
@@ -244,10 +247,16 @@ function RequirementRow({ r, answer, onChange }: { r: Requirement; answer: Answe
       ? { label: "For tone", className: "text-muted-foreground" }
       : answer.userHas
         ? { label: "You have this", className: "text-primary" }
-        : CHIP[r.verdict];
+        : listedOnly
+          ? { label: "Only in your skills", className: "text-amber-700 dark:text-amber-400" }
+          : CHIP[r.verdict];
   const useLabel = r.kind === "keyword" ? REQUIREMENT_USE_LABEL[requirementUse(r)] : null;
   const hasEvidence = r.evidence.length > 0;
-  const placeholder = core ? "One line on how you do this makes the resume more believable" : "Optional note, for example: AWS certified, 2023";
+  const placeholder = listedOnly
+    ? `Anything you have built with ${r.text}? Say where, and the resume shows it as work`
+    : core
+      ? "One line on how you do this makes the resume more believable"
+      : "Optional note, for example: AWS certified, 2023";
   const noteInput = (label: string, hint = placeholder) => (
     <Input value={answer.note} maxLength={MAX_NOTE} placeholder={hint} aria-label={`${label}: ${r.text}`} onChange={(e) => onChange({ note: e.target.value })} />
   );
@@ -322,6 +331,11 @@ function RequirementRow({ r, answer, onChange }: { r: Requirement; answer: Answe
           <Collapse open={adding} className="min-w-0 flex-1">
             {noteInput("Detail")}
           </Collapse>
+          {listedOnly && (
+            <Collapse open={answer.note.trim() === ""} className="basis-full">
+              <p className="text-xs text-muted-foreground">Your record lists this as a skill but tells of no work with it, so the resume can only list it. Optional.</p>
+            </Collapse>
+          )}
         </div>
       )}
     </li>

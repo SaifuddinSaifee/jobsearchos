@@ -24,6 +24,15 @@ const EnvSchema = z.object({
    * with no better resumes (`npm run eval:writer`, 2026-10-15).
    */
   REVIEW_MODEL: z.string().default("deepseek-ai/DeepSeek-V4.1-Flash"),
+  /**
+   * Output limits for the resume writer, thinking included (GLM-5.3 counts its thinking as output). A draft past
+   * WRITER_MAX_TOKENS is stopped and written again at low effort with WRITER_FALLBACK_MAX_TOKENS; a revision past
+   * REVISE_MAX_TOKENS keeps the reviewed draft. Drafts that worked used up to about 23,000 in all, and one cut off at
+   * 24,000 had finished its thinking with no room left for the answer (Oct 17, 2026), so the first limit leaves room.
+   */
+  WRITER_MAX_TOKENS: z.coerce.number().int().min(4_000).default(28_000),
+  WRITER_FALLBACK_MAX_TOKENS: z.coerce.number().int().min(4_000).default(16_000),
+  REVISE_MAX_TOKENS: z.coerce.number().int().min(4_000).default(16_000),
   /** Extraction, parsing, scoring, classification, summarization. */
   EXTRACTION_MODEL: z.string().default("zai-org/GLM-5.3-Flash"),
   /** High-volume triage (discovery prefilter). */

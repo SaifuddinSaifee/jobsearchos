@@ -98,26 +98,25 @@ describe("the plan for the writer", () => {
     expect(buildResumeDoc(w, contact).doc.content?.some((n) => n.type === "section" && n.attrs?.kind === "achievements")).toBe(true);
   });
 
-  it("puts a condition the user asked to mention at the end of the summary, and nowhere else", () => {
+  it("puts a condition the user asked to mention in the header, and nowhere else", () => {
     const relocate = [...reqs, { ...reqs[0], id: "r9", kind: "must" as const, text: "Willing to relocate to San Francisco", use: "logistics" as const, verdict: "missing" as const, userHas: true }];
     const p = planWriting(richRecord(), job, relocate);
     expect(p.mentions).toEqual(["Willing to relocate to San Francisco"]);
     expect(p.users.map((u) => u.text)).not.toContain("Willing to relocate to San Francisco");
     const { user } = buildPrompt(p, job, relocate);
-    expect(user).toContain('MENTION BRIEFLY (write "mention": one short sentence in the candidate\'s words, for example "Open to relocating to San Francisco." It closes the summary)\nWilling to relocate to San Francisco');
+    expect(user).toContain('MENTION BRIEFLY (write "mention": a few words in the candidate\'s words, under 70 characters, for example "Open to relocating to San Francisco". It goes in the header, next to the contact details)\nWilling to relocate to San Francisco');
     expect(user.slice(user.indexOf("WHAT THE JOB ASKS FOR"), user.indexOf("THE CANDIDATE'S ROLES"))).not.toContain("relocate");
 
-    // Its own field, so the summary cannot crowd it out, put after the summary in code. Left out, it does not throw the
-    // draft away: the code checks find it missing and the revision writes it.
+    // Its own field, so the summary cannot crowd it out, put in the header by code. Left out, it does not throw the draft
+    // away: the code checks find it missing and the revision writes it.
     const schema = answerSchema(p);
     expect(schema.safeParse(answer(OWN)).success).toBe(true);
     expect(missingMentions(readWriting(answer(OWN), p).summary, p.mentions)).toEqual(["Willing to relocate to San Francisco"]);
-    expect(readWriting(answer(OWN, { mention: "Open to relocating to San Francisco" }), p).summary).toBe("Product manager who shipped billing to 2,000 merchants. Open to relocating to San Francisco.");
-    // Not twice, when the summary already says it.
-    const said = answer(OWN, { summary: "Product manager, open to relocating to San Francisco.", mention: "Happy to relocate to San Francisco." });
-    expect(readWriting(said, p).summary).toBe("Product manager, open to relocating to San Francisco.");
+    const told = readWriting(answer(OWN, { mention: "Open to relocating to San Francisco." }), p);
+    expect([told.summary, told.mention]).toEqual(["Product manager who shipped billing to 2,000 merchants.", "Open to relocating to San Francisco"]);
     // Nothing to mention: whatever the model wrote there is dropped.
-    expect(readWriting(answer(OWN, { mention: "Open to relocating." }), plan).summary).toBe("Product manager who shipped billing to 2,000 merchants.");
+    const none = readWriting(answer(OWN, { mention: "Open to relocating." }), plan);
+    expect([none.summary, none.mention]).toEqual(["Product manager who shipped billing to 2,000 merchants.", ""]);
   });
 
   it("closes the summary with the mention line", () => {
@@ -296,19 +295,25 @@ describe("makeWriter: write, review, revise", () => {
     expect(out.notes.join(" ")).toContain("One bullet was put back to your own wording");
   });
 
-  it("asks a draft again with less thinking and less room when it runs out, and never asks a revision twice", async () => {
+  it("writes a draft that ran out of room again at low effort with less room, marks it a fallback, and never asks a revision twice", async () => {
     const cutOff = new Error("Output was cut off (max_tokens); the input may be too long");
     const chat = vi.fn().mockRejectedValueOnce(cutOff).mockResolvedValueOnce(answer(OWN)).mockRejectedValueOnce(cutOff).mockResolvedValueOnce(answer(OWN));
     let trace: WriterTrace | null = null;
-    await makeWriter(chat as never, asks, async () => {}, { effort: "max", onTrace: (t) => (trace = t) })(plan, job, reqs);
-    const calls = chat.mock.calls.map((c) => [(c[2] as { step: string }).step, (c[2] as { reasoningEffort: string }).reasoningEffort, (c[2] as { maxTokens: number }).maxTokens]);
-    // A stuck revision keeps the reviewed draft: asking again cost as much as the first try and gave nothing.
-    expect(calls).toEqual([
-      ["write-resume", "max", 24_000],
-      ["write-resume", "high", 16_000],
-      ["revise-resume", "max", 16_000],
+    const stages: string[] = [];
+    const out = await makeWriter(chat as never, asks, async () => {}, { onTrace: (t) => (trace = t) })(plan, job, reqs, null, (stage, status, detail) => {
+      if (stage === "write") stages.push(`${status} ${detail ?? ""}`);
+    });
+    const calls = chat.mock.calls.map((c) => c[2] as { step: string; reasoningEffort: string; maxTokens: number; traceAttributes?: Record<string, unknown> });
+    // Never medium: a medium retry ran out of room too. A stuck revision keeps the reviewed draft.
+    expect(calls.map((c) => [c.step, c.reasoningEffort, c.maxTokens])).toEqual([
+      ["write-resume", "high", 28_000],
+      ["write-resume", "low", 16_000],
+      ["revise-resume", "high", 16_000],
     ]);
-    expect(trace).toMatchObject({ draftAttempts: 2, revision: "failed" });
+    expect(calls[1].traceAttributes).toEqual({ "resume.attempt": 2, "resume.fallback": true });
+    expect(trace).toMatchObject({ draftAttempts: 2, fallback: true, revision: "failed" });
+    expect(stages).toEqual(["done fallback: the first ran too long, written with less thinking"]);
+    expect(out.notes[0]).toMatch(/fallback draft/);
 
     const broken = vi.fn().mockResolvedValueOnce(answer(OWN)).mockRejectedValueOnce(new Error("The model's output was not valid JSON"));
     await makeWriter(broken as never, asks)(plan, job, reqs);

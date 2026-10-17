@@ -34,12 +34,15 @@ const MAX_JD_CHARS = 50_000;
 
 class Failure extends Error {}
 
-/** Carries over what the user said last time (they have it, and a note) to the same requirements this time. */
+/**
+ * Carries over what the user said last time to the same requirements this time: that they have it, and any note, also
+ * one added to something the record already shows ("Add detail"), which is not ticked but is still theirs to keep.
+ */
 export function carryOver(fresh: Requirement[], previous: Requirement[]): Requirement[] {
-  const said = new Map(previous.filter((r) => r.userHas).map((r) => [normalizeText(r.text), r]));
+  const said = new Map(previous.filter((r) => r.userHas || r.note.trim() !== "").map((r) => [normalizeText(r.text), r]));
   return fresh.map((r) => {
     const before = said.get(normalizeText(r.text));
-    return before ? { ...r, userHas: true, note: before.note } : r;
+    return before ? { ...r, userHas: r.userHas || before.userHas, note: before.note } : r;
   });
 }
 

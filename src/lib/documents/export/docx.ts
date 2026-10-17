@@ -30,6 +30,11 @@ const LINK_COLOR = "0563C1";
 
 type Style = { bold?: boolean; italics?: boolean; size?: number; color?: string };
 
+/** Sections laid out as one line of items with a divider between them rather than a list, as the PDF does. */
+const ROW_SECTIONS = new Set(["certifications", "achievements"]);
+/** The divider between items: plain text, so a parser reading the file sees where one item ends. */
+const ITEM_SEP = "   |   ";
+
 /**
  * A document as a Word file: A4, the same fonts, sizes and spacing as the PDF (taken from the page settings), real
  * Word bullets and tab-aligned dates. The PDF is the exact layout; Word lays text out a little differently, so line
@@ -68,6 +73,13 @@ export async function renderDocx(content: DocJSON, settings: PageSettings, opts:
 
   const field = (n: DocJSON, type: string, style?: Style) => runs(firstOf(n, type), style);
   const isEmpty = (n: DocJSON, type: string) => plainText(firstOf(n, type)).trim() === "";
+
+  /** A list of short items as one paragraph, in order, a divider between them. */
+  function inRow(list: DocJSON) {
+    const items = children(list).map((b) => runs(children(b).find((c) => c.type === "paragraph")));
+    const row = items.flatMap((r, i) => (i === 0 ? r : [new TextRun({ text: ITEM_SEP, color: "888888" }), ...r]));
+    out.push(new Paragraph({ children: row, alignment: AlignmentType.LEFT, spacing: line }));
+  }
 
   function bullets(list: DocJSON | undefined, level: number, out: Paragraph[]) {
     for (const b of children(list)) {
@@ -151,9 +163,11 @@ export async function renderDocx(content: DocJSON, settings: PageSettings, opts:
             keepNext: true,
           }),
         );
-        children(n)
-          .filter((c) => c.type !== "sectionTitle")
-          .forEach((c, i) => item(c, i === 0));
+        const body = children(n).filter((c) => c.type !== "sectionTitle");
+        // A flat list of short items, as certifications and achievements are, goes in rows; anything else as it is.
+        const flat = body.length === 1 && body[0].type === "bulletList" && children(body[0]).every((b) => !children(b).some((c) => c.type === "bulletList"));
+        if (ROW_SECTIONS.has(String(n.attrs?.kind ?? "")) && flat) inRow(body[0]);
+        else body.forEach((c, i) => item(c, i === 0));
         break;
       }
       case "bulletList":

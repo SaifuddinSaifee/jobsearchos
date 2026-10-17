@@ -7,13 +7,13 @@ vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 import {
   RESUME_BANNED_EXTRA,
   answerSchema,
-  budgets,
   buildPrompt,
   checkWriting,
   pickFraming,
   planWriting,
   recommendFraming,
   readWriting,
+  shareBullets,
   skillTerms,
   tidy,
   type WriterAnswer,
@@ -31,14 +31,35 @@ describe("pickFraming", () => {
   });
 });
 
-describe("budgets", () => {
-  it("gives the latest role the most, and fits the total", () => {
-    expect(budgets(5, 14)).toEqual([4, 4, 3, 2, 1]);
-    expect(budgets(5, 16)).toEqual([5, 4, 3, 2, 2]);
-    expect(budgets(2, 14)).toEqual([5, 4]);
-    expect(budgets(3, 8)).toEqual([3, 3, 2]);
-    expect(budgets(2, 1)).toEqual([1, 1]);
-    expect(budgets(0, 16)).toEqual([]);
+describe("proofStrength", () => {
+  it("counts saying how the work was checked: tests, evals, accuracy, an approval step", () => {
+    expect(proofStrength("Shipped a chatbot, checked by a 50+ edge-case test suite") - proofStrength("Shipped a chatbot with a 50+ edge-case suite")).toBe(1);
+    expect(proofStrength("Publishes release notes after approval in a Slack modal")).toBeGreaterThan(proofStrength("Publishes release notes from a Slack modal"));
+  });
+});
+
+describe("shareBullets", () => {
+  const roles = (...demand: number[]) => demand.map((d) => ({ demand: d, cap: 10 }));
+
+  it("gives each role bullets by how much it has to say for the job, within the total", () => {
+    // The record behind the Great Question resume: the latest role has most of what the job asks for.
+    expect(shareBullets([{ demand: 8, cap: 9 }, { demand: 4, cap: 4 }, { demand: 2, cap: 2 }], 14)).toEqual([8, 4, 2]);
+    // A second job that is the relevant one gets the most, whatever its place.
+    expect(shareBullets(roles(2, 7, 1), 12)).toEqual([2, 9, 1]);
+    // One long role takes what it can use.
+    expect(shareBullets([{ demand: 9, cap: 11 }], 14)).toEqual([11]);
+  });
+
+  it("never gives a role more than it offers, nor less than one", () => {
+    expect(shareBullets([{ demand: 9, cap: 3 }, { demand: 0, cap: 5 }], 10)).toEqual([3, 5]);
+    expect(shareBullets(roles(6, 0, 0), 6)).toEqual([4, 1, 1]);
+    // A role is part of the history: it keeps its one bullet even past a small total.
+    expect(shareBullets(roles(1, 1, 1), 2)).toEqual([1, 1, 1]);
+  });
+
+  it("falls back to more for the latest roles when nothing is matched", () => {
+    expect(shareBullets(roles(0, 0, 0), 12)).toEqual([5, 4, 3]);
+    expect(shareBullets([], 14)).toEqual([]);
   });
 });
 
@@ -48,8 +69,9 @@ describe("planWriting", () => {
 
   it("takes the most recent roles, each under the framing that fits, with the wording that fits it", () => {
     expect(plan.roles.map((r) => [r.alias, r.employer, r.title, r.budget])).toEqual([
-      ["e1", "Acme", "Product Manager", 5],
-      ["e2", "Initech", "Engineer", 4],
+      // Both answer the job alike, so they would share the bullets evenly; neither gets more than it has facts to tell.
+      ["e1", "Acme", "Product Manager", 3],
+      ["e2", "Initech", "Engineer", 1],
     ]);
     // The wording that carries a number comes first: the writer starts from it.
     expect(plan.roles[0].facts[0].texts).toEqual(["Launched self-serve billing for 2,000 merchants", "Built the billing service in TypeScript"]);
@@ -102,7 +124,11 @@ describe("planWriting", () => {
     expect(p.users[0].skills).toEqual(["Kafka"]);
     // The skills section is written by code, with what the user has in it; the writer is not asked to list skills.
     expect(p.skills.flatMap((l) => l.items)).toContain("Kafka");
-    expect(buildPrompt(p, job, withMap()).user).not.toContain("SKILLS");
+    const prompt = buildPrompt(p, job, withMap()).user;
+    expect(prompt).not.toMatch(/^SKILLS/m);
+    // No line of the record mentions Kafka, so the writer is told the skills section carries it, not a bullet.
+    expect(p.listedOnly).toEqual(["Kafka"]);
+    expect(prompt).toContain("IN THE SKILLS SECTION ONLY (listed there already; no line of the candidate's mentions them)\nKafka");
     const two = planWriting(record(), { ...job, technologies: ["Rails", "TypeScript"] }, [{ ...withMap()[0], text: "Rails and TypeScript experience", userHas: true }]);
     expect(two.skills.flatMap((l) => l.items)).toEqual(expect.arrayContaining(["Rails", "TypeScript"]));
   });
@@ -152,6 +178,31 @@ describe("planWriting", () => {
     rec.projects[1].wordings = [{ id: "pw", text: `${"Built a document collection platform. ".repeat(30)}Launched payments products for merchants and wrote SQL reports.`, framingId: null, form: "bullet", sources: [], provenance: rec.projects[1].provenance }];
     const p = planWriting(rec, job, withMap([{ verdict: "met", refs: ["proj2"] }]));
     expect(p.projects.map((x) => x.name)).toEqual(["Garden app", "Ledger toy"]);
+  });
+
+  it("offers a fact tied to the job's core even when its wording belongs to the role's other telling", () => {
+    const rec = record();
+    const daily = fact("fact5", [["w5", "Works daily in Claude Code with rules files and parallel agents"]]);
+    daily.wordings[0].framingId = "fEng";
+    rec.employers[0].roles[0].facts.push(daily);
+    const offeredIds = (reqs: ReturnType<typeof withMap>) => planWriting(rec, job, reqs).roles[0].facts.map((f) => f.factId);
+    // Written as Product Manager, an engineering line is left out, unless the job's core rests on it.
+    expect(offeredIds(withMap([{ verdict: "met", refs: ["fact5"] }]))).not.toContain("fact5");
+    expect(offeredIds(withMap([{ verdict: "met", refs: ["fact5"], core: true, weight: 8 }]))).toContain("fact5");
+  });
+
+  it("offers a project's wordings that prove the most, not its first ones", () => {
+    const rec = record();
+    rec.projects[0].wordings = ["Led discovery with a customer validation plan", "Wrote the MVP roadmap", "Scoped the pilot", "Covered by 248 automated tests, which caught a bug every other check missed"].map((text, i) => ({
+      id: `pw${i}`,
+      text,
+      framingId: null,
+      form: "bullet" as const,
+      sources: [],
+      provenance: rec.projects[0].provenance,
+    }));
+    const p = planWriting(rec, job, withMap([{ verdict: "met", refs: ["proj1"] }]));
+    expect(p.projects.find((x) => x.name === "Ledger toy")!.texts[0]).toBe("Covered by 248 automated tests, which caught a bug every other check missed");
   });
 
   it("follows the experience limits from the generation instructions", () => {
@@ -216,7 +267,8 @@ describe("answers", () => {
     expect(parsed.success).toBe(true);
     expect(parsed.data?.projects[0].bullets).toEqual([{ text: "Built the billing prototype in a week" }, { text: "Shipped it to 40 merchants" }]);
     const shown = JSON.stringify(z.toJSONSchema(schema));
-    expect(shown).toMatch(/"bullets":\{"default":\[\],"type":"array","items":\{"type":"object","properties":\{"text"/);
+    // A project bullet may also name the claims it proves.
+    expect(shown).toMatch(/"bullets":\{"default":\[\],"type":"array","items":\{"type":"object","properties":\{"facts":\{"description":"The \\"u\\" ids it proves, if any","type":"array","items":\{"type":"string"\}\},"text"/);
   });
 
   it("drops projects and certifications that were not offered, instead of failing the whole draft", () => {
@@ -311,12 +363,12 @@ describe("buildPrompt", () => {
     expect(system).toContain("The candidate is qualified for this job");
     expect(user).toContain("Product Manager at Stripe, Remote");
     expect(user).toContain("r1 [Must have, the candidate has this]: Experience launching payments products");
-    expect(user).toContain('e1: Product Manager at Acme, Jan 2021 - Present. Write up to 5 bullets.');
+    expect(user).toContain('e1: Product Manager at Acme, Jan 2021 - Present. Write up to 3 bullets.');
     expect(user).toContain('f1: "Launched self-serve billing for 2,000 merchants" | "Built the billing service in TypeScript"');
     expect(user).toContain("THE CANDIDATE SAYS THEY HAVE THIS\nu1: Experience launching payments products (their note: AWS certified)");
     expect(user).toContain("Tone: confident.");
     expect(user).toContain("No jargon.");
-    expect(user).toContain("PROJECTS (include the ones that answer the job; up to 2 bullets each)\np1: Ledger toy.");
+    expect(user).toContain("PROJECTS (include every one, chosen for this job; up to 2 bullets each, the ones that prove the most)\np1: Ledger toy.");
   });
 });
 

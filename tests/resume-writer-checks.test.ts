@@ -5,9 +5,10 @@ vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 import { mergeProvenance } from "@/lib/career/schema";
 import { closeCutJson } from "@/lib/llm/structured";
-import { addedNames, bareClaimFindings, bulletItems, droppedStrong, mergedResults, revertAddedNames, unproven } from "@/lib/resume-writer/faithful";
+import { headerLocation } from "@/lib/resume-writer/build";
+import { addedNames, bareClaimFindings, bulletItems, droppedStrong, mergedResults, revertAddedNames, revertRewrites, twoStories, unbackedInSummary, unproven, withoutRepeats } from "@/lib/resume-writer/faithful";
 import { buildReviewPrompt, makeReviewer, renderDraft, reviewSchema, salvageReview } from "@/lib/resume-writer/review";
-import { buildPrompt, inSentenceCase, offered, planWriting, readWriting, resultClause, strongestClause, withoutRepeatedStack, type WriterAnswer } from "@/lib/resume-writer/write";
+import { buildPrompt, clipAtSentence, headerMention, inSentenceCase, offered, planWriting, readWriting, resultClause, strongestClause, withoutRepeatedStack, type WriterAnswer } from "@/lib/resume-writer/write";
 import { codeFindings, repeatedInSummary, tooLong } from "@/lib/resume-writer/writer";
 import { job, record, withMap } from "./resume-writer-helpers";
 
@@ -115,6 +116,21 @@ describe("checks on what was written", () => {
     expect(mergedResults("Raised activation by 45%, cutting time to first value from 8 minutes to 1.", plan)).toEqual([]);
   });
 
+  it("finds a tool the summary names that no bullet shows, but not one a bullet shows", () => {
+    const p = { ...plan, terms: ["Rails", "React"] };
+    const w = readWriting(
+      answer([{ facts: [alias("fact3")], text: ONBOARDING }, { facts: [alias("fact1")], text: LOGGING }], { summary: "Engineer who builds React frontends on Rails and logs every LLM call in Postgres." }),
+      p,
+    );
+    expect(unbackedInSummary(w, bulletItems(w, p), p)).toEqual(["Rails", "React"]);
+  });
+
+  it("finds a bullet that tells two separate results joined by a semicolon, not one result told in full", () => {
+    const w = readWriting(answer([{ facts: [alias("fact2")], text: MIGRATION }, { facts: [alias("fact3")], text: ONBOARDING }]), plan);
+    const found = twoStories(bulletItems(w, plan));
+    expect(found.map((x) => [x.item.id, x.clauses])).toEqual([["b1", ["Migrated the platform to Next.js, handling 3x traffic", "cut support tickets by 36% with an AI chatbot"]]]);
+  });
+
   it("finds a role that leaves out its strongest result while a bullet proves less", () => {
     const w = readWriting(answer([{ facts: [alias("fact1")], text: LOGGING }, { facts: [alias("fact2")], text: MIGRATION }]), plan);
     const found = droppedStrong(w, bulletItems(w, plan));
@@ -203,10 +219,26 @@ describe("reading what the writer chose", () => {
     expect(offered("p9", items, names)).toBeUndefined();
   });
 
-  it("flags a resume that leaves out every project the record offers", () => {
+  it("flags a draft with no summary, or one that left a role out, for the revision to write", () => {
+    const p = planWriting(provenRecord(), job, core);
+    const w = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }], { summary: "" }), p);
+    // The older role was left out: it holds its own lines, marked, and the revision is asked to write it.
+    expect(w.roles[1]).toMatchObject({ fromRecord: true });
+    expect(w.roles[0].fromRecord).toBeUndefined();
+    const found = codeFindings(w, bulletItems(w, p), p, job, []).filter((f) => f.kind === "left-out");
+    expect(found.find((f) => f.bullet === "summary")?.detail).toBe("is empty; write the summary");
+    expect(found.filter((f) => f.detail.includes("at Initech (e2)"))).toHaveLength(1);
+  });
+
+  it("flags each project code chose for the job that the draft leaves out", () => {
     const p = planWriting(provenRecord(), job, withMap([{ verdict: "met", refs: ["proj1"] }]));
-    const w = readWriting(answer([{ facts: [p.roles[0].facts[0].alias], text: LOGGING }]), p);
-    expect(codeFindings(w, bulletItems(w, p), p, job, []).filter((f) => f.kind === "left-out")).toHaveLength(1);
+    const left = (projects: WriterAnswer["projects"]) => {
+      const w = readWriting(answer([{ facts: [p.roles[0].facts[0].alias], text: LOGGING }], { projects }), p);
+      return codeFindings(w, bulletItems(w, p), p, job, []).filter((f) => f.kind === "left-out" && f.detail.startsWith("leaves out the project")).map((f) => f.detail);
+    };
+    expect(p.projects.length).toBeGreaterThan(0);
+    expect(left([])).toHaveLength(p.projects.length);
+    expect(left([{ project: p.projects[0].alias, bullets: [{ text: "Built a payments ledger in SQL" }] }])).toHaveLength(p.projects.length - 1);
   });
 });
 
@@ -251,5 +283,107 @@ describe("the review prompt", () => {
     expect(user).toContain("- Own the payments roadmap");
     expect(user).toContain("Experience launching payments products (no detail given)");
     expect(system).toContain("The skills section is built by code from the candidate's record: score it, but list no edits for it.");
+  });
+});
+
+describe("the header's location", () => {
+  it("carries how the candidate meets the job's conditions, and leaves out a bare way of working the job's location makes evasive", () => {
+    expect(headerLocation("Remote", "", true)).toBe("");
+    expect(headerLocation("Remote | Open to relocate", "", true)).toBe("");
+    // With no location set by the job, the candidate's own header stays as they wrote it.
+    expect(headerLocation("Remote", "", false)).toBe("Remote");
+    expect(headerLocation("Mumbai, India", "", true)).toBe("Mumbai, India");
+    expect(headerLocation("Mumbai, India", "Open to relocating to Toronto", true)).toBe("Mumbai, India | Open to relocating to Toronto");
+    expect(headerLocation("Remote", "Authorized to work in Canada", true)).toBe("Authorized to work in Canada");
+  });
+
+  it("takes a short mention out of the summary and into the header; a long one still closes the summary", () => {
+    const p = { ...plan, mentions: ["Location: Canada, Remote (their note: moving to Toronto in March)"], jobLocation: "Canada, Remote" };
+    const short = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }], { summary: "Engineer who ships.", mention: "Relocating to Toronto in March." }), p);
+    expect([short.summary, short.mention, short.locationAsked]).toEqual(["Engineer who ships.", "Relocating to Toronto in March", true]);
+    const line = "Relocating to Toronto in March, with a work permit already granted and no sponsorship needed.";
+    const long = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }], { summary: "Engineer who ships.", mention: line }), p);
+    expect([long.summary, long.mention]).toEqual([`Engineer who ships. ${line}`, ""]);
+  });
+});
+
+// Trace acdb5f21352d4b4407820f3c1b35a053: the draft proved the user's MCP note in a project bullet; code took "MCP" for a
+// name the bullet added, put back the project's first wording (cut off at "profile..."), and the page said it twice.
+describe("a project bullet that proves a claim", () => {
+  const MCP_NOTE = "JobSearchOS MCP Server: App exposes jobs, the career record and resume generation as tools.";
+  const LONG = `Designed and built solo a self-hosted job-search platform that takes a role from a posting link to a sent outreach email. ${"Postings become structured records through a fetch pipeline. ".repeat(12)}Made history immutable from day one: profile versions are append-only.`;
+  const SETUP = "Designed and built solo a self-hosted job-search platform that takes a role from a posting link to a sent outreach email";
+  function mcpPlan() {
+    const rec = provenRecord();
+    rec.projects[0].wordings = [wording("pw1", LONG)];
+    const reqs = withMap([{ verdict: "met", refs: ["proj1"] }]);
+    const mcp = { ...reqs[0], id: "r9", kind: "keyword" as const, text: "MCP", use: "skill" as const, verdict: "met" as const, userHas: false, note: MCP_NOTE, refs: [] };
+    return planWriting(rec, { ...job, technologies: ["MCP"] }, [...reqs, mcp]);
+  }
+
+  it("is never offered or put back cut off mid-sentence", () => {
+    const p = mcpPlan();
+    const offeredText = p.projects.find((x) => x.name === "Ledger toy")!.texts[0];
+    expect(offeredText.length).toBeLessThanOrEqual(600);
+    expect(offeredText).toMatch(/\.$/);
+    expect(offeredText).not.toMatch(/\.\.\.$/);
+    expect(clipAtSentence("One sentence here. Two three four five.", 20)).toBe("One sentence here.");
+    expect(clipAtSentence("Short line.", 100)).toBe("Short line.");
+  });
+
+  it("names the claim it proves, and is kept", () => {
+    const p = mcpPlan();
+    const u = p.users.find((x) => x.text === "MCP")!.alias;
+    const proj = p.projects.find((x) => x.name === "Ledger toy")!.alias;
+    const mcp = "Exposed jobs, the career record and resume generation as tools through a JobSearchOS MCP Server";
+    const w = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }], { projects: [{ project: proj, bullets: [{ text: SETUP }, { facts: [u], text: mcp }] }] }), p);
+    expect(w.projects[0].bullets[1].userRequirementIds).toEqual(["r9"]);
+    const named = revertAddedNames(w, w, p);
+    const safe = revertRewrites(named.written, p);
+    expect(safe.written.projects[0].bullets.map((b) => b.text)).toEqual([SETUP, mcp]);
+    // Named but not cited, as the traced draft did: tied to the claim all the same.
+    const uncited = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }], { projects: [{ project: proj, bullets: [{ text: mcp }] }] }), p);
+    expect(uncited.projects[0].bullets[0].userRequirementIds).toEqual(["r9"]);
+  });
+
+  it("goes back to a wording that does not repeat a bullet above it, or is left out", () => {
+    // With no claim to tie it to, the MCP bullet names a job term its lines do not: its only own wording repeats the first bullet.
+    const p = { ...mcpPlan(), users: [] };
+    const proj = p.projects.find((x) => x.name === "Ledger toy")!.alias;
+    const w = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }], { projects: [{ project: proj, bullets: [{ text: SETUP }, { text: "Exposed the app's tools to Claude through an MCP Server" }] }] }), p);
+    const out = revertAddedNames(w, w, p);
+    expect(out.reverted).toHaveLength(1);
+    expect(out.written.projects[0].bullets.map((b) => b.text)).toEqual([SETUP]);
+  });
+
+  it("is left out when it says what a bullet above it says", () => {
+    const w = readWriting(answer([{ facts: [alias("fact3")], text: ONBOARDING }, { facts: [alias("fact2")], text: "Rebuilt onboarding, increasing user activation by 45%" }]), plan);
+    const out = withoutRepeats(w);
+    expect([out.dropped, out.written.roles[0].bullets.length]).toEqual([1, 1]);
+  });
+});
+
+describe("a line split into two stories", () => {
+  it("may run past the role's count, since it takes no other fact's place", () => {
+    const p = { ...plan, roles: plan.roles.map((r, i) => (i === 0 ? { ...r, budget: 2 } : r)) };
+    const w = readWriting(
+      answer([
+        { facts: [alias("fact2")], text: "Migrated the platform to Next.js, handling 3x traffic" },
+        { facts: [alias("fact2")], text: "Cut support tickets by 36% with an AI chatbot" },
+        { facts: [alias("fact3")], text: ONBOARDING },
+        { facts: [alias("fact1")], text: LOGGING },
+      ]),
+      p,
+    );
+    expect(w.roles[0].bullets).toHaveLength(3);
+  });
+});
+
+describe("the header's mention", () => {
+  it("never names a place or anything else the candidate's note does not", () => {
+    // The note said remote; the job said Canada; the candidate is in India.
+    expect(headerMention("In Canada; can work remotely.", ["I can work remotely"])).toBe("Can work remotely");
+    expect(headerMention("Relocating to Toronto in March", ["Relocating to Toronto in March, permit in hand"])).toBe("Relocating to Toronto in March");
+    expect(headerMention("Open to relocating to Toronto.", [])).toBe("Open to relocating to Toronto");
   });
 });

@@ -239,8 +239,9 @@ describe("the writer's use of the job's terms", () => {
   const plan = planWriting(record(), richJob, reqs);
   it("puts the job's terms and the company in the prompt, each in its own place", () => {
     const { system, user } = buildPrompt(plan, richJob, reqs);
-    expect(user).toContain("JOB TERMS (use them exactly as written, the first ones matter most)\nKafka");
-    const asked = user.slice(user.indexOf("WHAT THE JOB ASKS FOR"), user.indexOf("JOB TERMS"));
+    // Claimed with no note and in no line of the record: the skills section carries it, not a bullet.
+    expect(user).toContain("IN THE SKILLS SECTION ONLY (listed there already; no line of the candidate's mentions them)\nKafka");
+    const asked = user.slice(user.indexOf("WHAT THE JOB ASKS FOR"), user.indexOf("IN THE SKILLS SECTION ONLY"));
     expect(asked).toContain("Experience with Kafka");
     expect(asked).not.toMatch(/relocate|Books apps|Adaptability|mission/);
     expect(user).toContain("THE COMPANY (for tone and context only; never quote it, never name it in the resume)\nField: Books apps");
@@ -254,7 +255,7 @@ describe("the writer's use of the job's terms", () => {
     expect(system).toContain("never the company's name or mission");
     expect(system).toContain("Never copy its sentences");
     expect(system).toContain("Never move one into a line about other work");
-    expect(system).toContain("One achievement per bullet");
+    expect(system).toContain("One story per bullet");
   });
 
   it("asks for what was done in the candidate's words, not a copy of the posting", () => {

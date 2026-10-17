@@ -202,6 +202,17 @@ describe("matchRequirements", () => {
     expect(out[0].evidence).toEqual(["Software Engineer at Acme: Built the billing service in TypeScript used by 2,000 merchants"]);
   });
 
+  it("marks what only the skills list shows, unless a line of the record names it", async () => {
+    const reqs = buildRequirements(job({ technologies: ["Postgres"], requirements: { required: ["Docker in production"], preferred: [] } }));
+    const matcher = vi.fn<Matcher>(async () => new Map([["r1", { verdict: "met" as const, refs: ["skill1"] }]]));
+    const out = await matchRequirements(reqs, indexSource(record()), matcher);
+    // A line of the record says Docker. Postgres is in the skills list and nowhere else: the review screen asks about it.
+    expect(out.map((r) => [r.text, r.skillsOnly])).toEqual([
+      ["Docker in production", false],
+      ["Postgres", true],
+    ]);
+  });
+
   it("scores the share of weight the source answers, partial for half, and counts what the user says they have", () => {
     const base = buildRequirements(job({ requirements: { required: ["A", "B"], preferred: ["C"] } }));
     expect(matchScore(base)).toBe(0);

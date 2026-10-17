@@ -30,6 +30,11 @@ export function traceStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
   return traceChain(fn, { name, processInput: noContent, processOutput: noContent })();
 }
 
+/** Adds attributes to the current step's span in the trace (Phoenix only; nothing here reaches the database). */
+export function setStepAttributes(attributes: Record<string, string | number | boolean>) {
+  trace.getActiveSpan()?.setAttributes(attributes);
+}
+
 /** Adds ids learned part way through a run (a version's document, say). Only calls made afterwards get them. */
 export function addLlmIds(ids: LlmIds) {
   const ctx = store.getStore();

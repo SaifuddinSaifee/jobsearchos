@@ -152,7 +152,9 @@ editor.
 - **Where the time goes.** The page lists each step with how long it took: reading, matching, the first draft, the review
   (with its score), the review's edits (or "nothing needed"), and saving. The running step's time counts up, and a
   total shows below, not counting the time you spend on the match. The same list stays on the page once the resume is
-  ready, has failed or was stopped.
+  ready, has failed or was stopped. If the first draft thinks for too long it is stopped and written again with less thinking;
+  the draft step and the resume's notes say it was a fallback, so you know to read it with that in mind or write it
+  again.
 - **Match first.** Everything the job asks for (must haves, nice to haves, the posting's keywords and the company's
   values) is lined up against your record: **In your record**, **Partly in your record** or **Not in your record**, with
   the lines of your record behind each. Short terms like a tool name are found directly; the rest are judged by the AI,
@@ -173,27 +175,38 @@ editor.
   and your pick is remembered for every later resume.
 - **You are taken to be qualified.** Whatever the record does not fully show of the experience and skills the job asks for
   (its must haves and nice to haves) starts out ticked as **I have this**, because a record is usually shorter than what you
-  have done. Untick what you would rather leave out, and add a note where it helps ("AWS certified, 2023"). Each ticked
+  have done. Untick what you would rather leave out, and add a note where it helps ("AWS certified, 2023"). Your ticks and
+  notes, including notes added to what the record already shows, come back the next time you write a resume for the job. Each ticked
   item with a note is proven on the page: written as work you did, in a bullet under the role your note places it in, with
   that role's real product and tools and the specifics of your note, with no invented numbers, certifications or degrees.
   A ticked item with no note is listed in your skills, or named inside a bullet whose own lines show that work; it never
   gets a bullet of its own or a place in the summary, and the screen says so under it ("Say where you did it and the
   resume shows it as work"). A **Core** item opens a note field ("One line on how you do this makes the resume
-  more believable"), and **Add detail** does the same for anything already in your record. **Keywords are your pick** and start unticked, as do fields, ways of working,
+  more believable"), and **Add detail** does the same for anything already in your record. Something your record has
+  only in its skills list, with no line telling of work with it (MCP), is marked **Only in your skills** with its note
+  field open: "Anything you have built with MCP? Say where, and the resume shows it as work". It is optional; without a
+  note the resume lists it in the skills section and nowhere else. **Keywords are your pick** and start unticked, as do fields, ways of working,
   the company's values and conditions: tick the ones you want in. The footer shows "Your record covers 76%. With what you
   have: 100%", which updates as you tick. **Don't show this step again** skips the match screen from then on, and the
   experience and skills are then taken as yours without asking (a switch in Profile, under instructions, turns the screen
   back on).
 - **Written for the job.** The most recent roles, each under the title that fits the job. Only the facts you worded for that
   title are used (an engineering job gets your engineering facts, not your product ones; a role with nothing for that title
-  keeps all its wording so it is never missing), chosen for what they answer of the job and how much they prove: a line
-  with a measured result is never lost to one that only names the right things, and of a fact's versions the one with the
-  result comes first. Each recent role opens with a bullet that proves one of the job's core requirements, a bullet leads
+  keeps all its wording so it is never missing; a fact the job's core rests on is used whatever title it was worded for),
+  chosen for what they answer of the job and how much they prove: a line with a measured result, or one that says how the
+  work was checked (tests, an eval, an accuracy number, an approval step), is never lost to one that only names the right
+  things, and of a fact's versions the one with the result comes first. The bullets go to the roles by how much each has
+  for this job, not by a fixed share for the latest: about 14 in all, so a role with most of the job's evidence gets most
+  of them (8, 4 and 2 for the Great Question job), and no role gets more than it has facts or fewer than one. A
+  project's versions that prove the most are offered, not its first ones. Each recent role opens with a bullet that proves one of the job's core requirements, a bullet leads
   with its result where you gave one ("Increased activation by 45% by..."), and words that add tone but no evidence are cut.
-  One bullet tells one thing you did. Length follows importance: the bullets that answer the top requirements carry the
-  full detail and may run to three or four lines, the rest stay to one or two. The summary is up to four sentences: what you are,
-  with the job's title; your strongest measured result (chosen in code, one result per sentence); what you built that answers
-  the job's core; how you work. Education is
+  One bullet tells one story you did: a line of yours that joins two results becomes two bullets, or keeps the one that
+  matters. Length follows importance: the bullets that answer the top requirements carry the full detail and may run to
+  about three lines, the rest stay to one or two. The summary is up to three sentences: what you are, in plain
+  words (never the posting's title); your strongest measured result (chosen in code, one result per sentence) with what
+  you built that answers the job's core; and how you work, only from your note or a line of yours that says it (with
+  neither, it is left out rather than written generically). It names only what the bullets show: a tool found only in
+  your skills list stays in the skills section. Education is
   one entry per school (repeats of the same school written different ways are one), without high school and board exams
   once there is a degree; certifications are cleaned of repeats. The skills section is written from your record by code, not
   the model: your own categories (a catch-all like "Technologies" gives its skills to the categories they belong to; a small
@@ -204,7 +217,7 @@ editor.
   from your record, never written. Your Profile's tone, style rules and section limits are followed, and generic wording
   such as "passionate", "leverage" or "results-driven" is rewritten. Each bullet remembers which facts it came from.
 - **Made to pass applicant tracking, without stuffing.** The writing rules come from the job application skill (`SKILL.md`):
-  the posting's own terms in its own spelling, an acronym spelled out once, the job's title in the summary, each bullet an
+  the posting's own terms in its own spelling, an acronym spelled out once, each bullet an
   action and a result, the company never named in the resume, and no responsibility line of the posting copied in. The
   terms it is asked to use are only the tools and skills you have (shown in your record, or ticked by you), each used once
   where it fits. After writing, the resume is checked in code for the signs of writing for a keyword scanner: wording
@@ -217,7 +230,8 @@ editor.
   second model (DeepSeek V4.1 Flash) then reviews the draft like a hiring manager would, against eleven criteria (faithful to the record,
   sounds like you, specific, no invented results, proves what the job is about, answers the job, terms placed naturally,
   varied rhythm, a summary with a point of view, clean, skills), and the writer makes the edits that matter. Code also flags a
-  job term worn as a label ("On realtime voice agents, ...") and anything you have with a note that no bullet shows. Code
+  job term worn as a label ("On realtime voice agents, ..."), anything you have with a note that no bullet shows, a tool
+  the summary names that no bullet shows, and a bullet that tells two results joined by a semicolon. Code
   checks the same things and puts back to your own words any bullet still rewritten beyond recognition, or one the
   revision moved a tool into from other work. The notes show the review's score. A draft that runs too long is not thrown
   away for a format slip; a stuck model call is cut off early and asked once more with less room; a job you stop is never
@@ -225,8 +239,12 @@ editor.
 - **Your wins, your interests, your conditions.** Achievements from the record (a hackathon win) are always on the
   resume. An interest the job asks about ("into fandom or fanfiction") is yours to tick, with a note for the specifics; it
   becomes one short **Interests** line and is never claimed if you did not tick it. A condition such as relocating can be
-  ticked as **Mention it**, with a note on how you meet it, and closes the summary in a short sentence. Where the job is
-  ("Canada, Remote") is listed as a condition too.
+  ticked as **Mention it**, with a note on how you meet it, and goes in the header next to your contact details ("Open to
+  relocating to Toronto"); a longer one closes the summary instead. Where the job is ("Canada, Remote") is listed as a
+  condition too, and when the job sets a location you have not answered, a header location that is only a way of working
+  ("Remote") is left out rather than shown beside a phone number from another country. Certifications and achievements
+  each sit on one line, the items an even space apart with a divider between them, which every text extractor tried
+  (pdftotext, unpdf, Word's text) reads in order; an item too long for the line moves whole to the next one.
 - **Links that work.** The name and contact line come from your Profile, then your resumes; a link shown as a label
   ("GitHub") keeps its address.
 - **Length is yours to set.** A resume written for a job is not squeezed to one page: its length follows the bullets above,

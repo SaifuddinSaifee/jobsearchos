@@ -8,8 +8,8 @@ import type { CareerRecord, Education, Framing, Role } from "@/lib/career/schema
 import { findBanned } from "@/lib/outreach/checks";
 import type { GenerationInstructions } from "@/lib/profile/schema";
 import { wordingsConflict } from "./clashes";
-import { clip, containsPhrase, indexSource, jobTerms, type JobInput } from "./context";
-import { numbersIn, proofStrength, STRONG_PROOF } from "./proof";
+import { clip, containsPhrase, indexSource, jobTerms, mentionsTerm, type JobInput } from "./context";
+import { namesIn, numbersIn, proofStrength, STRONG_PROOF } from "./proof";
 import { composeSkills, isNamed, skillWanted, type SkillLine } from "./skills";
 import { REQUIREMENT_KIND_LABEL, requirementUse, type GenerationChoices, type Requirement } from "./types";
 
@@ -20,19 +20,27 @@ import { REQUIREMENT_KIND_LABEL, requirementUse, type GenerationChoices, type Re
 // record by code, so the model never types any of them. The loop that writes, reviews and revises is in writer.ts.
 
 export const DEFAULT_TOTAL_BULLETS = 14;
-/** The longest a bullet may be. Most stay far shorter; the ones that answer the job's top requirements may use this much. */
-export const DEFAULT_BULLET_CHARS = 440;
+/**
+ * The longest a bullet may be. Most stay far shorter; the ones that answer the job's top requirements may use this much.
+ * At 440, a role with few bullets packed two or three stories into each; more bullets of one story each read better in
+ * the same space.
+ */
+export const DEFAULT_BULLET_CHARS = 320;
 /** About how long the supporting bullets should stay, in characters. */
-export const SUPPORT_BULLET_CHARS = 260;
+export const SUPPORT_BULLET_CHARS = 220;
 export const MAX_ROLES = 5;
 const MAX_PROJECTS = 3;
 const MAX_ACHIEVEMENTS = 4;
 const TEXTS_PER_FACT = 2;
 const WORDING_CHARS = 600;
-/** The longest the summary should be. A longer one is flagged for the revision, never a reason to throw the draft away. */
-export const MAX_SUMMARY_CHARS = 720;
+/** The longest the summary should be: three sentences. A longer one is flagged for the revision, never a reason to throw the draft away. */
+export const MAX_SUMMARY_CHARS = 560;
 /** Bullets per project. */
 const PROJECT_BULLETS = 2;
+/** Wordings offered per project. */
+const PROJECT_TEXTS = 3;
+/** Bullets a role may run past its count when a line of the candidate's is split into two stories. */
+const MAX_SPLITS = 2;
 /** Shorter than this, a bullet says nothing: it is dropped. */
 const MIN_BULLET_CHARS = 10;
 const MAX_CERTIFICATIONS = 4;
@@ -94,11 +102,23 @@ export type WritingPlan = {
   achievements: PlanAchievement[];
   /** What the user ticked about themselves outside work, for one short Interests line and nowhere else. */
   interests: PlanInterest[];
-  /** Conditions of the job the user asked to mention ("willing to relocate"), for one short line of the summary. */
+  /** Conditions of the job the user asked to mention ("willing to relocate"), for one short line in the header. */
   mentions: string[];
+  /** The job's location as posted ("Canada, Remote"), or "". */
+  jobLocation: string;
+  /** The candidate's own notes on the conditions they ticked: the only words the header's mention may draw on. */
+  conditionNotes: string[];
   education: Education[];
   /** The tools and skills the job names that the candidate has, in the job's wording: what the resume is asked to use. */
   terms: string[];
+  /**
+   * The terms no line offered to the writer mentions (nor a note of the candidate's): the record has them only in its
+   * skills list, so the skills section is where they go. Asked to place every term, the writer spent thousands of
+   * tokens of thinking looking for a bullet that could carry "AI agents", then pushed it into a line about other work.
+   */
+  listedOnly: string[];
+  /** The requirements the record shows only through its skills list (see `Requirement.skillsOnly`), by id. */
+  skillsOnly: string[];
   /**
    * The result the summary leads with, chosen in code: of the facts that state a measured result, the one that best
    * answers the job's core, in its strongest wording narrowed to its strongest clause (a line joined by a semicolon holds
@@ -108,6 +128,22 @@ export type WritingPlan = {
   totalBullets: number;
   bulletChars: number;
 };
+
+/**
+ * A long wording cut at the last sentence that fits, never mid-sentence. A wording cut with "..." was copied onto the
+ * page as it was, or put back there by code, and the resume read "Made history immutable from day one: profile...".
+ * One with no sentence end in reach is cut at the last clause break, then the last word, still without dots.
+ */
+export function clipAtSentence(text: string, max: number): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  const head = t.slice(0, max);
+  const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "));
+  if (end >= max / 3) return head.slice(0, end + 1);
+  const clause = Math.max(head.lastIndexOf("; "), head.lastIndexOf(", "));
+  if (clause >= max / 2) return head.slice(0, clause);
+  return head.slice(0, head.lastIndexOf(" ")).replace(/[,;:]$/, "");
+}
 
 /** A line that lists tools ("Technologies: Python, SQL") is a skills line kept as a bullet, not something that was done. */
 const isSkillsLine = (text: string) => /^\s*(technologies|tech stack|skills)\s*:/i.test(text);
@@ -158,17 +194,36 @@ export function chosenFraming(role: Role, jobTitle: string, requirements: Pick<R
   return role.framings.find((f) => f.id === picked) ?? recommendFraming(role, jobTitle, requirements);
 }
 
+/** How bullets fall to roles that no requirement points at: more for the latest role, fewer for older ones. */
+const RECENCY_SHARE = [5, 4, 3, 2, 2];
+
 /**
- * Bullets for each role, most recent first: more for the latest role, fewer for older ones, within the total. A small
- * total shrinks every role in proportion; any leftover is taken from the oldest roles first. Never less than one.
+ * Bullets for each role (most recent first), within the total, by how much each has to say for this job: its `demand`
+ * is the number of its facts that answer the job or state a strong result. A fixed share for the latest role fitted one
+ * resume and broke the next: a candidate whose second job is the relevant one, or who has one long role. A role gets at
+ * most `cap` (the facts it offers) and never less than one, since it is part of the history; what is left over goes to
+ * the roles with the most to say that still have room. With nothing matched anywhere, the latest roles get the most.
  */
-export function budgets(roleCount: number, total: number): number[] {
-  const base = (roleCount <= 3 ? [5, 4, 3] : [5, 4, 3, 2, 2]).slice(0, roleCount);
-  const sum = base.reduce((n, b) => n + b, 0);
-  if (sum <= total) return base;
-  const out = base.map((b) => Math.max(1, Math.round((b * total) / sum)));
-  for (let i = out.length - 1; out.reduce((n, b) => n + b, 0) > total && out.some((b) => b > 1); i = i === 0 ? out.length - 1 : i - 1) {
-    if (out[i] > 1) out[i]--;
+export function shareBullets(roles: { demand: number; cap: number }[], total: number): number[] {
+  if (roles.length === 0) return [];
+  const asked = roles.reduce((n, r) => n + r.demand, 0);
+  const demand = roles.map((r, i) => (asked > 0 ? r.demand : (RECENCY_SHARE[i] ?? 2)));
+  const sum = demand.reduce((n, d) => n + d, 0);
+  const caps = roles.map((r) => Math.max(1, r.cap));
+  const exact = demand.map((d) => (total * d) / sum);
+  const out = exact.map((x, i) => Math.min(caps[i], Math.max(1, Math.floor(x))));
+  // Leftover bullets go by the largest share left unpaid, then by demand, to a role with room.
+  for (let left = total - out.reduce((n, b) => n + b, 0); left > 0; left--) {
+    const open = out.map((b, i) => i).filter((i) => out[i] < caps[i]);
+    if (open.length === 0) break;
+    const next = open.sort((a, b) => exact[b] - out[b] - (exact[a] - out[a]) || demand[b] - demand[a] || a - b)[0];
+    out[next]++;
+  }
+  // The one-bullet floor can run past a small total: take back from the roles with least to say, oldest first.
+  for (let over = out.reduce((n, b) => n + b, 0) - total; over > 0; over--) {
+    const giving = out.map((b, i) => i).filter((i) => out[i] > 1);
+    if (giving.length === 0) break;
+    out[giving.sort((a, b) => demand[a] - demand[b] || b - a)[0]]--;
   }
   return out;
 }
@@ -243,7 +298,7 @@ export function recentRoles(record: CareerRecord): { employer: string; role: Rol
  */
 export function planWriting(
   record: CareerRecord,
-  job: Pick<JobInput, "title"> & Partial<Pick<JobInput, "technologies">>,
+  job: Pick<JobInput, "title"> & Partial<Pick<JobInput, "technologies" | "location">>,
   requirements: Requirement[],
   instructions?: GenerationInstructions | null,
   choices?: GenerationChoices | null,
@@ -256,7 +311,6 @@ export function planWriting(
   const coreOf = factWeigher(requirements.filter((r) => r.core));
 
   const chosen = recentRoles(record);
-  const budget = budgets(chosen.length, totalBullets);
 
   // A technology the job names only inside a sentence is the candidate's when the record says it.
   const items = indexSource(record);
@@ -268,9 +322,9 @@ export function planWriting(
   let factN = 0;
   // Every fact offered, with its strongest wording and how well it would lead the summary.
   const leads: { alias: string; text: string; proof: number; score: number }[] = [];
-  const roles: PlanRole[] = chosen.map(({ employer, role }, i) => {
+  const told = chosen.map(({ employer, role }) => {
     const framing = chosenFraming(role, job.title, requirements, choices);
-    const read = (strict: boolean) =>
+    const readFacts = (strict: boolean) =>
       role.facts
         .map((f, order) => {
           const bullets = bulletWordings(role, f, null);
@@ -280,21 +334,30 @@ export function planWriting(
           const picked = choices?.wordings[f.id];
           const pickedText = f.wordings.find((w) => w.id === picked)?.text;
           const agrees = (w: { text: string }) => !pickedText || !wordingsConflict(pickedText, w.text);
-          const offered = (strict ? fitting : fitting.length > 0 ? fitting : bullets).filter(agrees);
+          // A fact matched to the job's core is offered whatever telling its wording belongs to: the one line that shows
+          // daily agentic coding was written for the product telling of a role being written as engineering.
+          const offered = (strict && coreOf(f.id) === 0 ? fitting : fitting.length > 0 ? fitting : bullets).filter(agrees);
           const pickedWording = f.wordings.find((w) => w.id === picked && w.form === "bullet");
           const ranked = (pickedWording && !offered.includes(pickedWording) ? [pickedWording, ...offered] : offered)
             .map((w, n) => ({ w, n, score: fitScore(w.text) + proofStrength(w.text) }))
             .sort((a, b) => Number(b.w.id === picked) - Number(a.w.id === picked) || b.score - a.score || a.n - b.n)
             .slice(0, TEXTS_PER_FACT);
           const proof = Math.max(0, ...ranked.map(({ w }) => proofStrength(w.text)));
-          return { factId: f.id, texts: ranked.map(({ w }) => clip(w.text, WORDING_CHARS)), weight: weightOf(f.id), core: coreOf(f.id), proof, order };
+          return { factId: f.id, texts: ranked.map(({ w }) => clipAtSentence(w.text, WORDING_CHARS)), weight: weightOf(f.id), core: coreOf(f.id), proof, order };
         })
         .filter((f) => f.texts.length > 0);
     // A role none of whose facts fit the framing is still part of the history, so it falls back to all of its wording.
-    const picked = read(true).length > 0 ? read(true) : read(false);
+    const picked = readFacts(true).length > 0 ? readFacts(true) : readFacts(false);
     // Ranked by what a fact answers of the job and how much it proves, so a measured result is never lost to a line that
     // only names the right things; the role's strongest proof is offered whatever it answers.
     const ranked = [...picked].sort((a, b) => b.weight + b.proof - (a.weight + a.proof) || a.order - b.order);
+    return { employer, role, framing, picked, ranked };
+  });
+  const budget = shareBullets(
+    told.map((r) => ({ demand: r.ranked.filter((f) => f.weight > 0 || f.proof >= STRONG_PROOF).length, cap: r.ranked.length })),
+    totalBullets,
+  );
+  const roles: PlanRole[] = told.map(({ employer, role, framing, picked, ranked }, i) => {
     const kept = ranked.slice(0, Math.max(6, budget[i] * 2));
     const strongest = [...picked].sort((a, b) => b.proof - a.proof || a.order - b.order).slice(0, STRONGEST_KEPT);
     for (const strong of strongest) {
@@ -343,7 +406,13 @@ export function planWriting(
       description: p.description,
       url: p.url,
       technologies: p.technologies,
-      texts: p.wordings.slice(0, 3).map((w) => clip(w.text, WORDING_CHARS)),
+      // The wordings that prove the most come first: of fourteen for one project, the first three were its plans
+      // ("a customer validation plan") and the one with its 248 tests and the bug they caught was never offered.
+      texts: p.wordings
+        .map((w, n) => ({ text: w.text, n, score: fitScore(w.text) + proofStrength(w.text) }))
+        .sort((a, b) => b.score - a.score || a.n - b.n)
+        .slice(0, PROJECT_TEXTS)
+        .map((w) => clipAtSentence(w.text, WORDING_CHARS)),
     }));
 
   // The company's own values are its words, for tone: never something the candidate is said to have. A note the user
@@ -364,6 +433,16 @@ export function planWriting(
   const results = leads.filter((l) => l.proof >= STRONG_PROOF);
   const best = [...(results.length > 0 ? results : leads)].sort((a, b) => b.score - a.score)[0];
   const summaryProof = best ? { alias: best.alias, text: resultClause(best.text) } : null;
+  const skillIds = new Set(record.skills.map((s) => s.id));
+  const offeredText = normalizeText(
+    [...roles.flatMap((r) => r.facts.flatMap((f) => f.texts)), ...projects.flatMap((p) => [p.description, ...p.texts]), ...users.map((u) => u.note)].join(" "),
+  );
+  // A term counts as mentioned when a line has it (see `mentionsTerm`), or when it is something the candidate gave a
+  // note on, which a bullet proves.
+  const claimed = new Set(users.filter((u) => !u.bare).map((u) => normalizeText(u.text)));
+  const mentioned = (t: string) => claimed.has(normalizeText(t)) || mentionsTerm(offeredText, t);
+  const listedOnly = terms.filter((t) => normalizeText(t) && !mentioned(t));
+  const shownBySkills = (r: Requirement) => r.verdict !== "missing" && r.refs.length > 0 && r.refs.every((ref) => skillIds.has(ref)) && !mentioned(r.text);
   const skills = composeSkills(
     record.skills.map((s) => ({ name: s.name, category: s.category })),
     skillWanted(terms, askedFor(requirements).map((r) => r.text)),
@@ -385,8 +464,12 @@ export function planWriting(
     interests: requirements.filter((r) => r.userHas && isInterest(r)).map((r) => ({ requirementId: r.id, text: r.text, note: r.note })),
     // With the user's note, which says how the condition is met ("relocating to Toronto"): the job's text alone does not.
     mentions: requirements.filter((r) => r.use === "logistics" && r.userHas).map((r) => (r.note.trim() ? `${r.text} (their note: ${r.note.trim()})` : r.text)),
+    jobLocation: (job.location ?? "").trim(),
+    conditionNotes: requirements.filter((r) => r.use === "logistics" && r.userHas && r.note.trim()).map((r) => r.note.trim()),
     education: pickEducation(record.education),
     terms,
+    listedOnly,
+    skillsOnly: requirements.filter(shownBySkills).map((r) => r.id),
     summaryProof,
     totalBullets,
     bulletChars,
@@ -422,7 +505,12 @@ export function answerSchema(plan: WritingPlan) {
         bullets: list(asObject(z.object({ facts: list(z.string()).describe("The ids it was written from"), text: z.string() }))),
       }),
     ),
-    projects: list(z.object({ project: z.string().describe(projects ? `One of ${projects}` : "A project id"), bullets: list(asObject(z.object({ text: z.string() }))) })),
+    projects: list(
+      z.object({
+        project: z.string().describe(projects ? `One of ${projects}` : "A project id"),
+        bullets: list(asObject(z.object({ facts: z.array(z.string()).optional().describe('The "u" ids it proves, if any'), text: z.string() }))),
+      }),
+    ),
     certifications: list(z.string().describe(certifications ? `One of ${certifications}` : "A certification id")),
     // Only read when the user gave interests; empty otherwise.
     interests: z.string().optional(),
@@ -439,7 +527,8 @@ export type WrittenBullet = {
   /** How much of what the job asks for it answers. */
   relevance: number;
 };
-export type WrittenRole = { plan: PlanRole; bullets: WrittenBullet[] };
+/** `fromRecord`: the draft left the role out, so it holds the role's strongest facts as the candidate worded them. */
+export type WrittenRole = { plan: PlanRole; bullets: WrittenBullet[]; fromRecord?: boolean };
 export type WrittenProject = { plan: PlanProject; bullets: WrittenBullet[] };
 export type WrittenResume = {
   summary: string;
@@ -451,7 +540,37 @@ export type WrittenResume = {
   /** One short line about the candidate outside work, from what they ticked and their notes, or "" for none. */
   interests: string;
   education: Education[];
+  /**
+   * How the candidate meets the job's conditions, in their words ("Open to relocating to Toronto"), for the header next
+   * to the contact details, where a reviewer looks for it. Empty when there is none, or when it is too long for the
+   * header and closes the summary instead.
+   */
+  mention?: string;
+  /** The job sets a location: a header that gives only a way of working ("Remote") then answers nothing. */
+  locationAsked?: boolean;
 };
+
+/** The longest mention that goes in the header; a longer one closes the summary. */
+export const HEADER_MENTION_CHARS = 70;
+
+/**
+ * The line on how the candidate meets the job's conditions, held to their own note: a place or other name the note does
+ * not have is never written. Given the note "I can work remotely" for a job in "Canada, Remote", the writer put "In
+ * Canada; can work remotely" in the header of a candidate in India. A line that adds a name gives way to the note itself,
+ * without "I" ("Can work remotely"); with no note, the line stands, since a tick with nothing said meets the condition
+ * as the job states it.
+ */
+export function headerMention(written: string, notes: string[]): string {
+  const line = tidy(written).replace(/[.!]+$/, "");
+  if (notes.length === 0) return line;
+  const said = normalizeText(notes.join(" "));
+  const added = namesIn(line).filter((n) => !containsPhrase(said, normalizeText(n)));
+  if (line && added.length === 0) return line;
+  const own = tidy(notes[0])
+    .replace(/^i(?:'m| am)?\s+/i, "")
+    .replace(/[.!]+$/, "");
+  return own ? own[0].toUpperCase() + own.slice(1) : "";
+}
 
 /** Wording the model wrote, tidied: no list markers, one space, and a plain hyphen for any long dash. */
 export function tidy(text: string): string {
@@ -558,21 +677,38 @@ export function readWriting(answer: WriterAnswer, plan: WritingPlan): WrittenRes
     const bullets =
       given.length > 0 ? given : p.facts.slice(0, 2).map((f) => ({ text: bulletText(f.texts[0]), factIds: [f.factId], userRequirementIds: [], relevance: f.weight }));
     // The model's order is kept: it was asked to lead with what proves the job's core, and a sum of weights cannot tell
-    // which bullet does (a bullet citing two facts outranked the one that answered the job's first ask).
-    return { plan: p, bullets: unique(bullets).slice(0, p.budget) };
+    // which bullet does (a bullet citing two facts outranked the one that answered the job's first ask). A line split
+    // into two stories gives a second bullet from the same fact, which does not take another fact's place: up to
+    // MAX_SPLITS of them are on top of the count.
+    const kept = unique(bullets);
+    const splits = kept.filter((b, i) => b.factIds.length > 0 && kept.slice(0, i).some((e) => b.factIds.every((id) => e.factIds.includes(id)))).length;
+    return { plan: p, bullets: kept.slice(0, p.budget + Math.min(splits, MAX_SPLITS)), ...(given.length === 0 ? { fromRecord: true } : {}) };
   });
 
   const projects: WrittenProject[] = [];
   for (const g of answer.projects) {
     const p = offered(g.project, plan.projects, projectNames);
     if (!p || projects.some((x) => x.plan === p) || projects.length >= MAX_PROJECTS) continue;
-    const bullets = g.bullets.map((b) => ({ text: inSentenceCase(withoutRepeatedStack(bulletText(b.text), p.technologies), plan.terms), factIds: [p.projectId], userRequirementIds: [], relevance: 1 }));
+    // A project bullet may prove something the candidate said they have ("MCP", with a note on the MCP server they
+    // built): without the claim tied to it, the check took the bullet for a rewrite and put the project's first line back.
+    // A bullet that names such a claim without citing it is tied to it all the same.
+    const bullets = g.bullets.map((b) => {
+      const text = inSentenceCase(withoutRepeatedStack(bulletText(b.text), p.technologies), plan.terms);
+      const cited = (b.facts ?? []).map((a) => userByAlias.get(a)).filter((u): u is PlanUser => !!u);
+      const named = plan.users.filter((u) => !u.bare && !cited.includes(u) && containsPhrase(normalizeText(text), normalizeText(u.text)));
+      return { text, factIds: [p.projectId], userRequirementIds: [...cited, ...named].slice(0, 2).map((u) => u.requirementId), relevance: 1 };
+    });
     projects.push({ plan: p, bullets: unique(bullets.filter((b) => b.text.length >= MIN_BULLET_CHARS)).slice(0, PROJECT_BULLETS) });
   }
 
   const certs = answer.certifications.map((a) => offered(a, plan.certifications, certificationNames)).filter((c): c is PlanCertification => !!c);
+  const summary = inSentenceCase(tidy(answer.summary), plan.terms);
+  const mention = plan.mentions.length > 0 ? headerMention(answer.mention ?? "", plan.conditionNotes) : "";
+  const inHeader = mention !== "" && mention.length <= HEADER_MENTION_CHARS;
   return {
-    summary: withMention(inSentenceCase(tidy(answer.summary), plan.terms), answer.mention ?? "", plan.mentions),
+    summary: inHeader || mention === "" ? summary : withMention(summary, mention, plan.mentions),
+    mention: inHeader ? mention : "",
+    locationAsked: plan.jobLocation !== "",
     roles,
     projects,
     skills: plan.skills.map((l) => ({ ...l, items: [...l.items] })),
@@ -621,23 +757,24 @@ export function checkWriting(w: WrittenResume): string[] {
  * What code decides or checks (the skills section, names and dates, new numbers, copied posting wording, overused terms)
  * is said once or not at all: the code checks find it and the revision fixes it.
  */
-export const SYSTEM = `You edit a candidate's own resume lines into a resume for a specific job. You are an editor, not a writer: the candidate wrote every line in their career record, and a hiring manager should hear the candidate, not a model. The candidate is qualified for this job: what it asks for that the record does not show is experience not yet written down, not a gap. Cover what is listed under "WHAT THE JOB ASKS FOR".
+export const SYSTEM = `You edit a candidate's own resume lines into a resume for a specific job. You are an editor, not a writer: the candidate wrote every line in their career record, and a hiring manager should hear the candidate, not a model. The candidate is qualified for this job: what it asks for that the record does not show is experience not yet written down, not a gap. Under "WHAT THE JOB ASKS FOR", prove the [Core] requirements first and the rest where the candidate's lines support them; what is "in the skills list only" is shown by the skills section, and no bullet has to prove it.
 Editing:
 - Start from the first wording given for each fact, word for word, and change only what this job needs: the posting's spelling of a tool or term, working in what the candidate says they have, cutting what does not matter here, moving what matters most to the front. A line that already works stays as it is.
 - Lead with the result when the line states one, by moving the candidate's own clauses ("Increased user activation by 45% by rebuilding onboarding..."). Cut words that add tone and no evidence ("ruthlessly", "from first principles").
 - Keep every name (tools, systems, products, customers, teams) and every number exactly as written; never replace a name with a category. Never add a number, or a result, purpose or benefit the candidate did not write ("so that", "enabling", "ensuring"). Never invent an employer, title, degree, certification, interest or hobby.
-- Each bullet names in "facts" the ids it was written from, only ids you were given. One achievement per bullet: two ids only for the same piece of work, or a "u" item with the fact it builds on.
+- One story per bullet: the problem or decision, what was built, and what came of it. A line that joins separate pieces of work (two results joined by a semicolon, or a list of separate systems) gives two bullets, each citing that fact, or keeps the one that matters for this job; such a second bullet does not count toward the role's bullets.
+- Each bullet names in "facts" the ids it was written from, only ids you were given: the fact it tells, plus the "u" items it proves; a second fact only for the same piece of work.
 What the candidate says they have (it is true; prove it, never question it):
-- Under "THE CANDIDATE SAYS THEY HAVE THIS": show it as work done, in a bullet of the role their note places it in, told with that role's real product, tools and team and the specifics of their note. Extend the bullet it builds on or add one there, citing its u id with that fact's id. Never as a label in front of a sentence ("On realtime voice agents, built..."), and never with a number they did not give.
+- Under "THE CANDIDATE SAYS THEY HAVE THIS": show it as work done, in a bullet of the role or project their note places it in, told with its real product, tools and team and the specifics of their note. Extend the bullet it builds on or add one there, citing its u id (with the fact's id in a role). Never as a label in front of a sentence ("On realtime voice agents, built..."), and never with a number they did not give.
 - Under "ALSO TRUE, NO DETAIL GIVEN": it is already in the skills section. Name it in a bullet only where that bullet's own lines describe that work; never a bullet of its own, never the summary, never in place of a fact.
 Fitting the job:
-- The terms under "JOB TERMS" are tools and skills the candidate has: use each in the line about the work that used it, about once. Never move one into a line about other work ("Claude Code" does not go in a line about a product's logging layer). Write an acronym out once, then the short form.
+- The terms under "JOB TERMS" are tools and skills the candidate has: use each in the line about the work that used it, about once. Never move one into a line about other work ("Claude Code" does not go in a line about a product's logging layer). The terms under "IN THE SKILLS SECTION ONLY" are already listed there and no line of the candidate's mentions them: leave them out of the bullets and the summary. Write an acronym out once, then the short form.
 - Speak the posting's language, discreetly: where a fact is the work the posting describes, use the posting's own short phrases for it (up to four words: "production systems", "exposing APIs", "customer conversations") inside the candidate's sentence. Never copy its sentences or restate a responsibility as "I do X".
 - The company's field may frame the summary in a few words and appears nowhere else. A way of working under "SHOW, DO NOT NAME" is shown by what was done, never named.
-- Be thorough on purpose: the bullets that answer [Core] requirements keep their full detail (what was built, with which tools, for whom, the decision behind it, the result); the rest keep what matters for this job. Use the bullet counts given.
+- Be thorough on purpose: the bullets that answer [Core] requirements keep their full detail (what was built, with which tools, for whom, the decision behind it, the result, and how it was checked when the line says so: tests, evals, an accuracy number, an approval step); the rest keep what matters for this job. Use the bullet counts given.
 - The first bullet of each recent role proves a [Core] requirement with the strongest result the role has for it; the order you give is the order printed. A fact marked [keep] is one of the role's strongest results: it always gets a bullet, and a job term or claim never takes its place. Vary how sentences start and run.
-- A project's technologies are printed above its bullets: never list them in a bullet.
-The summary: up to four sentences, one thing each. What kind of professional the candidate is, with the job's title as posted and the stack their facts show; the result under "SUMMARY PROOF", in one clause of your own (the result and the work it came from, never the method list or a bullet's sentence), its numbers exactly as written and nothing from another line joined to it; what they built and ran that answers the [Core] requirements; how they work, from their lines or a claim with a note. Not a list of tools, and never the company's name or mission. What is under "MENTION BRIEFLY" goes in "mention" as one short sentence, not in the summary; with nothing there, leave "mention" out.
+- A project's technologies are printed above its bullets: never list them in a bullet. A project bullet says what was built and what came of it (users, tests, results), not a plan, when its lines give both.
+The summary: up to three sentences. What kind of professional the candidate is, in plain words (never the posting's title), with the stack their bullets show; the result under "SUMMARY PROOF", in one clause of your own (the result and the work it came from, never the method list or a bullet's sentence), its numbers exactly as written and nothing from another line joined to it, with what they built and ran that answers the [Core] requirements; how they work, only from a note of the candidate's or a line of theirs that describes how they work, and with neither, no such sentence at all rather than a general one. Name only tools and work the bullets show or the candidate's notes give. Not a list of tools, and never the company's name or mission. What is under "MENTION BRIEFLY" goes in "mention" as a few words, not in the summary; with nothing there, leave "mention" out.
 "interests": one short line from what is under "INTERESTS" and its notes only; with nothing there, leave it out.
 No first person, filler, long dashes or runs of three adjectives. Names, titles, dates, schools, skills and achievements are filled in by code; you only choose which certifications to show.`;
 
@@ -652,7 +789,10 @@ export function askedFor(requirements: Requirement[]): Requirement[] {
 
 /** What the model is asked, as text: the job, what it asks for, and the candidate by id. */
 export function buildPrompt(plan: WritingPlan, job: JobInput, requirements: Requirement[], instructions?: GenerationInstructions | null): { system: string; user: string } {
-  const reqLine = (r: Requirement) => `${r.id} [${r.core ? "Core, " : ""}${REQUIREMENT_KIND_LABEL[r.kind]}${r.userHas ? ", the candidate has this" : r.verdict === "met" ? ", in the record" : r.verdict === "partial" ? ", partly in the record" : ""}]: ${r.text}`;
+  const listed = new Set(plan.skillsOnly);
+  const where = (r: Requirement) =>
+    r.userHas ? ", the candidate has this" : r.verdict === "missing" ? "" : listed.has(r.id) ? ", in the skills list only" : r.verdict === "met" ? ", in the record" : ", partly in the record";
+  const reqLine = (r: Requirement) => `${r.id} [${r.core ? "Core, " : ""}${REQUIREMENT_KIND_LABEL[r.kind]}${where(r)}]: ${r.text}`;
   const dates = (r: PlanRole) => [r.start, r.current ? "Present" : r.end].filter(Boolean).join(" - ");
 
   const fields = requirements.filter((r) => r.kind === "keyword" && requirementUse(r) === "domain").map((r) => r.text);
@@ -664,11 +804,13 @@ export function buildPrompt(plan: WritingPlan, job: JobInput, requirements: Requ
     values.length ? `What it values: ${values.join("; ")}` : "",
   ].filter(Boolean);
 
-  const terms = plan.terms;
+  const listedOnly = new Set(plan.listedOnly);
+  const terms = plan.terms.filter((t) => !listedOnly.has(t));
   const sections = [
     `THE JOB\n${job.title} at ${job.company}${job.location ? `, ${job.location}` : ""}${job.responsibilities.length ? `\nResponsibilities (for understanding the role, never to be copied):\n${job.responsibilities.slice(0, 8).map((r) => `- ${clip(r, 200)}`).join("\n")}` : ""}`.trim(),
     `WHAT THE JOB ASKS FOR\n${askedFor(requirements).map(reqLine).join("\n")}`,
     terms.length > 0 ? `JOB TERMS (use them exactly as written, the first ones matter most)\n${terms.join(", ")}` : "",
+    plan.listedOnly.length > 0 ? `IN THE SKILLS SECTION ONLY (listed there already; no line of the candidate's mentions them)\n${plan.listedOnly.join(", ")}` : "",
     company.length > 0 ? `THE COMPANY (for tone and context only; never quote it, never name it in the resume)\n${company.join("\n")}` : "",
     traits.length > 0 ? `SHOW, DO NOT NAME\n${traits.join(", ")}` : "",
     `THE CANDIDATE'S ROLES (most recent first; each fact shows the candidate's own wording, the one to start from first)\n${plan.roles
@@ -677,10 +819,10 @@ export function buildPrompt(plan: WritingPlan, job: JobInput, requirements: Requ
           `${r.alias}: ${r.title || "Role"} at ${r.employer}, ${dates(r)}. Write up to ${r.budget} bullets.\n${r.facts.map((f) => `  ${f.alias}${f.keep ? " [keep]" : ""}: ${f.texts.map((t) => `"${t}"`).join(" | ")}`).join("\n")}`,
       )
       .join("\n")}`,
-    plan.projects.length ? `PROJECTS (include the ones that answer the job; up to 2 bullets each)\n${plan.projects.map((p) => `${p.alias}: ${p.name}. ${p.description} ${p.technologies.length ? `Technologies: ${p.technologies.join(", ")}.` : ""} ${p.texts.map((t) => `"${t}"`).join(" | ")}`.trim()).join("\n")}` : "",
+    plan.projects.length ? `PROJECTS (include every one, chosen for this job; up to 2 bullets each, the ones that prove the most)\n${plan.projects.map((p) => `${p.alias}: ${p.name}. ${p.description} ${p.technologies.length ? `Technologies: ${p.technologies.join(", ")}.` : ""} ${p.texts.map((t) => `"${t}"`).join(" | ")}`.trim()).join("\n")}` : "",
     plan.certifications.length ? `CERTIFICATIONS (pick the relevant ones)\n${plan.certifications.map((c) => `${c.alias}: ${c.name}${c.issuer ? `, ${c.issuer}` : ""}`).join("\n")}` : "",
     plan.interests.length ? `INTERESTS (the candidate's own; write "interests" from these and their notes only)\n${plan.interests.map((i) => `${i.text}${i.note ? ` (their note: ${i.note})` : ""}`).join("\n")}` : "",
-    plan.mentions.length ? `MENTION BRIEFLY (write "mention": one short sentence in the candidate's words, for example "Open to relocating to San Francisco." It closes the summary)\n${plan.mentions.join("\n")}` : "",
+    plan.mentions.length ? `MENTION BRIEFLY (write "mention": a few words in the candidate's words, under ${HEADER_MENTION_CHARS} characters, for example "Open to relocating to San Francisco". It goes in the header, next to the contact details)\n${plan.mentions.join("\n")}` : "",
     plan.users.some((u) => !u.bare) ? `THE CANDIDATE SAYS THEY HAVE THIS\n${plan.users.filter((u) => !u.bare).map((u) => `${u.alias}: ${u.text} (their note: ${u.note})`).join("\n")}` : "",
     plan.users.some((u) => u.bare) ? `ALSO TRUE, NO DETAIL GIVEN\n${plan.users.filter((u) => u.bare).map((u) => `${u.alias}: ${u.text}`).join("\n")}` : "",
     plan.summaryProof ? `SUMMARY PROOF (the result the summary leads with, from ${plan.summaryProof.alias})\n${plan.summaryProof.text}` : "",

@@ -25,18 +25,27 @@ export const STRONG_PROOF = 4;
 
 /** A measured change: a share ("45%"), a multiple ("3x") or a before and after ("from 8 minutes to 1"). */
 const MEASURED = /\d[\d,.]*\s*%|\b\d+(?:\.\d+)?x\b|\bfrom\s+\d[\d,.]*\s+\w+\s+to\s+\d/gi;
+/**
+ * How the work was checked: an accuracy number, an eval, tests, a human approval step or a guardrail. A hiring manager
+ * for AI work looks for this on every LLM feature, so a line that says it proves more than one that does not.
+ */
+const QUALITY = /\b(accura(?:cy|te)|evals?|evaluat\w*|tests?|tested|test suite|human review|approv\w*|guardrails?)\b/i;
+/** Whether a text states a measured change ("45%", "3x", "from 8 minutes to 1"). */
+export const isMeasured = (text: string): boolean => new RegExp(MEASURED.source, "i").test(text);
 /** A verb that states a result rather than an activity. */
 const RESULT = /\b(increas|cut|reduc|rais|grew|grow|doubl|tripl|improv|lift|boost|sav|halv|lower|eliminat|accelerat|achiev)/i;
 
 /**
  * How much a line proves, as a rough score: each number counts (up to four), a measured change counts again, a stated
- * result counts once, and named tools and products count a little. "Increased user activation by 45%, cut
- * time-to-value from 8 minutes to 1" scores far above "Owned onboarding and worked with design".
+ * result counts once, saying how the work was checked counts once, and named tools and products count a little.
+ * "Increased user activation by 45%, cut time-to-value from 8 minutes to 1" scores far above "Owned onboarding and
+ * worked with design".
  */
 export function proofStrength(text: string): number {
   const numbers = Math.min(numbersIn(text).length, 4);
   const measured = Math.min((text.match(MEASURED) ?? []).length, 3);
   const result = RESULT.test(text) ? 1 : 0;
+  const checked = QUALITY.test(text) ? 1 : 0;
   const names = Math.min(namesIn(text).length, 4) * 0.25;
-  return numbers + measured + result + names;
+  return numbers + measured + result + checked + names;
 }

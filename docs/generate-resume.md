@@ -566,3 +566,99 @@ one let it through, and `readWriting`, which looked them up by id only, dropped 
 - a resume with no projects, when the record offers some, is flagged (`left-out`), so the revision puts them back.
 
 Replayed through the fixed code, that run's answer gives all three projects and all three certifications.
+
+**A draft that will always finish (Oct 17).** On the same prompt GLM-5.3's thinking varied from 12,600 to past 24,000
+tokens. In trace `61a206fa3621c9bc0139e2ad7daf4695` the draft ran out of room at high effort, and again on its medium
+retry: $0.19 and no resume. Now:
+- **A cut-off draft is written again at low effort, never medium** (`FALLBACK_EFFORT`). At low effort GLM-5.3 barely
+  thinks, so the draft is written, then reviewed and revised as usual.
+- **It is marked a fallback** in three places:
+  - the generation screen's draft step;
+  - the resume's notes;
+  - the call's span (`resume.fallback`, with `resume.attempt` on every draft call).
+- **The output limits are settings**: `WRITER_MAX_TOKENS` 24,000, `WRITER_FALLBACK_MAX_TOKENS` 16,000 and
+  `REVISE_MAX_TOKENS` 16,000. They count thinking and the answer together. The largest draft that worked used 22,908 of
+  them, before the prompt was cut; since then, 13,900 and 17,300.
+- **No separate early stop by token count was added**: it would be the output limit again. A 16,000 threshold would
+  have stopped about half the drafts that worked.
+- **A draft with structural gaps goes to the revision, not to failure** (`leftOut`):
+  - an empty summary;
+  - a role it left out (`fromRecord`, kept from the candidate's own lines meanwhile);
+  - no projects when the record offers some.
+- **Notes carry over.** A note on a requirement the record already shows ("Add detail") now carries over to the next
+  run, as ticked items' notes always did.
+- **The thinking of a cut-off call is saved to its trace** (see LLM-LOGGING.md), so the next runaway shows what it was
+  stuck on. A check call confirmed Together streams GLM-5.3's thinking text. Asked for a bullet under 200 characters,
+  it counted the characters in its thinking. That is one example, not yet the cause of the runaways.
+
+**High against low effort (Oct 17).** Five drafts each on the 09:00 prompt, run in parallel, no revision:
+
+| | High | Low |
+|---|---|---|
+| Finished | 4 of 5 (one cut off at 24,000) | 5 of 5 |
+| Thinking | 12,400 to 23,000 tokens | 100 to 2,700 |
+| Time per draft | 98 to 193 s | 12 to 30 s |
+| Cost per draft | $0.07 to $0.11 | $0.014 to $0.025 |
+| Review score (of 5) | 4.11 | 4.07 |
+| Code findings per draft | 3.8 | 5.4 |
+| Projects kept | 3 every time | 3, 3, 3, 2, 2 |
+
+High stays the default (low is close on the score but not consistently: more findings, and it drops projects); low is
+the fallback. The cut-off draft's saved thinking (89,000 characters) was not mostly counting characters, so the length
+wording stays. It went round three demands the rules could not all meet: two noted claims that both belonged to one fact
+against "two ids per bullet", a core requirement ("agentic coding harness daily") that only the skills list supported
+against "never move a tool into a line about other work", and "cover what is listed" against 30 requirements for 10
+bullets. It had finished planning ("Write JSON.") at 22,994 tokens of 24,000.
+
+### Eighth pass: what an outside reviewer found, judged against our own standards
+
+The 09:00 resume (rebuilt as version 7) lost to another agent's resume, about 60 to 69 on an outside reviewer's rubric.
+The reviewer's findings, and what was taken:
+
+| Finding | Taken? | What changed |
+|---|---|---|
+| Ways of working listed as keywords, not described | Yes | The summary's "how they work" sentence comes only from a note or a line of the candidate's that says it; with neither it is left out, never written generically (the reviewer's correction: a required line with no source turns into filler). |
+| Claims with nothing behind them (Rails, MCP) | Half | The summary names only what the bullets show (`unbackedInSummary`). Terms no offered line mentions are sent as "IN THE SKILLS SECTION ONLY" and stay there; they are never cut from the skills section. |
+| LLM features without a quality signal | Yes | `proofStrength` counts how the work was checked (tests, evals, accuracy, an approval step), so those lines rank up; the writer keeps that clause. |
+| Strong material left out | Yes | The latest role had 5 of 12 bullets, so its nine facts were packed into catch-alls. Bullets now go to roles by how many facts each has that answer the job or state a strong result (`shareBullets`): 8, 4 and 2 for this record. The reviewer's correction: by relevance, not a fixed 8/3/2, which would break a candidate whose second job is the relevant one. Bullets are shorter (320 and 220 characters, from 440 and 260). A fact the core rests on is offered whatever telling it was worded for. A project's most proving wordings are offered, not its first three. |
+| Catch-all bullets | Yes | "One story per bullet"; a line of the candidate's joining two pieces of work may give two bullets citing the same fact. Two measured results joined by a semicolon are flagged (`twoStories`); "packs several deliverables" is a reviewer criterion, since it is a judgement. |
+| One feature across every layer | Follows | The RBAC admin panel fact now has room. |
+| Echoing the posting | Yes | The summary no longer opens with the posting's title. |
+| A link the job asks for; results, not plans | Yes, as a reviewer criterion | "A plan rather than a result" is semantic, so the reviewer judges it. All the record's project links are empty: only the user can add them. |
+| Location left ambiguous | Yes | A condition the user answered goes in the header (`headerLocation`); unanswered, a header location that is only a way of working is left out (the reviewer's correction: a bare "Remote" beside a +91 number reads as evasive). |
+| Seniority | Already done | |
+| Placeholders in the resume | No | A generated resume must be ready to send; the review screen asks instead. |
+| Cut unbacked terms from the skills section | No | The user's claims are theirs to make, and the skills section is a list by design. |
+| Merge education, certifications and hackathons | No | The house layout stays. Certifications and achievements each go on one line instead. |
+| Job Pilot and the eval harness | Not a writing gap | Neither is in the record (version 15). The review screen now asks about a job's term the record has only in its skills list ("Anything you have built with MCP?"), which is how such work gets in. |
+| A pre-flight checklist pass | No | Its cheap items are code checks, its judgements reviewer criteria: no extra model call. |
+
+**Certifications on one line, checked with text extractors.** Equal columns read as a table: pdftotext read down the
+columns and put two achievements before their own heading. A divider drawn with `position: absolute` was painted last,
+so unpdf (the app's own reader) put both rows after both headings. What reads in order in pdftotext (plain and layout),
+unpdf and Word's text: inline items an even space apart with a " | " divider as real text, an item moving whole to the
+next line when it does not fit. Tested in `documents-export.test.ts` with unpdf and mammoth.
+
+**The draft limit** is 28,000 (`WRITER_MAX_TOKENS`), from 24,000: a cut-off costs about $0.02 more, and drafts that had
+finished thinking are no longer cut before the answer.
+
+**The first run of the eighth pass (Oct 17, trace `acdb5f21352d4b4407820f3c1b35a053`).** Louper got its 8 bullets, the
+summary landed, and the outside reviewer scored it about 59. Three defects were ours:
+- **An invented place in the header.** The note said "I can work remotely"; the writer's mention line said "In Canada; can
+  work remotely" for a candidate in India, and it went in the header (the user corrected it by hand). The mention may
+  now name nothing the note does not; otherwise it is the note itself without "I" (`headerMention`).
+- **A cut-off duplicate in place of the MCP proof.** The user answered "MCP" on the review screen with a note on their
+  MCP server, and the draft proved it in a Job Search OS bullet. Project bullets could not cite a claim, so code took
+  "MCP" for a name the bullet added and put back the project's first wording, clipped at 600 characters ("profile...")
+  and the same as the bullet above. Now a project bullet cites the claims it proves (and one that names a claim with a
+  note is tied to it anyway); wordings are cut at a sentence end, never with "..."; a bullet goes back to the closest
+  wording that repeats no other bullet, or is left out; and a bullet repeating another is dropped last
+  (`withoutRepeats`).
+- **Two projects dropped.** The writer kept only Job Search OS. Code chooses the projects, so each one left out is now a
+  finding for the revision, and the prompt asks for all of them.
+
+Also: a fact split into two stories may run up to two bullets past the role's count, so splits no longer push out
+facts such as the RBAC panels; the stale note "The summary does not mention" is not given when the header carries it;
+the reviewer rubric names a change of who built what. Two of the reviewer's points were not taken: "real-time
+captioning" is what the record and the note say (the other resume's "built voice agents" overclaimed), and the
+prototyping bullet's "eliminating spec ambiguity" is the candidate's own line in the record.

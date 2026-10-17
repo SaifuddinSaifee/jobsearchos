@@ -200,6 +200,12 @@ describe("matching", () => {
     const [a, b] = buildRequirements(sampleJob);
     expect(carryOver([a, b], [{ ...a, userHas: true, note: "AWS certified" }])).toEqual([{ ...a, userHas: true, note: "AWS certified" }, b]);
   });
+
+  it("carries over a note added to something the record already shows, without ticking it", () => {
+    const [a, b] = buildRequirements(sampleJob);
+    const detail = { ...a, verdict: "met" as const, userHas: false, note: "I use Claude Code and Codex every day" };
+    expect(carryOver([a, b], [detail, { ...b, note: "   " }])).toEqual([{ ...a, userHas: false, note: "I use Claude Code and Codex every day" }, b]);
+  });
 });
 
 describe("review and writing", () => {

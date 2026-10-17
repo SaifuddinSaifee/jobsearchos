@@ -1,16 +1,32 @@
 import type { DocJSON } from "@/lib/documents/build";
 import { newId } from "@/lib/documents/build";
-import { profileToDoc } from "@/lib/documents/convert/profile-to-doc";
+import { CONTACT_SEP, profileToDoc } from "@/lib/documents/convert/profile-to-doc";
 import type { Profile } from "@/lib/profile/schema";
 import type { WrittenBullet, WrittenResume } from "./write";
 
 // The written resume as an editor document. Employers, titles, dates, schools and certifications come from the record
 // (by way of the plan), never from the model. Every bullet is remembered with the facts it was written from.
 
+/** A way of working, not a place: "Remote", "Hybrid", "Open to relocate". */
+const WORK_MODE = /^(?:remote|hybrid|on-?site|in office|anywhere|open to (?:relocat\w*|remote)|willing to relocate)$/i;
+
+/**
+ * The header's location. How the candidate meets the job's conditions goes there when they said ("Open to relocating to
+ * Toronto"). When the job sets a location and they did not answer, a location that is only a way of working ("Remote")
+ * is left out: next to a phone number from another country it reads as evasive, and the number already says where they
+ * are. A real place is always kept.
+ */
+export function headerLocation(location: string, mention: string, locationAsked: boolean): string {
+  const place = location.trim();
+  const modeOnly = place !== "" && place.split(/\s*[|,/;]\s*/).filter(Boolean).every((p) => WORK_MODE.test(p));
+  const kept = modeOnly && (locationAsked || mention) ? "" : place;
+  return [kept, mention.trim()].filter(Boolean).join(CONTACT_SEP);
+}
+
 /** The resume as the structured profile that `profileToDoc` knows how to lay out. */
 export function resumeToProfile(w: WrittenResume, contact: Profile["contact"]): Profile {
   return {
-    contact,
+    contact: { ...contact, location: headerLocation(contact.location, w.mention ?? "", w.locationAsked ?? false) },
     summary: w.summary,
     experience: w.roles.map((r) => ({
       company: r.plan.employer,

@@ -19,7 +19,7 @@ export const RUBRIC: Criterion[] = [
     id: "faithful",
     name: "Faithful to the record",
     five: "Every bullet says what the candidate's own lines say: the same work, scope and numbers. What the candidate says they have is worked in as stated. The summary claims no interest, hobby or background the candidate did not state, and the interests they gave are only in the Interests line.",
-    one: "Bullets change what happened, inflate the scope, or carry numbers, tools or results the candidate never wrote; the summary gives the candidate an interest in the company's field they never claimed.",
+    one: "Bullets change what happened or who built what ('built captioning for the voice agents' where the candidate built the agents, or the reverse), inflate the scope, or carry numbers, tools or results the candidate never wrote; the summary gives the candidate an interest in the company's field they never claimed.",
   },
   {
     id: "voice",
@@ -43,7 +43,7 @@ export const RUBRIC: Criterion[] = [
     id: "proof",
     name: "Proves what the job is about",
     five: "Each core requirement, and each thing the candidate says they have with a note, is shown by a concrete bullet in the place the candidate's lines or note put it: where it happened, with what, and what came of it when the candidate gave a result. The strongest measured results in the candidate's lines are on the page.",
-    one: "Claims with detail sit only in the skills lines, or are worn as labels ('On realtime voice agents, ...'), or are moved into lines about other work; the core of the job is asserted ('AI-native builder') rather than shown; the candidate's best numbers are missing.",
+    one: "Claims with detail sit only in the skills lines, or are worn as labels ('On realtime voice agents, ...'), or are moved into lines about other work; the core of the job is asserted ('AI-native builder') rather than shown; the candidate's best numbers are missing; a project reports a plan or an intention ('a customer validation plan') where the candidate's lines say what was built and what came of it.",
   },
   {
     id: "relevance",
@@ -60,14 +60,14 @@ export const RUBRIC: Criterion[] = [
   {
     id: "rhythm",
     name: "Varied and readable",
-    five: "One to three detailed bullets per role, the rest one line; a bullet leads with its result where the candidate states one; sentences start and run differently; one thing per bullet.",
-    one: "Every bullet is the same long shape ('Verb X, Y and Z, which...'), or two achievements are joined into one.",
+    five: "One to three detailed bullets per role, the rest one line; a bullet leads with its result where the candidate states one; sentences start and run differently; one story per bullet: the problem or decision, what was built, what came of it.",
+    one: "Every bullet is the same long shape ('Verb X, Y and Z, which...'); a bullet joins two achievements, or packs several separate deliverables into one line ('demos and integrations ... using LLM APIs, AI agents and agentic search').",
   },
   {
     id: "summary",
     name: "Summary with a point of view",
-    five: "In four sentences at most, one thing each: what kind of professional this is, with the job's title; the result the job cares most about, its numbers exact and nothing from another line joined to it; what they built and ran that answers the core; and how they work. Plus the closing line the candidate asked for (relocation, remote, office days), which stays.",
-    one: "A list of tools or adjectives; names the company or repeats its mission.",
+    five: "In three sentences at most: what kind of professional this is, in plain words rather than the posting's title; the result the job cares most about, its numbers exact and nothing from another line joined to it, with what they built and ran that answers the core; and how they work, where a note or line of the candidate's says so. It names only what the bullets show. Plus the closing line the candidate asked for (relocation, remote, office days), which stays.",
+    one: "A list of tools or adjectives; opens with the posting's exact title; names tools no bullet shows; a general line on how they work that nothing of the candidate's says; names the company or repeats its mission.",
   },
   {
     id: "mechanics",
@@ -192,7 +192,7 @@ export function buildReviewPrompt(
       ? `THE POSTING'S RESPONSIBILITIES (flag any line of the resume that copies or paraphrases one; the posting's short terms used for the candidate's own work are fine)\n${job.responsibilities.slice(0, 8).map((r) => `- ${clip(r, 200)}`).join("\n")}`
       : "",
     plan.terms.length
-      ? `JOB TERMS THE CANDIDATE HAS\n${plan.terms.join(", ")}`
+      ? `JOB TERMS THE CANDIDATE HAS\n${plan.terms.join(", ")}${plan.listedOnly.length ? `\nOf these, only in the skills section (no line of the candidate's mentions them, so no bullet or summary should): ${plan.listedOnly.join(", ")}` : ""}`
       : "",
     plan.users.length
       ? `THE CANDIDATE SAYS THEY HAVE THIS (true; never question it)\n${plan.users.map((u) => `- ${u.text}${u.note ? ` (${u.note})` : " (no detail given)"}`).join("\n")}`
