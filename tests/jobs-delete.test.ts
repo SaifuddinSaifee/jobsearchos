@@ -13,6 +13,7 @@ import { emptyExtraction, type JobDraft, type JobEdit } from "@/lib/jobs/schema"
 import {
   deleteJobs,
   fillAdditionalDetails,
+  fillApplyNotes,
   findDuplicate,
   restoreDeleted,
   saveJob,
@@ -63,6 +64,7 @@ async function editOf(jobId: string): Promise<JobEdit> {
     salaryPeriod: d.salaryPeriod ?? "",
     postedAt: d.postedAt ?? "",
     applicationUrl: d.applyUrl ?? "",
+    applyNotes: d.applyNotes ?? [],
     aboutCompany: d.aboutCompany,
     responsibilities: d.responsibilities,
     requirements: d.requirements,
@@ -302,5 +304,53 @@ describe("additional details", () => {
 
     await deleteJobs([a.jobId], db);
     await expect(fillAdditionalDetails(a.jobId, db, async () => [])).rejects.toThrow("No saved posting text");
+  });
+});
+
+describe("apply notes", () => {
+  it("saves them cleaned, keeping only links that are web addresses or email addresses", async () => {
+    const a = await save(1, {
+      applyNotes: [
+        { kind: "where", text: " Apply through the Google Form, not this site ", link: " https://forms.gle/abc " },
+        { kind: "where", text: "Email your resume", link: "mailto:jobs@acme.com" },
+        { kind: "include", text: "Put the code word in the subject", link: "javascript:alert(1)" },
+        { kind: "other", text: "  ", link: "" },
+      ],
+    });
+    const d = (await getJobDetail(a.jobId, db))!;
+    expect(d.applyNotes).toEqual([
+      { kind: "where", text: "Apply through the Google Form, not this site", link: "https://forms.gle/abc" },
+      { kind: "where", text: "Email your resume", link: "jobs@acme.com" },
+      { kind: "include", text: "Put the code word in the subject", link: "" },
+    ]);
+    expect((await listJobRows(db))[0].hasApplyNotes).toBe(true);
+  });
+
+  it("are an empty list for a posting with none, and can be edited", async () => {
+    const a = await save(1);
+    expect((await getJobDetail(a.jobId, db))!.applyNotes).toEqual([]);
+    expect((await listJobRows(db))[0].hasApplyNotes).toBe(false);
+    const notes = [{ kind: "deadline" as const, text: "Apply by 1 December", link: "" }];
+    await updateJob(a.jobId, { ...(await editOf(a.jobId)), applyNotes: notes }, db);
+    expect((await getJobDetail(a.jobId, db))!.applyNotes).toEqual(notes);
+  });
+
+  it("are null for jobs saved before they existed, and filled from the saved posting text", async () => {
+    const a = await save(1, { rawText: "Apply at jobs@acme.com" });
+    await db.update(jobs).set({ applyNotes: null }).where(eq(jobs.id, a.jobId));
+    expect((await getJobDetail(a.jobId, db))!.applyNotes).toBeNull();
+    expect((await listJobRows(db))[0].hasApplyNotes).toBe(false);
+
+    const seen: string[] = [];
+    const out = await fillApplyNotes(a.jobId, db, async (text) => {
+      seen.push(text);
+      return [{ kind: "where", text: "Email your application", link: "jobs@acme.com" }];
+    });
+    expect(seen).toEqual(["Apply at jobs@acme.com"]);
+    expect(out).toEqual([{ kind: "where", text: "Email your application", link: "jobs@acme.com" }]);
+    expect((await getJobDetail(a.jobId, db))!.applyNotes).toEqual(out);
+
+    await deleteJobs([a.jobId], db);
+    await expect(fillApplyNotes(a.jobId, db, async () => [])).rejects.toThrow("No saved posting text");
   });
 });

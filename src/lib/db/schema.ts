@@ -17,7 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
-import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
+import type { AdditionalDetail, ApplyNote, JobDraft } from "@/lib/jobs/schema";
 import type { DocJSON } from "@/lib/documents/build";
 import type { PageSettings } from "@/lib/documents/page-settings";
 import type { DocumentKind, DocumentOrigin, RecordChoice, VersionReason } from "@/lib/documents/types";
@@ -198,6 +198,11 @@ export const jobs = pgTable(
     requirements: jsonb("requirements").$type<JobRequirements>().notNull(),
     /** Everything else worth keeping from the posting (benefits, interview process...), grouped under headings. */
     additionalDetails: jsonb("additional_details").$type<AdditionalDetail[]>().notNull().default([]),
+    /**
+     * The posting's instructions on how to apply (use this form, email this address, include a portfolio...). Null for
+     * jobs saved before this was extracted, so the panel can offer to look for them; [] when the posting has none.
+     */
+    applyNotes: jsonb("apply_notes").$type<ApplyNote[]>(),
     technologies: text("technologies").array().notNull(),
     origin: jobOrigin("origin").notNull().default("manual"),
     status: jobStatus("status").notNull().default("saved"),

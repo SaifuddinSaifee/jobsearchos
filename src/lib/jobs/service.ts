@@ -13,9 +13,9 @@ import { env } from "@/lib/env";
 import { applyResearch, removeCompaniesWithoutJobs, resolveCompany } from "@/lib/companies/service";
 import { dedupKey } from "./dedup";
 import { canonicalizeUrl } from "./fetch/url";
-import { safeHref } from "./links";
-import { extractAdditionalDetails } from "./extract";
-import { JobDraftSchema, JobEditSchema, type AdditionalDetail } from "./schema";
+import { applyNoteHref, safeHref } from "./links";
+import { extractAdditionalDetails, extractApplyNotes } from "./extract";
+import { JobDraftSchema, JobEditSchema, type AdditionalDetail, type ApplyNote } from "./schema";
 import type { DeletedState } from "./types";
 
 export type SaveResult =
@@ -55,6 +55,13 @@ export function cleanDetails(list: AdditionalDetail[]): AdditionalDetail[] {
   return list
     .map((d) => ({ heading: d.heading.trim() || "Other details", items: d.items.map((i) => i.trim()).filter(Boolean) }))
     .filter((d) => d.items.length > 0);
+}
+
+/** Trims notes and drops empty ones. A link that is neither an email address nor an http(s) URL is dropped. */
+export function cleanApplyNotes(list: ApplyNote[]): ApplyNote[] {
+  return list
+    .map((n) => ({ kind: n.kind, text: n.text.trim(), link: applyNoteHref(n.link) ? n.link.trim().replace(/^mailto:/i, "") : "" }))
+    .filter((n) => n.text);
 }
 
 function cleanKeywords(list: string[]): string[] {
@@ -111,6 +118,7 @@ export async function saveJob(input: unknown, db: Db = defaultDb()): Promise<Sav
           responsibilities: draft.responsibilities,
           requirements: draft.requirements,
           additionalDetails: cleanDetails(draft.additionalDetails),
+          applyNotes: cleanApplyNotes(draft.applyNotes),
           technologies: draft.technologies,
           origin: "manual",
           status: "saved",
@@ -199,6 +207,7 @@ export async function updateJob(
           responsibilities: edit.responsibilities,
           requirements: edit.requirements,
           additionalDetails: cleanDetails(edit.additionalDetails),
+          applyNotes: cleanApplyNotes(edit.applyNotes),
           technologies: edit.technologies,
           dedupKey: key,
           updatedAt: new Date(),
@@ -320,4 +329,23 @@ export async function fillAdditionalDetails(
   const details = cleanDetails(await extract(snap.rawText));
   await db.update(jobs).set({ additionalDetails: details, updatedAt: new Date() }).where(eq(jobs.id, jobId));
   return details;
+}
+
+/** Finds a saved job's notes on how to apply in the posting text kept when it was saved. Overwrites what is there. */
+export async function fillApplyNotes(
+  jobId: string,
+  db: Db = defaultDb(),
+  extract: (text: string) => Promise<ApplyNote[]> = extractApplyNotes,
+): Promise<ApplyNote[]> {
+  const [snap] = await db
+    .select({ rawText: jobSnapshots.rawText })
+    .from(jobSnapshots)
+    .innerJoin(jobs, eq(jobs.id, jobSnapshots.jobId))
+    .where(and(eq(jobSnapshots.jobId, jobId), isNull(jobs.deletedAt)))
+    .orderBy(desc(jobSnapshots.fetchedAt))
+    .limit(1);
+  if (!snap) throw new Error("No saved posting text for this job");
+  const notes = cleanApplyNotes(await extract(snap.rawText));
+  await db.update(jobs).set({ applyNotes: notes, updatedAt: new Date() }).where(eq(jobs.id, jobId));
+  return notes;
 }

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withLlmContext } from "@/lib/llm/context";
-import { deleteJobs, fillAdditionalDetails, restoreDeleted, updateJob } from "@/lib/jobs/service";
+import { deleteJobs, fillAdditionalDetails, fillApplyNotes, restoreDeleted, updateJob } from "@/lib/jobs/service";
 import { STATUS_VALUES } from "@/lib/jobs/status";
 import {
   changeStatus,
@@ -103,5 +103,13 @@ export async function fillAdditionalDetailsAction(jobId: string) {
   return run(async () => {
     const id = Id.parse(jobId);
     return { details: await withLlmContext("fill-job-details", { jobId: id }, () => fillAdditionalDetails(id)) };
+  });
+}
+
+/** Reads the saved posting text again (one LLM call) to find its instructions on how to apply. */
+export async function fillApplyNotesAction(jobId: string) {
+  return run(async () => {
+    const id = Id.parse(jobId);
+    return { notes: await withLlmContext("fill-job-details", { jobId: id }, () => fillApplyNotes(id)) };
   });
 }

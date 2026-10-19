@@ -18,6 +18,7 @@ import { MAX_NOTES, type DeletedState, type JobDetail, type JobRow } from "@/lib
 import { statusInfo, type ApplicationStatus } from "@/lib/jobs/status";
 import { detailToMarkdownJob } from "@/lib/jobs/markdown";
 import { cn } from "@/lib/utils";
+import { ApplyNotesCallout, FindApplyNotesButton } from "./apply-notes";
 import { AskClaudeButton } from "./ask-claude";
 import { JobEditForm } from "./job-edit-form";
 import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
@@ -172,6 +173,13 @@ function Panel({
           {salary && <span>· {salary}</span>}
         </SheetDescription>
         <JobLinkButtons job={head} />
+        {detail?.applyNotes ? (
+          <ApplyNotesCallout notes={detail.applyNotes} />
+        ) : detail?.snapshot ? (
+          <div>
+            <FindApplyNotesButton jobId={detail.jobId} />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <MarkdownButtons
             disabled={!detail}

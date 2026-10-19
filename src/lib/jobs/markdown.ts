@@ -1,6 +1,6 @@
 import { companySection, type CompanyMarkdownInput } from "@/lib/companies/markdown";
 import { sourceLabel } from "./links";
-import type { AdditionalDetail, JobDraft } from "./schema";
+import type { AdditionalDetail, ApplyNote, JobDraft } from "./schema";
 import type { JobDetail } from "./types";
 
 /** Everything the extraction produced, in one shape shared by the saved-job panel and the review form. */
@@ -18,6 +18,7 @@ export type MarkdownJob = {
   source: string | null;
   postingUrl: string | null;
   applyUrl: string | null;
+  applyNotes: ApplyNote[];
   responsibilities: string[];
   requirements: { required: string[]; preferred: string[] };
   additionalDetails: AdditionalDetail[];
@@ -33,6 +34,8 @@ export type MarkdownJob = {
 const REMOTE: Record<string, string> = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site" };
 const SYMBOL: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", INR: "₹", CAD: "C$", AUD: "A$" };
 const PER: Record<string, string> = { year: "per year", month: "per month", hour: "per hour" };
+
+const NOTE_LABEL: Record<ApplyNote["kind"], string> = { where: "Where to apply", include: "Include", deadline: "Deadline", other: "Note" };
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -77,6 +80,14 @@ export function jobToMarkdown(j: MarkdownJob): string {
   out.push(facts.filter(([, v]) => v.trim()).map(([k, v]) => `- **${k}:** ${oneLine(v)}`).join("\n"));
 
   const section = (heading: string, body: string) => body && out.push(`${heading}\n\n${body}`);
+  // Right after the facts: these change how to apply, so whoever reads this should see them first.
+  section(
+    "## How to apply",
+    j.applyNotes
+      .filter((n) => n.text.trim())
+      .map((n) => `- **${NOTE_LABEL[n.kind]}:** ${oneLine(n.text)}${n.link.trim() && !n.text.includes(n.link.trim()) ? ` (${n.link.trim()})` : ""}`)
+      .join("\n"),
+  );
   section("## Responsibilities", bullets(j.responsibilities));
   const req = [
     j.requirements.required.length ? `### Required\n\n${bullets(j.requirements.required)}` : "",
@@ -124,6 +135,7 @@ export function detailToMarkdownJob(d: JobDetail): MarkdownJob {
     source: d.source,
     postingUrl: d.postingUrl,
     applyUrl: d.applyUrl,
+    applyNotes: d.applyNotes ?? [],
     responsibilities: d.responsibilities,
     requirements: d.requirements,
     additionalDetails: d.additionalDetails,
@@ -151,6 +163,7 @@ export function draftToMarkdownJob(d: JobDraft): MarkdownJob {
     source: d.ats ?? d.fetchMethod,
     postingUrl: d.sourceUrl || null,
     applyUrl: d.applicationUrl || null,
+    applyNotes: d.applyNotes,
     responsibilities: d.responsibilities,
     requirements: d.requirements,
     additionalDetails: d.additionalDetails,

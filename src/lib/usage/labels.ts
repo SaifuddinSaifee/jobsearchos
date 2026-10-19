@@ -22,6 +22,7 @@ export const STEP_LABELS: Record<LlmStep, string> = {
   "parse-resume": "Parse resume",
   "extract-job": "Extract job",
   "extract-additional-details": "Extract extra details",
+  "extract-apply-notes": "Extract how to apply",
   "research-company": "Summarize company",
   "extract-posting-people": "People named in the posting",
   "find-people-web": "People found on the web",

@@ -117,6 +117,11 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
   when you are logged out: the company's tech stack, the full skills list, the application questions and the founders.
 - The app pulls out company, title, location, remote type, employment type, salary, posted date, responsibilities,
   requirements, technologies, keywords, and extra details such as benefits and the interview process.
+- It also pulls out **how to apply**: any instruction in the posting beyond the usual apply button, such as "do not
+  apply on LinkedIn, use this Google Form", "email your resume to this address with this subject line", what to
+  include (portfolio, expected salary, an answer to a question), deadlines, and things to avoid ("do not DM the
+  founders"). Each note is marked as where to apply, what to include, a deadline, or other, with its link or email
+  address. You can edit them on the review screen.
 - Keywords aim to be the full list a resume should match (usually 25-60): every technology, the posting's named focus
   areas, domains, practices, role type and stage, and the working traits it asks for.
 - Clean results save automatically. Doubtful ones wait for your review.
@@ -130,7 +135,11 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
 - Statuses: Saved, Preparing, Applied, Recruiter Screen, Interview, Technical Interview, Final Interview, Offer,
   Rejected, Withdrawn, Ghosted. Every change is recorded on a timeline.
 - A side panel per job: links, status, applied date, notes, details, requirements, responsibilities, keywords, timeline
-  and the original posting text. Move to the previous or next job without closing it. Each job has its own link.
+  and the original posting text. A highlighted **How to apply** box sits right under the apply links, with the form
+  links and email addresses clickable. Jobs saved before this existed offer **Check the posting for how to apply**,
+  which reads the saved posting text once.
+- In the table, a job with instructions on how to apply shows a highlighted icon next to its links ("Read how to apply
+  first") that opens the job. Move to the previous or next job without closing it. Each job has its own link.
 - Edit any job's fields by hand.
 - **Copy or download a job as Markdown**, including the company profile, for use in any AI tool.
 - **Ask Claude:** opens a claude.ai chat with the job already loaded and a prompt to tailor your resume and cover letter

@@ -176,6 +176,13 @@
       "when": 1792106508182,
       "tag": "0024_review_choices",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792442275784,
+      "tag": "0025_job_apply_notes",
+      "breakpoints": true
     }
   ]
 }

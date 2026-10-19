@@ -2,13 +2,28 @@ import { env } from "@/lib/env";
 import { chatStructured } from "@/lib/llm/structured";
 import type { Hints } from "./fetch/types";
 import { z } from "zod";
-import { AdditionalDetailSchema, JobExtractionSchema, type AdditionalDetail, type JobExtraction } from "./schema";
+import {
+  AdditionalDetailSchema,
+  ApplyNoteSchema,
+  JobExtractionSchema,
+  type AdditionalDetail,
+  type ApplyNote,
+  type JobExtraction,
+} from "./schema";
 
 const MAX_CHARS = 60_000;
+/**
+ * Extraction is copying a posting into fields. At its default effort GLM-5.3-Flash still thinks under structured
+ * outputs, anywhere from a few hundred to all 16,000 output tokens for the same posting, so some runs were cut off
+ * before writing any JSON. Low effort removes nearly all of the thinking, as it does for resume parsing.
+ */
+const EXTRACT_EFFORT = "low";
 /** Some ATS boards store a literal placeholder (Stripe returns "LOCATION"). */
 const PLACEHOLDER = /^\s*(location|n\/a|tbd|none|-)?\s*$/i;
 
 const ADDITIONAL_RULE = `- additionalDetails: everything else in the posting worth keeping that the other fields do not cover: benefits and perks, compensation details (bonus, equity, pay ranges by location, how pay is set), the interview or hiring process and timeline, work schedule, travel, on-call, visa sponsorship, relocation, security clearance, team and reporting line, start date, application deadline and similar. Group them under short headings, using the posting's own section names where it has them (e.g. "Benefits", "Interview process"). One item per bullet, concise and in the posting's words. Do not repeat responsibilities, requirements or the text about the company. Leave out equal-opportunity and legal boilerplate. [] if the posting has nothing else.`;
+
+const APPLY_RULE = `- applyNotes: every instruction in the posting on how to apply that goes beyond pressing the job board's apply button, so the applicant does not miss it. Look for: a different place to apply (a Google Form or other form, the company's own careers page, an email address) and any request not to apply through the site the posting is on; what to send or put in the application (cover letter, portfolio, GitHub or work samples, a subject line, a code word, answers to a question, expected salary, notice period); deadlines; and anything else applicants are asked to do or avoid (e.g. "Do not contact the recruiter directly"). One note per instruction. kind: "where" (where or how to send the application), "include" (what to send or put in it), "deadline", or "other". text: the instruction, short and in the posting's words. link: the URL or email address the instruction names, copied exactly, else "". Do not repeat requirements or the interview process. [] if the posting gives no such instructions.`;
 
 const SYSTEM = `You convert a job posting into structured JSON.
 Rules:
@@ -20,6 +35,7 @@ Rules:
 - Salary: numbers only, no symbols (120000, not "$120k"). salaryCurrency as an ISO code (USD, EUR); salaryPeriod one of year, month, hour, or "". Use null when no pay is stated.
 - postedAt: ISO date (YYYY-MM-DD) if stated, else "".
 - applicationUrl: only if the posting gives an explicit apply link, else "".
+${APPLY_RULE}
 - aboutCompany: the paragraph(s) in the posting that describe the employer itself (what the company does, its mission, values, culture). Copy them as written with light trimming. Leave out the role's duties, perks lists and equal-opportunity statements. "" if the posting says nothing about the company.
 - responsibilities: what the person will do, one item per bullet, concise and in the posting's words. When the posting groups the work under named areas (e.g. "Agents. Build agents, tools..."), start each bullet with the area name and a colon ("Agents: Build agents, tools...").
 - requirements.required: must-have qualifications; requirements.preferred: nice-to-haves, bonus points, "preferred".
@@ -56,8 +72,25 @@ export async function extractJob(
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
   const user = `${known ? `Known fields (reliable, from the source):\n${known}\n\n` : ""}Job posting:\n\n${text.slice(0, MAX_CHARS)}`;
-  const extraction = await chatStructured(JobExtractionSchema, { system: SYSTEM, user }, { model, step: "extract-job" });
+  const extraction = await chatStructured(JobExtractionSchema, { system: SYSTEM, user }, { model, reasoningEffort: EXTRACT_EFFORT, step: "extract-job" });
   return { extraction: mergeHints(extraction, hints), model };
+}
+
+const ApplyNotesOnlySchema = z.object({ applyNotes: z.array(ApplyNoteSchema) });
+
+/** Pulls only the notes on how to apply out of a posting. Used for jobs saved before that field existed. */
+export async function extractApplyNotes(text: string): Promise<ApplyNote[]> {
+  const system = `You read a job posting and return only its instructions on how to apply.
+Rules:
+- Use only what the posting says. Never infer or invent.
+${APPLY_RULE}
+- Ignore navigation, cookie notices and equal-opportunity or legal boilerplate.`;
+  const out = await chatStructured(
+    ApplyNotesOnlySchema,
+    { system, user: `Job posting:\n\n${text.slice(0, MAX_CHARS)}` },
+    { model: env().EXTRACTION_MODEL, reasoningEffort: EXTRACT_EFFORT, step: "extract-apply-notes" },
+  );
+  return out.applyNotes;
 }
 
 const DetailsOnlySchema = z.object({ additionalDetails: z.array(AdditionalDetailSchema) });
@@ -75,7 +108,7 @@ ${ADDITIONAL_RULE}
   const out = await chatStructured(
     DetailsOnlySchema,
     { system, user: `Job posting:\n\n${text.slice(0, MAX_CHARS)}` },
-    { model: env().EXTRACTION_MODEL, step: "extract-additional-details" },
+    { model: env().EXTRACTION_MODEL, reasoningEffort: EXTRACT_EFFORT, step: "extract-additional-details" },
   );
   return out.additionalDetails;
 }

@@ -22,6 +22,7 @@ export const LLM_STEPS = [
   "parse-resume",
   "extract-job",
   "extract-additional-details",
+  "extract-apply-notes",
   "research-company",
   "extract-posting-people",
   "find-people-web",

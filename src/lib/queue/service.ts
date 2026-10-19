@@ -168,8 +168,10 @@ export async function listQueue(db: Db = defaultDb()): Promise<QueueSnapshot> {
 /** One item with its draft, for the review screen. */
 export async function getQueueDraft(id: string, db: Db = defaultDb()): Promise<{ item: QueueItem; draft: JobDraft | null } | null> {
   const [r] = await db.select().from(applicationQueue).where(eq(applicationQueue.id, id));
-  // Drafts stored before additional details existed lack the field.
-  const draft = r?.draft ? { ...r.draft, additionalDetails: r.draft.additionalDetails ?? [] } : null;
+  // Drafts stored before additional details or apply notes existed lack those fields.
+  const draft = r?.draft
+    ? { ...r.draft, additionalDetails: r.draft.additionalDetails ?? [], applyNotes: r.draft.applyNotes ?? [] }
+    : null;
   return r ? { item: toItem(r), draft } : null;
 }
 

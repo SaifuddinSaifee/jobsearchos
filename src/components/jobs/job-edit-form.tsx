@@ -26,6 +26,7 @@ function toEdit(d: JobDetail): JobEdit {
     salaryPeriod: d.salaryPeriod ?? "",
     postedAt: d.postedAt ?? "",
     applicationUrl: d.applyUrl ?? "",
+    applyNotes: d.applyNotes ?? [],
     aboutCompany: d.aboutCompany,
     responsibilities: d.responsibilities,
     requirements: d.requirements,

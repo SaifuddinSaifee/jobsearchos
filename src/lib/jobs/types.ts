@@ -1,6 +1,6 @@
 import type { JobRequirements } from "@/lib/db/schema";
 import type { CompanyProfile } from "@/lib/companies/types";
-import type { AdditionalDetail } from "./schema";
+import type { AdditionalDetail, ApplyNote } from "./schema";
 import type { ApplicationStatus } from "./status";
 
 // Client-safe: no database imports here, so components can import these without bundling the driver.
@@ -31,6 +31,8 @@ export type JobRow = {
   applyUrl: string | null;
   technologies: string[];
   hasNotes: boolean;
+  /** The posting has instructions on how to apply, so the table can flag them next to the apply link. */
+  hasApplyNotes: boolean;
 };
 
 export type TimelineEvent = {
@@ -51,6 +53,8 @@ export type JobDetail = JobRow & {
   requirements: JobRequirements;
   /** Benefits, interview process and other posting details, grouped under headings. */
   additionalDetails: AdditionalDetail[];
+  /** Instructions from the posting on how to apply; null when the job was saved before these were looked for. */
+  applyNotes: ApplyNote[] | null;
   keywords: string[];
   timeline: TimelineEvent[];
   snapshot: { sourceUrl: string | null; fetchMethod: string; fetchedAt: string; rawText: string } | null;

@@ -17,7 +17,8 @@ export type StructuredOptions = {
   /**
    * How the JSON is asked for. "schema" (the default) uses Together's structured outputs. "prompt" only puts the schema
    * in the prompt and reads the JSON out of the reply: GLM-5.3 does not think at all under structured outputs (no
-   * reasoning tokens, whatever the effort), so a call that needs its reasoning asks this way. The reply is validated
+   * reasoning tokens, whatever the effort), so a call that needs its reasoning asks this way. GLM-5.3-Flash does think
+   * under structured outputs, as much as it likes at its default effort, so set an effort on Flash calls too. The reply is validated
    * against the schema the same way in both.
    */
   jsonMode?: "schema" | "prompt";

@@ -63,7 +63,7 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |
 | `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`: one call per 6 open requirements, all at the same time) and `read-requirements` (alongside them: what each requirement is and which are the job's core), `write-resume` (the draft, `WRITER_MODEL` at high effort with `WRITER_MAX_TOKENS`, retried once if unreadable; one cut off is written again at low effort with `WRITER_FALLBACK_MAX_TOKENS` and marked a fallback), `review-resume` (`REVIEW_MODEL`, 32,000 tokens, retried after rate limits; a cut-off review keeps its finished part), `revise-resume` (`WRITER_MODEL` with `REVISE_MAX_TOKENS`, when the review asks for a material edit or a code check found something; asked once). A stopped job is never retried |
 | `upload-resume` | `POST /api/resume/parse` | `parse-resume` |
-| `fill-job-details` | Server action | `extract-additional-details` |
+| `fill-job-details` | Server action | `extract-additional-details`, `extract-apply-notes` |
 | `research-company` | Server action | `research-company` |
 | `regroup-role` | Server action | `group-bullets` |
 | `eval-resume`, `eval-jobs`, `snapshot-job` | Scripts | the step under test |
