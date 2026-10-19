@@ -58,6 +58,7 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | Action | Where it is opened | Steps it makes |
 | --- | --- | --- |
 | `add-job` | Queue: `processItem` | `extract-job`, `research-company` |
+| `refetch-job` | Server action (Refetch on a job) | `extract-job` |
 | `find-contacts` | Queue: `processSearch` | `extract-posting-people`, `find-people-web`, `rank-contacts` |
 | `index-resume` | Queue: `processIndex` | `parse-resume` (only for an unstructured upload) |
 | `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |

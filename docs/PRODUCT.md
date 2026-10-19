@@ -141,6 +141,11 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
 - In the table, a job with instructions on how to apply shows a highlighted icon next to its links ("Read how to apply
   first") that opens the job. Move to the previous or next job without closing it. Each job has its own link.
 - Edit any job's fields by hand.
+- **Refetch a job** from the row menu or the side panel: gets the posting again and replaces the job's details with a
+  fresh extraction, for when the posting changed or the extraction got better. Status, notes, documents and the
+  company profile stay as they are. A pasted job reads its saved text again. If the site cannot be fetched (the
+  posting was taken down), the app says so and offers **Use saved text** instead; a job-board posting that is gone is
+  never replaced by whatever page the link now shows. **Undo** puts the previous details back.
 - **Copy or download a job as Markdown**, including the company profile, for use in any AI tool.
 - **Ask Claude:** opens a claude.ai chat with the job already loaded and a prompt to tailor your resume and cover letter
   and point out gaps.

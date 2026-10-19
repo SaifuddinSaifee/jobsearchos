@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, ChevronRight, Mail, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Mail, Pencil, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -55,6 +55,9 @@ type Props = {
   onEditingChange: (editing: boolean) => void;
   onEdited: (removedCompanies: DeletedState["companies"]) => void;
   onDelete: (jobId: string) => void;
+  /** This job is being fetched again. */
+  refetching: boolean;
+  onRefetch: (jobId: string) => void;
 };
 
 export function JobSheet(props: Props) {
@@ -131,6 +134,8 @@ function Panel({
   onEditingChange,
   onEdited,
   onDelete,
+  refetching,
+  onRefetch,
 }: Props & { head: JobRow; detail: JobDetail | null; loading: boolean }) {
   const now = useNow();
   const dateRef = useRef<HTMLInputElement>(null);
@@ -192,6 +197,21 @@ function Panel({
             Email a contact
           </Link>
           <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!detail}
+              loading={refetching}
+              onClick={() => onRefetch(head.jobId)}
+              title={
+                detail?.snapshot?.fetchMethod === "paste"
+                  ? "This job was pasted, so its saved text is read again with the current extraction"
+                  : "Fetches the job's link again and updates its details with the current extraction"
+              }
+            >
+              <RefreshCw />
+              {refetching ? "Refetching" : "Refetch"}
+            </Button>
             <Button
               variant={editing ? "secondary" : "outline"}
               size="sm"

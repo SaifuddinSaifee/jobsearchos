@@ -24,7 +24,9 @@ import {
   bulkChangeStatusAction,
   changeStatusAction,
   deleteJobsAction,
+  refetchJobAction,
   restoreDeletedAction,
+  undoRefetchAction,
   revertStatusAction,
   setAppliedAtAction,
 } from "@/app/(app)/jobs/actions";
@@ -42,6 +44,7 @@ import {
   type TabValue,
   TABS,
 } from "@/lib/jobs/status";
+import type { RefetchUndo } from "@/lib/jobs/refetch";
 import type { DeletedState, JobRow, PreviousState } from "@/lib/jobs/types";
 import { JobSheet } from "../job-sheet";
 import { useNow } from "../use-now";
@@ -145,6 +148,8 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [focusDate, setFocusDate] = useState(false);
   const [editing, setEditing] = useState(false);
+  /** Jobs being refetched, so the row menu and the panel show the same busy state. */
+  const [refetching, setRefetching] = useState<ReadonlySet<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dirty = useRef(false);
@@ -338,6 +343,60 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
     toast.success("Job updated", { description: companiesNote(removedCompanies) });
   }
 
+  /**
+   * Gets the posting again and replaces the job's details. A site that cannot be fetched offers the saved text instead.
+   * Unsaved edits to the same job would be overwritten, so the user is asked first and the edit form is closed.
+   */
+  async function refetchJob(id: string, from: "auto" | "saved-text" = "auto") {
+    if (refetching.has(id)) return;
+    if (id === jobId && editing) {
+      if (!confirmDiscard()) return;
+      dirty.current = false;
+      setEditing(false);
+    }
+    setRefetching((prev) => new Set(prev).add(id));
+    const row = optimisticRows.find((r) => r.jobId === id);
+    const title = shortTitle(row?.title ?? "the job");
+    // A pasted job has no site to fetch, so its saved text is read again.
+    const fromText = from === "saved-text" || row?.source === "paste";
+    const toastId = toast.loading(fromText ? `Reading the saved posting for "${title}" again...` : `Refetching "${title}"...`);
+    const res = await refetchJobAction(id, from);
+    setRefetching((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    if (!res.ok) return void toast.error(res.error, { id: toastId });
+    const outcome = res.outcome;
+    if (outcome.type === "fetch-failed") {
+      return void toast.error(`Could not fetch "${title}"`, {
+        id: toastId,
+        description: outcome.canUseSavedText
+          ? `${outcome.message.replace(/([^.!?])$/, "$1.")} You can read the posting text saved last time instead.`
+          : outcome.message,
+        duration: 12000,
+        action: outcome.canUseSavedText ? { label: "Use saved text", onClick: () => void refetchJob(id, "saved-text") } : undefined,
+      });
+    }
+    invalidateJobs();
+    const note = companiesNote(outcome.removedCompanies);
+    toast.success(outcome.source === "site" ? `Refetched "${title}"` : `Read the saved posting for "${title}" again`, {
+      id: toastId,
+      description: note ?? "Its details are up to date.",
+      duration: 10000,
+      action: { label: "Undo", onClick: () => undoRefetch(id, title, outcome.undo) },
+    });
+  }
+
+  function undoRefetch(id: string, title: string, previous: RefetchUndo) {
+    startTransition(async () => {
+      const res = await undoRefetchAction(id, previous);
+      if (!res.ok) return void toast.error(res.error);
+      invalidateJobs();
+      toast.success(`Put back the details of "${title}"`, { description: companiesNote(res.removedCompanies) });
+    });
+  }
+
   function setAppliedDate(applicationId: string, date: string) {
     startTransition(async () => {
       applyOptimistic({ type: "appliedAt", applicationId, date });
@@ -514,7 +573,7 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
     .map((c) => ({ id: c.id, label: COLUMN_LABELS[c.id] ?? c.id, visible: c.getIsVisible() }));
 
   return (
-    <JobsActionsProvider value={{ now, openJob, editJob, changeStatus, deleteJobs }}>
+    <JobsActionsProvider value={{ now, openJob, editJob, changeStatus, deleteJobs, refetchJob, refetching }}>
       <div className="space-y-3">
         <Tabs
           value={tab}
@@ -658,6 +717,8 @@ export function JobsTable({ rows }: { rows: JobRow[] }) {
         }}
         onEdited={finishEdit}
         onDelete={(id) => deleteJobs([id])}
+        refetching={jobId !== null && refetching.has(jobId)}
+        onRefetch={(id) => void refetchJob(id)}
       />
     </JobsActionsProvider>
   );

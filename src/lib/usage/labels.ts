@@ -7,6 +7,7 @@ export const ACTION_LABELS: Record<RecordedAction, string> = {
   "research-company": "Research a company",
   "regroup-role": "Regroup a role",
   "add-job": "Add a job",
+  "refetch-job": "Refetch a job",
   "find-contacts": "Find contacts",
   "index-resume": "Read a resume",
   "read-career-source": "Read a career source",

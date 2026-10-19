@@ -15,7 +15,7 @@ import { dedupKey } from "./dedup";
 import { canonicalizeUrl } from "./fetch/url";
 import { applyNoteHref, safeHref } from "./links";
 import { extractAdditionalDetails, extractApplyNotes } from "./extract";
-import { JobDraftSchema, JobEditSchema, type AdditionalDetail, type ApplyNote } from "./schema";
+import { JobDraftSchema, JobEditSchema, type AdditionalDetail, type ApplyNote, type JobExtraction } from "./schema";
 import type { DeletedState } from "./types";
 
 export type SaveResult =
@@ -171,8 +171,23 @@ export async function updateJob(
   input: unknown,
   db: Db = defaultDb(),
 ): Promise<{ removedCompanies: DeletedState["companies"] }> {
-  const edit = JobEditSchema.parse(input);
-  const key = dedupKey(edit);
+  return writeJobFields(jobId, JobEditSchema.parse(input), db);
+}
+
+export type NewSnapshot = Omit<typeof jobSnapshots.$inferInsert, "id" | "jobId" | "fetchedAt">;
+
+/**
+ * Replaces a saved job's fields (edited by the user, or extracted again by a refetch), with its keywords. With a
+ * snapshot, the newly fetched posting is added in the same transaction; older snapshots are kept. Status, notes and
+ * documents are not touched.
+ */
+export async function writeJobFields(
+  jobId: string,
+  fields: JobExtraction,
+  db: Db = defaultDb(),
+  snapshot?: NewSnapshot,
+): Promise<{ removedCompanies: DeletedState["companies"] }> {
+  const key = dedupKey(fields);
   try {
     return await db.transaction(async (tx) => {
       const [job] = await tx
@@ -185,30 +200,30 @@ export async function updateJob(
       const dup = await findDuplicate({ dedupKey: key, exceptId: jobId }, tx);
       if (dup) throw new Error(`"${dup.title}" at ${dup.company} is already saved with this title and location`);
 
-      const company = await resolveCompany({ name: edit.company, aboutFromPosting: edit.aboutCompany }, tx);
-      const applicationUrl = safeHref(edit.applicationUrl) ?? job.canonicalUrl;
+      const company = await resolveCompany({ name: fields.company, aboutFromPosting: fields.aboutCompany }, tx);
+      const applicationUrl = safeHref(fields.applicationUrl) ?? job.canonicalUrl;
 
       await tx
         .update(jobs)
         .set({
-          company: edit.company,
+          company: fields.company.trim(),
           companyId: company.id,
-          aboutCompany: edit.aboutCompany.trim(),
-          title: edit.title,
-          location: edit.location.trim(),
-          remoteType: edit.remoteType,
-          employmentType: edit.employmentType.trim() || null,
-          salaryMin: edit.salaryMin === null ? null : Math.round(edit.salaryMin),
-          salaryMax: edit.salaryMax === null ? null : Math.round(edit.salaryMax),
-          salaryCurrency: edit.salaryCurrency.trim() || null,
-          salaryPeriod: edit.salaryPeriod.trim() || null,
-          postedAt: /^\d{4}-\d{2}-\d{2}$/.test(edit.postedAt) ? edit.postedAt : null,
+          aboutCompany: fields.aboutCompany.trim(),
+          title: fields.title.trim(),
+          location: fields.location.trim(),
+          remoteType: fields.remoteType,
+          employmentType: fields.employmentType.trim() || null,
+          salaryMin: fields.salaryMin === null ? null : Math.round(fields.salaryMin),
+          salaryMax: fields.salaryMax === null ? null : Math.round(fields.salaryMax),
+          salaryCurrency: fields.salaryCurrency.trim() || null,
+          salaryPeriod: fields.salaryPeriod.trim() || null,
+          postedAt: /^\d{4}-\d{2}-\d{2}$/.test(fields.postedAt) ? fields.postedAt : null,
           applicationUrl,
-          responsibilities: edit.responsibilities,
-          requirements: edit.requirements,
-          additionalDetails: cleanDetails(edit.additionalDetails),
-          applyNotes: cleanApplyNotes(edit.applyNotes),
-          technologies: edit.technologies,
+          responsibilities: fields.responsibilities,
+          requirements: fields.requirements,
+          additionalDetails: cleanDetails(fields.additionalDetails),
+          applyNotes: cleanApplyNotes(fields.applyNotes),
+          technologies: fields.technologies,
           dedupKey: key,
           updatedAt: new Date(),
         })
@@ -217,13 +232,15 @@ export async function updateJob(
 
       // The form shows every keyword, so the edited list replaces all of them.
       await tx.delete(jobKeywords).where(eq(jobKeywords.jobId, jobId));
-      const keywords = cleanKeywords(edit.keywords);
+      const keywords = cleanKeywords(fields.keywords);
       if (keywords.length) {
         await tx
           .insert(jobKeywords)
           .values(keywords.map((keyword) => ({ jobId, keyword, kind: "extracted" as const })))
           .onConflictDoNothing();
       }
+
+      if (snapshot) await tx.insert(jobSnapshots).values({ ...snapshot, jobId });
 
       const removedCompanies =
         job.companyId && job.companyId !== company.id ? await removeCompaniesWithoutJobs([job.companyId], tx) : [];
@@ -233,6 +250,33 @@ export async function updateJob(
     if (isUniqueViolation(err)) throw new Error("Another saved job already has this company, title and location");
     throw err;
   }
+}
+
+/** A saved job's fields in the shape the extraction gives, so they can be written back (Undo of a refetch). */
+export async function currentFields(jobId: string, db: Db = defaultDb()): Promise<JobExtraction> {
+  const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), isNull(jobs.deletedAt)));
+  if (!job) throw new Error("Job not found");
+  const keywords = await db.select({ keyword: jobKeywords.keyword }).from(jobKeywords).where(eq(jobKeywords.jobId, jobId));
+  return {
+    company: job.company,
+    title: job.title,
+    location: job.location,
+    remoteType: job.remoteType,
+    employmentType: job.employmentType ?? "",
+    salaryMin: job.salaryMin,
+    salaryMax: job.salaryMax,
+    salaryCurrency: job.salaryCurrency ?? "",
+    salaryPeriod: job.salaryPeriod ?? "",
+    postedAt: job.postedAt ?? "",
+    applicationUrl: job.applicationUrl ?? "",
+    applyNotes: job.applyNotes ?? [],
+    aboutCompany: job.aboutCompany,
+    responsibilities: job.responsibilities,
+    requirements: job.requirements,
+    additionalDetails: job.additionalDetails,
+    technologies: job.technologies,
+    keywords: keywords.map((k) => k.keyword),
+  };
 }
 
 /**

@@ -8,6 +8,7 @@ export const LLM_ACTIONS = [
   "research-company",
   "regroup-role",
   "add-job",
+  "refetch-job",
   "find-contacts",
   "index-resume",
   "read-career-source",
