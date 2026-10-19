@@ -1,17 +1,36 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, ChevronRight, Mail, Pencil, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  Banknote,
+  Building2,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Download,
+  FileText,
+  Mail,
+  MapPin,
+  Pencil,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fillAdditionalDetailsAction, saveNotesAction } from "@/app/(app)/jobs/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDate, formatSalary, relativeDays, storedToDate } from "@/lib/jobs/format";
 import { sourceLabel } from "@/lib/jobs/links";
 import { MAX_NOTES, type DeletedState, type JobDetail, type JobRow } from "@/lib/jobs/types";
@@ -19,9 +38,9 @@ import { statusInfo, type ApplicationStatus } from "@/lib/jobs/status";
 import { detailToMarkdownJob } from "@/lib/jobs/markdown";
 import { cn } from "@/lib/utils";
 import { ApplyNotesCallout, FindApplyNotesButton } from "./apply-notes";
-import { AskClaudeButton } from "./ask-claude";
+import { openInClaude } from "./ask-claude";
 import { JobEditForm } from "./job-edit-form";
-import { MarkdownButtons, toMarkdownFile } from "./markdown-actions";
+import { copyMarkdown, downloadMarkdown, toMarkdownFile } from "./markdown-actions";
 import { GenerateResumeButton } from "@/components/resume-writer/generate-button";
 import { JobDocuments } from "@/components/resume-writer/job-documents";
 import { JobLinkButtons } from "./table/job-links";
@@ -148,11 +167,12 @@ function Panel({
 
   return (
     <>
-      <SheetHeader className="space-y-2 p-6 pr-14">
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <SheetHeader className="gap-0 p-0">
+        {/* Toolbar: moving between jobs on the left, editing this one on the right (the close button sits past it). */}
+        <div className="flex h-13 items-center gap-1 border-b px-4 pr-12 text-xs text-muted-foreground">
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-sm"
             aria-label="Previous job"
             disabled={!neighbors.prev}
             onClick={() => neighbors.prev && onNavigate(neighbors.prev)}
@@ -161,59 +181,17 @@ function Panel({
           </Button>
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-sm"
             aria-label="Next job"
             disabled={!neighbors.next}
             onClick={() => neighbors.next && onNavigate(neighbors.next)}
           >
             <ChevronRight />
           </Button>
-          {neighbors.position && <span>{neighbors.position}</span>}
-        </div>
-        <SheetTitle className="text-lg leading-snug">{head.title}</SheetTitle>
-        <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="font-medium text-foreground">{head.company}</span>
-          {head.location && <span>· {head.location}</span>}
-          {REMOTE_LABEL[head.remoteType] && <Badge variant="outline">{REMOTE_LABEL[head.remoteType]}</Badge>}
-          {salary && <span>· {salary}</span>}
-        </SheetDescription>
-        <JobLinkButtons job={head} />
-        {detail?.applyNotes ? (
-          <ApplyNotesCallout notes={detail.applyNotes} />
-        ) : detail?.snapshot ? (
-          <div>
-            <FindApplyNotesButton jobId={detail.jobId} />
-          </div>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-2">
-          <MarkdownButtons
-            disabled={!detail}
-            build={() => toMarkdownFile(detailToMarkdownJob(detail!))}
-          />
-          <AskClaudeButton disabled={!detail} build={() => detailToMarkdownJob(detail!)} />
-          <GenerateResumeButton jobId={head.jobId} />
-          <Link href={`/jobs/${head.jobId}/outreach`} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-            <Mail />
-            Email a contact
-          </Link>
-          <div className="ml-auto flex items-center gap-2">
+          {neighbors.position && <span className="ml-1 tabular-nums">{neighbors.position}</span>}
+          <div className="ml-auto flex items-center gap-1">
             <Button
-              variant="outline"
-              size="sm"
-              disabled={!detail}
-              loading={refetching}
-              onClick={() => onRefetch(head.jobId)}
-              title={
-                detail?.snapshot?.fetchMethod === "paste"
-                  ? "This job was pasted, so its saved text is read again with the current extraction"
-                  : "Fetches the job's link again and updates its details with the current extraction"
-              }
-            >
-              <RefreshCw />
-              {refetching ? "Refetching" : "Refetch"}
-            </Button>
-            <Button
-              variant={editing ? "secondary" : "outline"}
+              variant={editing ? "secondary" : "ghost"}
               size="sm"
               disabled={!detail}
               aria-pressed={editing}
@@ -222,11 +200,55 @@ function Panel({
               <Pencil />
               {editing ? "Editing" : "Edit"}
             </Button>
-            <Button variant="destructive" size="sm" onClick={() => onDelete(head.jobId)}>
-              <Trash2 />
-              Delete
-            </Button>
           </div>
+        </div>
+
+        <div className="space-y-4 px-6 pt-5 pb-6">
+          <div className="space-y-2">
+            <SheetTitle className="text-xl leading-snug font-semibold tracking-tight text-balance">{head.title}</SheetTitle>
+            <SheetDescription className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              <MetaItem Icon={Building2} label="Company">
+                <span className="font-medium text-foreground">{head.company}</span>
+              </MetaItem>
+              {head.location && (
+                <MetaItem Icon={MapPin} label="Location">
+                  {head.location}
+                </MetaItem>
+              )}
+              {REMOTE_LABEL[head.remoteType] && <Badge variant="outline">{REMOTE_LABEL[head.remoteType]}</Badge>}
+              {salary && (
+                <MetaItem Icon={Banknote} label="Salary">
+                  {salary}
+                </MetaItem>
+              )}
+            </SheetDescription>
+          </div>
+
+          {/*
+            One row in a fixed place for every job: the main path first (resume, posting, outreach), then the other
+            actions as icons at the end of the line.
+          */}
+          <div className="flex flex-wrap items-center gap-2">
+            <GenerateResumeButton jobId={head.jobId} size="default" />
+            <JobLinkButtons job={head} />
+            <Link href={`/jobs/${head.jobId}/outreach`} className={buttonVariants({ variant: "outline" })}>
+              <Mail aria-hidden />
+              Email a contact
+            </Link>
+            <IconActions
+              jobId={head.jobId}
+              detail={detail}
+              refetching={refetching}
+              onRefetch={onRefetch}
+              onDelete={onDelete}
+            />
+          </div>
+
+          {detail?.applyNotes ? (
+            <ApplyNotesCallout notes={detail.applyNotes} />
+          ) : detail?.snapshot ? (
+            <FindApplyNotesButton jobId={detail.jobId} />
+          ) : null}
         </div>
       </SheetHeader>
 
@@ -260,6 +282,107 @@ function Panel({
         />
       )}
     </>
+  );
+}
+
+function MetaItem({ Icon, label, children }: { Icon: LucideIcon; label: string; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      <span className="sr-only">{label}: </span>
+      {children}
+    </span>
+  );
+}
+
+/** An icon-only button named by its tooltip and label. */
+function IconAction({ label, ...props }: React.ComponentProps<typeof Button> & { label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button variant="ghost" size="icon" aria-label={label} {...props} />} />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The job's other actions, as icons: hand it to another AI tool, then refresh or delete it. */
+function IconActions({
+  jobId,
+  detail,
+  refetching,
+  onRefetch,
+  onDelete,
+}: Pick<Props, "refetching" | "onRefetch" | "onDelete"> & { jobId: string; detail: JobDetail | null }) {
+  const markdown = () => detailToMarkdownJob(detail!);
+  // Briefly confirm the copy on the button itself, where the user is looking.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(id);
+  }, [copied]);
+
+  return (
+    <div className="ml-auto flex items-center gap-0.5">
+      <IconAction label="Ask Claude" disabled={!detail} onClick={() => openInClaude(markdown())}>
+        <Sparkles />
+      </IconAction>
+      <IconAction
+        label={copied ? "Copied" : "Copy as Markdown"}
+        disabled={!detail}
+        onClick={() =>
+          copyMarkdown(toMarkdownFile(markdown()).markdown).then(
+            () => setCopied(true),
+            (e: Error) => toast.error(e.message),
+          )
+        }
+      >
+        <span key={copied ? "done" : "idle"} className="animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none">
+          {copied ? <Check className="text-emerald-600 dark:text-emerald-400" aria-hidden /> : <Copy aria-hidden />}
+        </span>
+      </IconAction>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="icon" aria-label="Download" disabled={!detail} />}
+              />
+            }
+          >
+            <Download />
+          </TooltipTrigger>
+          <TooltipContent>Download</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onClick={() => downloadMarkdown(toMarkdownFile(markdown()))}>
+            <FileText aria-hidden />
+            Markdown (.md)
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <div className="mx-1 h-5 w-px bg-border" aria-hidden />
+      <IconAction
+        label={
+          refetching
+            ? "Refetching"
+            : detail?.snapshot?.fetchMethod === "paste"
+              ? "Refetch: read the pasted text again with the current extraction"
+              : "Refetch: fetch the link again and update the details"
+        }
+        disabled={!detail || refetching}
+        onClick={() => onRefetch(jobId)}
+      >
+        <RefreshCw className={cn(refetching && "animate-spin motion-reduce:animate-none")} />
+      </IconAction>
+      <IconAction
+        label="Delete job"
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20"
+        onClick={() => onDelete(jobId)}
+      >
+        <Trash2 />
+      </IconAction>
+    </div>
   );
 }
 

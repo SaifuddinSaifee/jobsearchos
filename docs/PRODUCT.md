@@ -135,9 +135,14 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
 - Statuses: Saved, Preparing, Applied, Recruiter Screen, Interview, Technical Interview, Final Interview, Offer,
   Rejected, Withdrawn, Ghosted. Every change is recorded on a timeline.
 - A side panel per job: links, status, applied date, notes, details, requirements, responsibilities, keywords, timeline
-  and the original posting text. A highlighted **How to apply** box sits right under the apply links, with the form
-  links and email addresses clickable. Jobs saved before this existed offer **Check the posting for how to apply**,
-  which reads the saved posting text once.
+  and the original posting text. Its header has a toolbar (previous and next job, and **Edit**), the title with
+  company, location and salary, and one row of actions in the same place for every job: **Generate resume**, **Open
+  job posting** (and the application page when it differs) and **Email a contact**, then icon buttons with tooltips at
+  the end of the line: Ask Claude, Copy as Markdown, Download (a menu of formats, Markdown for now), Refetch and
+  Delete. A highlighted **How to apply** box sits right under them, grouped
+  into labelled rows (Apply via, Include, Deadline, Also note), with the form links and email addresses clickable and
+  each email address copyable. Jobs saved before this existed offer **Check the posting for how to apply**, which
+  reads the saved posting text once.
 - In the table, a job with instructions on how to apply shows a highlighted icon next to its links ("Read how to apply
   first") that opens the job. Move to the previous or next job without closing it. Each job has its own link.
 - Edit any job's fields by hand.

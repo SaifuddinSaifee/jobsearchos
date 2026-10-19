@@ -1,7 +1,5 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { jobToMarkdown, type MarkdownJob } from "@/lib/jobs/markdown";
 
 const INTRO = `I'm applying for the job below. Read the job description carefully. If it lists a job posting link, open it to read the full original posting.
@@ -33,18 +31,6 @@ export function claudePrompt(job: MarkdownJob): string {
 }
 
 /** Opens a new claude.ai chat with this job description as the prompt; the user adds their resume there. */
-export function AskClaudeButton({ build, disabled }: { build: () => MarkdownJob; disabled?: boolean }) {
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      disabled={disabled}
-      onClick={() =>
-        window.open(`https://claude.ai/new?q=${encodeURIComponent(claudePrompt(build()))}`, "_blank", "noopener,noreferrer")
-      }
-    >
-      <Sparkles aria-hidden /> Ask Claude
-    </Button>
-  );
+export function openInClaude(job: MarkdownJob) {
+  window.open(`https://claude.ai/new?q=${encodeURIComponent(claudePrompt(job))}`, "_blank", "noopener,noreferrer");
 }
