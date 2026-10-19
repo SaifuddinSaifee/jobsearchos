@@ -10,7 +10,6 @@ import {
   ChevronRight,
   Copy,
   Download,
-  FileText,
   Mail,
   MapPin,
   Pencil,
@@ -25,7 +24,6 @@ import { toast } from "sonner";
 import { fillAdditionalDetailsAction, saveNotesAction } from "@/app/(app)/jobs/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -341,26 +339,9 @@ function IconActions({
           {copied ? <Check className="text-emerald-600 dark:text-emerald-400" aria-hidden /> : <Copy aria-hidden />}
         </span>
       </IconAction>
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <DropdownMenuTrigger
-                render={<Button variant="ghost" size="icon" aria-label="Download" disabled={!detail} />}
-              />
-            }
-          >
-            <Download />
-          </TooltipTrigger>
-          <TooltipContent>Download</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onClick={() => downloadMarkdown(toMarkdownFile(markdown()))}>
-            <FileText aria-hidden />
-            Markdown (.md)
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <IconAction label="Download Markdown" disabled={!detail} onClick={() => downloadMarkdown(toMarkdownFile(markdown()))}>
+        <Download />
+      </IconAction>
       <div className="mx-1 h-5 w-px bg-border" aria-hidden />
       <IconAction
         label={

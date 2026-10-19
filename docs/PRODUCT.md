@@ -138,7 +138,7 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
   and the original posting text. Its header has a toolbar (previous and next job, and **Edit**), the title with
   company, location and salary, and one row of actions in the same place for every job: **Generate resume**, **Open
   job posting** (and the application page when it differs) and **Email a contact**, then icon buttons with tooltips at
-  the end of the line: Ask Claude, Copy as Markdown, Download (a menu of formats, Markdown for now), Refetch and
+  the end of the line: Ask Claude, Copy as Markdown, Download Markdown, Refetch and
   Delete. A highlighted **How to apply** box sits right under them, grouped
   into labelled rows (Apply via, Include, Deadline, Also note), with the form links and email addresses clickable and
   each email address copyable. Jobs saved before this existed offer **Check the posting for how to apply**, which
