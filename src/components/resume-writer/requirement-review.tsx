@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Plus, Quote } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleDotDashed, Plus, Quote, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,11 +8,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Collapse } from "@/components/ui/collapse";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   assumeQualified,
   matchScore,
   REQUIREMENT_KIND_LABEL,
-  REQUIREMENT_KINDS,
   REQUIREMENT_USE_LABEL,
   requirementUse,
   type GenerationChoices,
@@ -21,6 +21,7 @@ import {
   type Requirement,
   type ReviewAnswer,
   type RoleOption,
+  type Verdict,
 } from "@/lib/resume-writer/types";
 import { cn } from "@/lib/utils";
 
@@ -28,11 +29,42 @@ const MAX_NOTE = 200;
 
 type Answers = Record<string, { userHas: boolean; note: string }>;
 
-const CHIP: Record<Requirement["verdict"], { label: string; className: string }> = {
-  met: { label: "In your record", className: "text-green-700 dark:text-green-400" },
-  partial: { label: "Partly in your record", className: "text-amber-700 dark:text-amber-400" },
-  missing: { label: "Not in your record", className: "text-muted-foreground" },
-};
+/**
+ * The requirements are split by what the record shows of them, gaps first: that is where the decisions are. What the
+ * record already has only takes an optional detail, so it sits in its own tab.
+ */
+const VERDICT_TABS: { verdict: Verdict; label: string; short: string; icon: LucideIcon; iconClass: string; hint: string; empty: string }[] = [
+  {
+    verdict: "missing",
+    label: "Not in your record",
+    short: "Not in record",
+    icon: CircleDashed,
+    iconClass: "text-muted-foreground",
+    hint: "Your record does not show these. Ticked ones go into the resume as yours: experience and skills start ticked, keywords are your pick.",
+    empty: "Your record shows something of everything this job asks for.",
+  },
+  {
+    verdict: "partial",
+    label: "Partly in your record",
+    short: "Partly",
+    icon: CircleDotDashed,
+    iconClass: "text-amber-600 dark:text-amber-400",
+    hint: "Your record shows some of these. Ticked ones are filled out in the resume; From your record shows what it already says.",
+    empty: "Nothing the job asks for is only partly in your record.",
+  },
+  {
+    verdict: "met",
+    label: "In your record",
+    short: "In record",
+    icon: CircleCheck,
+    iconClass: "text-green-600 dark:text-green-400",
+    hint: "Already in your record, so nothing to decide. Add detail where one line would make the resume more believable.",
+    empty: "Nothing the job asks for is fully in your record yet.",
+  },
+];
+
+/** The lists the tabs group by. The company's own words and the job's conditions are not matched, so they sit below the tabs. */
+const MATCHED_KINDS = ["must", "nice", "keyword"] as const;
 
 /**
  * What the job asks for, lined up against the career record, before the resume is written. The user picks the telling
@@ -63,6 +95,15 @@ export function RequirementReview({
   const fromBase = generation.source === "base_resume";
   const set = (id: string, patch: Partial<Answers[string]>) => setAnswers((a) => ({ ...a, [id]: { ...(a[id] ?? { userHas: false, note: "" }), ...patch } }));
 
+  // Split by what the record shows, not by the ticks, so an item stays in its tab while the user works on it. The job's
+  // core comes first in each list.
+  const matched = live.filter((r) => r.use !== "logistics" && r.kind !== "company").sort((a, b) => Number(!!b.core) - Number(!!a.core));
+  const byVerdict = { missing: matched.filter((r) => r.verdict === "missing"), partial: matched.filter((r) => r.verdict === "partial"), met: matched.filter((r) => r.verdict === "met") };
+  const [defaultTab] = useState<Verdict>(() => VERDICT_TABS.find((t) => byVerdict[t.verdict].length > 0)?.verdict ?? "missing");
+  const conditions = live.filter((r) => r.use === "logistics");
+  const company = live.filter((r) => r.kind === "company" && r.use !== "logistics");
+  const row = (r: Requirement) => <RequirementRow key={r.id} r={r} answer={answers[r.id] ?? { userHas: r.userHas, note: r.note }} onChange={(patch) => set(r.id, patch)} />;
+
   return (
     <section aria-labelledby="review-heading" className="space-y-4 animate-in fade-in duration-200 motion-reduce:animate-none">
       <div className="space-y-1">
@@ -70,9 +111,8 @@ export function RequirementReview({
           What this job asks for
         </h3>
         <p className="text-sm text-muted-foreground">
-          Matched against {fromBase ? "your base resume" : `your career record (version ${generation.recordVersion})`}. What the{" "}
-          {fromBase ? "resume" : "record"} does not show of the experience and skills the job asks for is ticked as something you have, and is
-          worked into the resume. Untick what you would rather leave out, tick the keywords you want in, and add a note where it helps.
+          Matched against {fromBase ? "your base resume" : `your career record (version ${generation.recordVersion})`}. Ticked items go into the resume
+          as yours; a note on where you did it turns a listed skill into work.
         </p>
         {generation.notes.map((n) => (
           <p key={n} className="text-sm text-muted-foreground">
@@ -84,24 +124,69 @@ export function RequirementReview({
       {roles.length > 0 && <RoleChoices roles={roles} value={framings} onChange={(roleId, framingId) => setFramings((f) => ({ ...f, [roleId]: framingId }))} />}
       {clashes.length > 0 && <ClashChoices clashes={clashes} value={wordings} onChange={(factId, wordingId) => setWordings((w) => ({ ...w, [factId]: wordingId }))} />}
 
-      {[...REQUIREMENT_KINDS.map((kind) => ({ key: kind, title: REQUIREMENT_KIND_LABEL[kind], items: live.filter((r) => r.kind === kind && r.use !== "logistics") })), { key: "logistics", title: "Conditions", items: live.filter((r) => r.use === "logistics") }].map(
-        ({ key, title, items }) =>
-          items.length === 0 ? null : (
-            <div key={key} className="space-y-1">
-              <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h4>
-              {key === "logistics" && (
-                <p className="text-xs text-muted-foreground">
-                  Conditions of the job, not experience. They do not count toward the match. Tick one to state it in the resume&apos;s header, next to your contact details, and say how you meet it.
-                </p>
+      <Tabs defaultValue={defaultTab}>
+        <TabsList className="w-full sm:w-fit">
+          {VERDICT_TABS.map((t) => (
+            <TabsTrigger key={t.verdict} value={t.verdict} className="px-2.5">
+              <t.icon className={cn("size-4", t.iconClass)} aria-hidden />
+              <span className="sm:hidden">{t.short}</span>
+              <span className="hidden sm:inline">{t.label}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">{byVerdict[t.verdict].length}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {VERDICT_TABS.map((t) => {
+          const items = byVerdict[t.verdict];
+          return (
+            <TabsContent key={t.verdict} value={t.verdict} className="space-y-4 pt-2">
+              {items.length === 0 ? (
+                <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">{t.empty}</p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">{t.hint}</p>
+                  {MATCHED_KINDS.map((kind) => {
+                    const group = items.filter((r) => r.kind === kind);
+                    return group.length === 0 ? null : (
+                      <div key={kind} className="space-y-1.5">
+                        <h4 className="flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                          {REQUIREMENT_KIND_LABEL[kind]}
+                          <span className="tabular-nums">{group.length}</span>
+                        </h4>
+                        <ul className="divide-y rounded-lg border">{group.map(row)}</ul>
+                      </div>
+                    );
+                  })}
+                </>
               )}
-              {key === "company" && <p className="text-xs text-muted-foreground">The company&apos;s own words. They set the tone of the resume and are never claimed as yours.</p>}
-              <ul className="divide-y rounded-lg border">
-                {items.map((r) => (
-                  <RequirementRow key={r.id} r={r} answer={answers[r.id] ?? { userHas: r.userHas, note: r.note }} onChange={(patch) => set(r.id, patch)} />
-                ))}
-              </ul>
-            </div>
-          ),
+            </TabsContent>
+          );
+        })}
+      </Tabs>
+
+      {(conditions.length > 0 || company.length > 0) && (
+        <div className="space-y-2">
+          {conditions.length > 0 && (
+            <FoldedSection
+              title="Conditions"
+              count={conditions.length}
+              summary="Not counted in the match"
+              hint="Conditions of the job, not experience. Tick one to state it in the resume's header, next to your contact details, and say how you meet it."
+              defaultOpen={conditions.some((r) => r.userHas)}
+            >
+              {conditions.map(row)}
+            </FoldedSection>
+          )}
+          {company.length > 0 && (
+            <FoldedSection
+              title="From the company"
+              count={company.length}
+              summary="Sets the tone, never claimed as yours"
+              hint="The company's own words. They set the tone of the resume and are never claimed as yours."
+            >
+              {company.map(row)}
+            </FoldedSection>
+          )}
+        </div>
       )}
 
       <div className="sticky bottom-0 -mx-1 flex flex-wrap items-center gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur">
@@ -229,6 +314,50 @@ function ClashChoices({ clashes, value, onChange }: { clashes: NumberClash[]; va
   );
 }
 
+/** A part of the posting that is not matched against the record, folded away until the user wants it. */
+function FoldedSection({
+  title,
+  count,
+  summary,
+  hint,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count: number;
+  summary: string;
+  hint: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors duration-150 outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-muted/60"
+      >
+        <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+        {title}
+        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+        <span className="ml-auto hidden truncate text-xs font-normal text-muted-foreground sm:block">{summary}</span>
+      </button>
+      <Collapse open={open}>
+        <div className="border-t">
+          <p className="px-3 pt-2.5 pb-1 text-xs text-muted-foreground">{hint}</p>
+          <ul className="divide-y">{children}</ul>
+        </div>
+      </Collapse>
+    </div>
+  );
+}
+
+/**
+ * One requirement as a checklist line. The tab it sits in says what the record shows, so the row only carries what
+ * differs between items: the tick (or Add detail, for what the record has), Core, and Only in your skills.
+ */
 function RequirementRow({ r, answer, onChange }: { r: Requirement; answer: Answers[string]; onChange: (patch: Partial<Answers[string]>) => void }) {
   const [open, setOpen] = useState(false);
   const logistics = r.use === "logistics";
@@ -236,20 +365,12 @@ function RequirementRow({ r, answer, onChange }: { r: Requirement; answer: Answe
   const core = !!r.core && !logistics && !company;
   // Only the skills list has it: the record names it but never tells of work with it, so the resume can only list it.
   const listedOnly = !!r.skillsOnly && r.verdict === "met" && !logistics && !company;
+  // A gap is ticked as "I have this"; a condition is ticked to be mentioned. What the record has takes a detail instead.
+  const tickable = logistics || (r.verdict !== "met" && !company);
+  const detailable = r.verdict === "met" && !logistics && !company;
   // Detail on what the record already shows makes the resume more believable; for the job's core, and for what only the
   // skills list has, the field is open.
   const [adding, setAdding] = useState(core || listedOnly || answer.note !== "");
-  const chip = logistics
-    ? answer.userHas
-      ? { label: "Mentioned", className: "text-primary" }
-      : { label: "Not mentioned", className: "text-muted-foreground" }
-    : company
-      ? { label: "For tone", className: "text-muted-foreground" }
-      : answer.userHas
-        ? { label: "You have this", className: "text-primary" }
-        : listedOnly
-          ? { label: "Only in your skills", className: "text-amber-700 dark:text-amber-400" }
-          : CHIP[r.verdict];
   const useLabel = r.kind === "keyword" ? REQUIREMENT_USE_LABEL[requirementUse(r)] : null;
   const hasEvidence = r.evidence.length > 0;
   const placeholder = listedOnly
@@ -260,84 +381,94 @@ function RequirementRow({ r, answer, onChange }: { r: Requirement; answer: Answe
   const noteInput = (label: string, hint = placeholder) => (
     <Input value={answer.note} maxLength={MAX_NOTE} placeholder={hint} aria-label={`${label}: ${r.text}`} onChange={(e) => onChange({ note: e.target.value })} />
   );
+  const text = (
+    <span className="min-w-0 flex-1">
+      {r.text}
+      {(core || listedOnly || useLabel) && (
+        <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 align-middle">
+          {core && <Badge variant="secondary">Core</Badge>}
+          {listedOnly && (
+            <Badge variant="outline" className="text-amber-700 dark:text-amber-400">
+              Only in your skills
+            </Badge>
+          )}
+          {useLabel && <span className="text-xs text-muted-foreground">{useLabel}</span>}
+        </span>
+      )}
+    </span>
+  );
   return (
-    <li className="space-y-2 px-3 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/40">
+    <li className="px-3 py-2.5 text-sm transition-colors duration-150 hover:bg-muted/40">
       <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-        <Badge variant="outline" className={cn("shrink-0", chip.className)}>
-          {chip.label}
-        </Badge>
-        {core && (
-          <Badge variant="secondary" className="shrink-0">
-            Core
-          </Badge>
+        {tickable ? (
+          // An unticked item is dimmed, so what goes into the resume reads at a glance.
+          <label className={cn("flex min-w-0 flex-1 cursor-pointer items-start gap-3 transition-colors duration-150", !answer.userHas && "text-muted-foreground")}>
+            <Checkbox className="mt-0.5" checked={answer.userHas} onCheckedChange={(c) => onChange({ userHas: c === true })} />
+            <span className="sr-only">{logistics ? "Mention on the resume:" : "I have this:"}</span>
+            {text}
+          </label>
+        ) : (
+          <p className="flex min-w-0 flex-1">{text}</p>
         )}
-        <p className="min-w-0 flex-1">
-          {r.text}
-          {useLabel && <span className="ml-2 text-xs text-muted-foreground">{useLabel}</span>}
-        </p>
-        {hasEvidence && (
-          <Button size="xs" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-            <ChevronDown className={cn("transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")} aria-hidden />
-            From your record
-          </Button>
+        {(hasEvidence || (detailable && !adding)) && (
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {detailable && !adding && (
+              <Button size="xs" variant="ghost" onClick={() => setAdding(true)}>
+                <Plus aria-hidden />
+                Add detail
+              </Button>
+            )}
+            {hasEvidence && (
+              <Button size="xs" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+                <ChevronDown className={cn("transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")} aria-hidden />
+                From your record
+              </Button>
+            )}
+          </div>
         )}
       </div>
-      {hasEvidence && (
-        <Collapse open={open}>
-          <ul className="space-y-1 pb-1 pl-1">
-            {r.evidence.map((e) => (
-              <li key={e} className="flex items-start gap-2 text-xs text-muted-foreground">
-                <Quote className="mt-0.5 size-3 shrink-0" aria-hidden />
-                {e}
-              </li>
-            ))}
-          </ul>
-        </Collapse>
-      )}
-      {logistics && (
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex cursor-pointer items-center gap-2">
-            <Checkbox checked={answer.userHas} onCheckedChange={(c) => onChange({ userHas: c === true })} />
-            Mention it on the resume
-          </label>
-          <Collapse open={answer.userHas} className="min-w-0 flex-1">
-            {noteInput("How you meet it", "How you meet it, for example: relocating to Toronto")}
+      <div className={cn(tickable && "pl-7")}>
+        {hasEvidence && (
+          <Collapse open={open}>
+            <ul className="space-y-1 pt-2">
+              {r.evidence.map((e) => (
+                <li key={e} className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <Quote className="mt-0.5 size-3 shrink-0" aria-hidden />
+                  {e}
+                </li>
+              ))}
+            </ul>
           </Collapse>
-        </div>
-      )}
-      {r.verdict !== "met" && !logistics && !company && (
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex cursor-pointer items-center gap-2">
-            <Checkbox checked={answer.userHas} onCheckedChange={(c) => onChange({ userHas: c === true })} />
-            I have this
-          </label>
-          <Collapse open={answer.userHas} className="min-w-0 flex-1">
-            {noteInput("Note")}
+        )}
+        {logistics && (
+          <Collapse open={answer.userHas}>
+            <div className="pt-2">{noteInput("How you meet it", "How you meet it, for example: relocating to Toronto")}</div>
           </Collapse>
-          {/* A claim with no detail can only be listed; a line on where it happened lets the resume show it as work. */}
-          <Collapse open={answer.userHas && answer.note.trim() === ""} className="basis-full">
-            <p className="text-xs text-muted-foreground">With no note this is listed in your skills only. Say where you did it and the resume shows it as work.</p>
+        )}
+        {tickable && !logistics && (
+          <Collapse open={answer.userHas}>
+            <div className="pt-2">
+              {noteInput("Note")}
+              {/* A claim with no detail can only be listed; a line on where it happened lets the resume show it as work. */}
+              <Collapse open={answer.note.trim() === ""}>
+                <p className="pt-1.5 text-xs text-muted-foreground">With no note this is listed in your skills only. Say where you did it and the resume shows it as work.</p>
+              </Collapse>
+            </div>
           </Collapse>
-        </div>
-      )}
-      {r.verdict === "met" && !logistics && !company && (
-        <div className="flex flex-wrap items-center gap-3">
-          {!adding && (
-            <Button size="xs" variant="ghost" onClick={() => setAdding(true)}>
-              <Plus aria-hidden />
-              Add detail
-            </Button>
-          )}
-          <Collapse open={adding} className="min-w-0 flex-1">
-            {noteInput("Detail")}
+        )}
+        {detailable && (
+          <Collapse open={adding}>
+            <div className="pt-2">
+              {noteInput("Detail")}
+              {listedOnly && (
+                <Collapse open={answer.note.trim() === ""}>
+                  <p className="pt-1.5 text-xs text-muted-foreground">Your record lists this as a skill but tells of no work with it, so the resume can only list it. Optional.</p>
+                </Collapse>
+              )}
+            </div>
           </Collapse>
-          {listedOnly && (
-            <Collapse open={answer.note.trim() === ""} className="basis-full">
-              <p className="text-xs text-muted-foreground">Your record lists this as a skill but tells of no work with it, so the resume can only list it. Optional.</p>
-            </Collapse>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </li>
   );
 }

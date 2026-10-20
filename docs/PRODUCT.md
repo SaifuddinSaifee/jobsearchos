@@ -173,7 +173,9 @@ against your record takes under a minute or two; writing, reviewing and revising
 editor.
 
 - **A page per job** (`/jobs/<job>/resume`), so it survives a reload and leaving. A sidebar card and toasts say when the
-  match is ready to look at, when the resume is ready, or when it failed. **Stop** cancels it.
+  match is ready to look at, when the resume is ready, or when it failed. **Stop** cancels it. Deleting the job also
+  stops a resume that is not finished yet (waiting, matching, in review or being written) and takes its card off the
+  sidebar; undoing the delete brings the job back but not the stopped resume, which you can start again.
 - **Where the time goes.** The page lists each step with how long it took: reading, matching, the first draft, the review
   (with its score), the review's edits (or "nothing needed"), and saving. The running step's time counts up, and a
   total shows below, not counting the time you spend on the match. The same list stays on the page once the resume is

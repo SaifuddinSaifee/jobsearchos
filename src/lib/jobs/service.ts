@@ -6,11 +6,13 @@ import {
   jobKeywords,
   jobs,
   jobSnapshots,
+  resumeGenerations,
   statusEvents,
   type JobRow,
 } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { applyResearch, removeCompaniesWithoutJobs, resolveCompany } from "@/lib/companies/service";
+import { OPEN_STATUSES } from "@/lib/resume-writer/types";
 import { dedupKey } from "./dedup";
 import { canonicalizeUrl } from "./fetch/url";
 import { applyNoteHref, safeHref } from "./links";
@@ -280,12 +282,17 @@ export async function currentFields(jobId: string, db: Db = defaultDb()): Promis
 }
 
 /**
- * Soft-deletes jobs. A company left without any jobs is deleted with them. Returns what was deleted so
- * Undo can bring it back.
+ * Soft-deletes jobs. A company left without any jobs is deleted with them, and a resume still being written (or
+ * waiting for review) for one of them is stopped, so the worker never picks it up. Returns what was deleted so Undo
+ * can bring it back (Undo does not restart a stopped resume), and the stopped generations so the caller can cancel
+ * any that are running.
  */
-export async function deleteJobs(jobIds: string[], db: Db = defaultDb()): Promise<DeletedState> {
+export async function deleteJobs(
+  jobIds: string[],
+  db: Db = defaultDb(),
+): Promise<{ deleted: DeletedState; stoppedGenerations: string[] }> {
   const ids = [...new Set(jobIds)];
-  if (!ids.length) return { jobIds: [], companies: [] };
+  if (!ids.length) return { deleted: { jobIds: [], companies: [] }, stoppedGenerations: [] };
   return db.transaction(async (tx) => {
     const deleted = await tx
       .update(jobs)
@@ -293,11 +300,16 @@ export async function deleteJobs(jobIds: string[], db: Db = defaultDb()): Promis
       .where(and(inArray(jobs.id, ids), isNull(jobs.deletedAt)))
       .returning({ id: jobs.id, companyId: jobs.companyId });
     if (deleted.length !== ids.length) throw new Error("Job not found");
+    const stopped = await tx
+      .update(resumeGenerations)
+      .set({ status: "stopped", finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(inArray(resumeGenerations.jobId, ids), inArray(resumeGenerations.status, [...OPEN_STATUSES])))
+      .returning({ id: resumeGenerations.id });
     const removed = await removeCompaniesWithoutJobs(
       deleted.map((d) => d.companyId).filter((id): id is string => id !== null),
       tx,
     );
-    return { jobIds: deleted.map((d) => d.id), companies: removed };
+    return { deleted: { jobIds: deleted.map((d) => d.id), companies: removed }, stoppedGenerations: stopped.map((s) => s.id) };
   });
 }
 

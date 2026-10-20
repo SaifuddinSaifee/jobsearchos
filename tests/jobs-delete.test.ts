@@ -100,7 +100,7 @@ describe("deleting jobs", () => {
   it("deletes the company with its only job, and a fresh one is made when a job comes back", async () => {
     const a = await save(1);
     const before = (await findCompanyByName("Acme", db))!;
-    const res = await deleteJobs([a.jobId], db);
+    const { deleted: res } = await deleteJobs([a.jobId], db);
 
     expect(res.companies).toEqual([{ id: before.id, name: "Acme" }]);
     expect(await findCompanyByName("Acme", db)).toBeNull();
@@ -115,7 +115,7 @@ describe("deleting jobs", () => {
   it("keeps a company that still has other jobs", async () => {
     const a = await save(1);
     await save(2);
-    const res = await deleteJobs([a.jobId], db);
+    const { deleted: res } = await deleteJobs([a.jobId], db);
     expect(res.companies).toEqual([]);
     const [c] = await listCompanies(db);
     expect(c).toMatchObject({ name: "Acme", jobCount: 1 });
@@ -127,7 +127,7 @@ describe("deleting jobs", () => {
     const youtube = await resolveCompany({ name: "YouTube" }, db);
     await updateCompany(youtube.id, { parentId: google.id }, db);
 
-    expect((await deleteJobs([a.jobId], db)).companies).toEqual([]);
+    expect((await deleteJobs([a.jobId], db)).deleted.companies).toEqual([]);
     expect(await findCompanyByName("Google", db)).not.toBeNull();
   });
 
@@ -153,7 +153,7 @@ describe("undo", () => {
   it("restores the jobs and the company deleted with them", async () => {
     const a = await save(1);
     const b = await save(2);
-    const res = await deleteJobs([a.jobId, b.jobId], db);
+    const { deleted: res } = await deleteJobs([a.jobId, b.jobId], db);
     expect(res.companies).toHaveLength(1);
 
     expect(await restoreDeleted(res, db)).toEqual({ restored: 2, skipped: 0 });
@@ -165,7 +165,7 @@ describe("undo", () => {
   it("leaves a job that was saved again, and joins a company that was added again", async () => {
     const a = await save(1);
     const b = await save(2);
-    const res = await deleteJobs([a.jobId, b.jobId], db);
+    const { deleted: res } = await deleteJobs([a.jobId, b.jobId], db);
     const fresh = await save(1);
 
     expect(await restoreDeleted(res, db)).toEqual({ restored: 1, skipped: 1 });

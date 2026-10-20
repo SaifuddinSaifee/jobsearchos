@@ -195,9 +195,13 @@ export async function listActiveGenerations(db: Db = defaultDb()): Promise<Activ
     .select({ g: resumeGenerations, title: jobs.title, company: jobs.company })
     .from(resumeGenerations)
     .innerJoin(jobs, eq(jobs.id, resumeGenerations.jobId))
+    // A deleted job's page is gone, so its card would lead nowhere (deleting a job also stops its resume).
     .where(
-      sql`${resumeGenerations.status} in ('queued', 'matching', 'review', 'writing_queued', 'writing')
-        or (${resumeGenerations.status} in ('done', 'failed') and ${resumeGenerations.finishedAt} > now() - make_interval(secs => ${RECENT_SECONDS}))`,
+      and(
+        isNull(jobs.deletedAt),
+        sql`(${resumeGenerations.status} in ('queued', 'matching', 'review', 'writing_queued', 'writing')
+          or (${resumeGenerations.status} in ('done', 'failed') and ${resumeGenerations.finishedAt} > now() - make_interval(secs => ${RECENT_SECONDS})))`,
+      ),
     )
     .orderBy(desc(resumeGenerations.createdAt));
   return rows.map((r) => ({ ...toItem(r.g), jobLabel: `${r.title} at ${r.company}` }));

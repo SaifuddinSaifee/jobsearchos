@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withLlmContext } from "@/lib/llm/context";
 import { deleteJobs, fillAdditionalDetails, fillApplyNotes, restoreDeleted, updateJob } from "@/lib/jobs/service";
 import { refetchJob, undoRefetch } from "@/lib/jobs/refetch";
+import { kickWorker, stopGenerationJob } from "@/lib/queue/worker";
 import { JobExtractionSchema } from "@/lib/jobs/schema";
 import { STATUS_VALUES } from "@/lib/jobs/status";
 import {
@@ -87,8 +88,14 @@ export async function updateJobAction(jobId: string, edit: unknown) {
   return run(async () => updateJob(Id.parse(jobId), edit));
 }
 
+/** Deletes jobs, and cancels the model calls of any resume that was being written for one of them. */
 export async function deleteJobsAction(jobIds: string[]) {
-  return run(async () => ({ deleted: await deleteJobs(z.array(Id).min(1).max(MAX_BULK).parse(jobIds)) }));
+  return run(async () => {
+    const { deleted, stoppedGenerations } = await deleteJobs(z.array(Id).min(1).max(MAX_BULK).parse(jobIds));
+    for (const id of stoppedGenerations) stopGenerationJob(id);
+    if (stoppedGenerations.length) kickWorker();
+    return { deleted };
+  });
 }
 
 const DeletedSchema = z.object({

@@ -8,7 +8,7 @@ import { saveRecordVersion } from "@/lib/career/service";
 import { applications, documents, documentVersions, resumeGenerations } from "@/lib/db/schema";
 import { createDocument } from "@/lib/documents/service";
 import { emptyExtraction, type JobDraft } from "@/lib/jobs/schema";
-import { saveJob } from "@/lib/jobs/service";
+import { deleteJobs, saveJob } from "@/lib/jobs/service";
 import { changeStatus } from "@/lib/jobs/tracker";
 import { defaultDocumentId } from "@/lib/outreach/attachments";
 import { saveVersion as saveProfile } from "@/lib/profile/service";
@@ -414,6 +414,30 @@ describe("stopping, sweeping and the sidebar", () => {
     );
     await db.execute(sql`UPDATE resume_generations SET finished_at = now() - interval '5 minutes' WHERE status = 'done'`);
     expect((await listActiveGenerations(db)).map((g) => g.id)).toEqual([open.id]);
+  });
+
+  it("stops the resume of a deleted job, so it is never picked up and leaves the list", async () => {
+    const a = await seedJob();
+    const b = await seedJob2();
+    await seedRecord();
+    const inReview = (await startGeneration(a.jobId, {}, db)).generation;
+    expect((await runNext())?.status).toBe("review");
+    const waiting = (await startGeneration(b.jobId, {}, db)).generation;
+
+    const res = await deleteJobs([a.jobId, b.jobId], db);
+    expect(res.stoppedGenerations.sort()).toEqual([inReview.id, waiting.id].sort());
+    const rows = await db.select().from(resumeGenerations);
+    expect(rows.map((r) => r.status)).toEqual(["stopped", "stopped"]);
+    expect(rows.every((r) => r.finishedAt)).toBe(true);
+    expect(await claimNextGeneration(db)).toBeNull();
+    expect(await listActiveGenerations(db)).toEqual([]);
+  });
+
+  it("leaves out a deleted job's resume even when it was not stopped", async () => {
+    const { jobId } = await seedJob();
+    await startGeneration(jobId, {}, db);
+    await db.execute(sql`UPDATE jobs SET deleted_at = now()`);
+    expect(await listActiveGenerations(db)).toEqual([]);
   });
 
   it("reports the job's state: its latest generation, its resume and its documents", async () => {
