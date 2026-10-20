@@ -126,6 +126,12 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
   areas, domains, practices, role type and stage, and the working traits it asks for.
 - Clean results save automatically. Doubtful ones wait for your review.
 - Duplicates are detected, so the same job is not saved twice.
+- Links to your own computer or local network (`localhost`, `192.168.x.x` and the like) are refused, including when a
+  posting redirects there or its page tries to load from there.
+- **From the Daily Job Shortlist.** The shortlist that Claude fills every morning on claude.ai has a **Saved to JSOS**
+  button. Clicking it adds the job here, in the same queue, and the shortlist's fit, "lead with", "apply" and "why"
+  lines become the job's notes. A job already saved or already waiting is reported back instead of added twice. It
+  works while this app and its tunnel are running; setup is in the README. Each one is also listed on **Discover**.
 
 ### Jobs (the tracker)
 
@@ -554,7 +560,7 @@ Open any document and write on it, like Notion on a real sheet of A4.
 | 6 | Match score and gap analysis | Not started |
 | 7a | Email settings and Gmail connection | Done |
 | 7b | Outreach: find people, find emails, compose, attach, send | Done (on `stage-emails`, not yet merged) |
-| 8 | Discover: new openings from Fortune 500 and YC | Not started (page is a placeholder) |
+| 8 | Discover: new openings from Fortune 500 and YC | Started: lists jobs sent from the Daily Job Shortlist (Claude.ai) |
 | 9 | Global search, more filters, follow-ups, browser extension | Not started |
 | 10 | Analytics | Not started |
 | 11 | Later: interview prep, reply detection, salary data | Not started |
@@ -622,6 +628,21 @@ User story: *I can see at a glance which jobs fit me best and why, and what I am
 
 ### Stage 8: Discover
 
+Started: **Discover** lists the jobs you send from the Daily Job Shortlist on claude.ai, newest first, marked
+**Claude.ai** as their source.
+
+- Each card shows the title (linking to the posting), the company, the shortlist's fit score, its track, mode,
+  location, pay and posting date, and its "why", "lead with" and "apply" lines.
+- It also shows where the job is now: being read, waiting for your review, could not be read, not added (a site that
+  blocks fetching), in Jobs with its tracker status, or no longer in Jobs. The matching button is **View job**,
+  **Review**, **Retry**, **Paste the text** or **Add again**.
+- The page follows the queue on its own: a job sent from claude.ai while it is open appears, and a job being read
+  turns into its result, without reloading.
+- Sending the same posting again updates its card instead of adding a second one. The list keeps a job even after its
+  queue item is cleared.
+
+Still to come:
+
 - A feed of new openings from Fortune 500 companies (mostly Workday) and Y Combinator startups (Ashby, Greenhouse,
   Lever), refreshed daily, filtered by your preferences and ranked by match score.
 - Save moves a job into the tracker; Ignore hides it.
@@ -647,8 +668,11 @@ User story: *Each morning I can scan relevant new openings and save the good one
 - Scheduling a send for the recipient's morning.
 - Salary data and AI recommendations.
 - Extra contact sources (Apollo, Hunter).
-- An MCP server so AI assistants (Claude Code, Claude Desktop) can read and act on your job search. Ideas in
+- An MCP server so AI assistants (Claude Code, Claude Desktop) can read and act on your job search. Started: the
+  `save_job` tool behind the Daily Job Shortlist's **Saved to JSOS** button. More ideas in
   [mcp-jobsearchos.md](mcp-jobsearchos.md).
+- Hosting the app somewhere that is always on (with sign-in), so the shortlist can save jobs with the laptop off and
+  job links open from a phone.
 - Automatic form filling, last, and only with your confirmation.
 
 ## 9. Recommended next steps

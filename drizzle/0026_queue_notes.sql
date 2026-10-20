@@ -1,0 +1,1 @@
+ALTER TABLE "application_queue" ADD COLUMN "notes" text;

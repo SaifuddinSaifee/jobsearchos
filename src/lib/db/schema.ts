@@ -290,6 +290,8 @@ export const applicationQueue = pgTable(
     input: text("input").notNull(),
     /** For pasted text: an optional URL used for de-duplication. */
     sourceUrl: text("source_url"),
+    /** Copied into the application's notes when the job is saved (e.g. the Daily Job Shortlist's "lead with"). */
+    notes: text("notes"),
     /** What to show in lists: the URL, then "Company - Title" once known. */
     label: text("label").notNull(),
     status: queueStatus("status").notNull().default("queued"),
@@ -307,6 +309,43 @@ export const applicationQueue = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("application_queue_status_idx").on(t.status, t.createdAt)],
+);
+
+/**
+ * Jobs that came from outside the app rather than being pasted, shown on Discover. Today the only source is the Daily
+ * Job Shortlist on claude.ai ("Claude.ai"), whose "Saved to JSOS" button calls the MCP tool `save_job`. One row per
+ * posting (canonical URL): sending it again refreshes the row. Kept apart from the queue, which gets cleared, so
+ * Discover remembers what arrived; where the job is now (queued, needs review, in Jobs) is looked up when listing.
+ */
+export const discoveredJobs = pgTable(
+  "discovered_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    canonicalUrl: text("canonical_url").notNull().unique(),
+    url: text("url").notNull(),
+    source: text("source").notNull(),
+    /** The source's own id for it (the shortlist row id). */
+    externalId: text("external_id"),
+    title: text("title").notNull().default(""),
+    company: text("company").notNull().default(""),
+    location: text("location").notNull().default(""),
+    mode: text("mode").notNull().default(""),
+    pay: text("pay").notNull().default(""),
+    /** As the source gave it, YYYY-MM-DD or empty. */
+    posted: text("posted").notNull().default(""),
+    track: text("track").notNull().default(""),
+    fit: integer("fit"),
+    why: text("why").notNull().default(""),
+    leadWith: text("lead_with").notNull().default(""),
+    applyHow: text("apply_how").notNull().default(""),
+    /** The queue item it was last added as, if any. */
+    queueId: uuid("queue_id").references(() => applicationQueue.id, { onDelete: "set null" }),
+    /** Why it could not be added (a site that blocks fetching, a full queue); null when it was. */
+    notAddedReason: text("not_added_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("discovered_jobs_created_idx").on(t.createdAt)],
 );
 
 /** Bookmarks for the job boards and career pages visited every day; `last_opened_at` drives the daily round. */

@@ -2,10 +2,12 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   applicationQueue,
+  applications,
   jobs,
   type QueueRow,
   type QueueSteps,
 } from "@/lib/db/schema";
+import { isPrivateHostLiteral, PRIVATE_MESSAGE } from "@/lib/jobs/fetch/guard";
 import { canonicalizeUrl, isBlockedHost, parseJobUrl } from "@/lib/jobs/fetch/url";
 import type { JobDraft } from "@/lib/jobs/schema";
 import { MAX_PASTE_CHARS } from "@/lib/jobs/pipeline";
@@ -28,7 +30,7 @@ function urlLabel(url: string): string {
   }
 }
 
-function toItem(r: Omit<QueueRow, "input" | "sourceUrl" | "draft" | "attempts" | "startedAt" | "updatedAt">): QueueItem {
+function toItem(r: Omit<QueueRow, "input" | "sourceUrl" | "notes" | "draft" | "attempts" | "startedAt" | "updatedAt">): QueueItem {
   return {
     id: r.id,
     kind: r.kind,
@@ -87,7 +89,11 @@ export async function enqueueUrls(urls: string[], db: Db = defaultDb()): Promise
     }
     let canonical: string;
     try {
-      parseJobUrl(input);
+      const parsed = parseJobUrl(input);
+      if (isPrivateHostLiteral(parsed.hostname)) {
+        result.skipped.push({ input, reason: PRIVATE_MESSAGE });
+        continue;
+      }
       if (isBlockedHost(input)) {
         result.skipped.push({ input, reason: "This site blocks automated fetching. Paste the job text instead." });
         continue;
@@ -130,7 +136,7 @@ export async function enqueueText(text: string, url: string | undefined, db: Db 
   if ((await activeCount(db)) >= MAX_ACTIVE) throw new Error(`The queue is full (${MAX_ACTIVE} items waiting).`);
   let sourceUrl: string | null = null;
   if (url?.trim()) {
-    parseJobUrl(url);
+    if (isPrivateHostLiteral(parseJobUrl(url).hostname)) throw new Error(PRIVATE_MESSAGE);
     sourceUrl = url.trim();
   }
   const firstLine = body.split("\n").map((l) => l.trim()).find(Boolean) ?? "Pasted job";
@@ -220,11 +226,19 @@ export async function touch(id: string, db: Db = defaultDb()) {
   await db.update(applicationQueue).set({ updatedAt: new Date() }).where(and(eq(applicationQueue.id, id), eq(applicationQueue.status, "running")));
 }
 
+/** Marks an item saved. Notes queued with it go into the new application's notes, unless it already has some. */
 export async function markSaved(id: string, jobId: string, label: string, db: Db = defaultDb()) {
-  await db
+  const [row] = await db
     .update(applicationQueue)
     .set({ status: "saved", jobId, label, draft: null, error: null, finishedAt: new Date(), updatedAt: new Date() })
-    .where(eq(applicationQueue.id, id));
+    .where(eq(applicationQueue.id, id))
+    .returning({ notes: applicationQueue.notes });
+  if (row?.notes?.trim()) {
+    await db
+      .update(applications)
+      .set({ notes: row.notes, updatedAt: new Date() })
+      .where(and(eq(applications.jobId, jobId), sql`coalesce(trim(${applications.notes}), '') = ''`));
+  }
 }
 
 export async function markNeedsReview(id: string, draft: JobDraft, label: string, reason: string, db: Db = defaultDb()) {

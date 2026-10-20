@@ -50,6 +50,11 @@ const EnvSchema = z.object({
   PHOENIX_API_KEY: z.string().optional(),
   /** Where your browser reaches Phoenix, for the "Open Phoenix" button. Defaults to the collector endpoint. */
   PHOENIX_UI_URL: z.string().optional(),
+  /**
+   * Optional: turns on the MCP endpoint at /api/mcp/<MCP_SECRET> (the claude.ai connector "Job Search OS"). The secret
+   * in the path is its only protection, so make it long and random (`openssl rand -hex 32`). Unset, the endpoint is off.
+   */
+  MCP_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(32).optional()),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

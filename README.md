@@ -103,6 +103,40 @@ The AI usage page works without this: the numbers for each call (tokens, cost, t
 
 See [docs/LLM-LOGGING.md](docs/LLM-LOGGING.md).
 
+### Setup: Daily Job Shortlist connector (optional, for "Saved to JSOS")
+
+The Daily Job Shortlist is a claude.ai page that a scheduled task fills every morning. Its **Saved to JSOS** button calls this app's MCP tool `save_job` through a claude.ai connector. The job joins the queue on New Application, and is fetched, extracted and saved to Jobs like a pasted link, with the shortlist's "lead with", "apply" and "why" lines in its notes. claude.ai's servers make that call (not your browser), so the endpoint has to be reachable over public HTTPS. Only `/api/mcp/` is exposed; the rest of the app stays on your machine.
+
+1. **Make the secret.** Run `openssl rand -hex 32`, put the result in `.env` as `MCP_SECRET`, and restart the app. The endpoint is `http://localhost:3000/api/mcp/<MCP_SECRET>`. Any other path under `/api/mcp/` returns 404.
+2. **Expose only that path, on a hostname that never changes.** A Cloudflare quick tunnel (`trycloudflare.com`) gets a new URL on every restart, which breaks the connector, so pick one of these:
+   - **Cloudflare named tunnel** (needs a domain whose DNS Cloudflare manages):
+     - Run `cloudflared tunnel login`, then `cloudflared tunnel create jsos`, then `cloudflared tunnel route dns jsos jsos.<your-domain>`.
+     - In `~/.cloudflared/config.yml`:
+       ```yaml
+       tunnel: jsos
+       credentials-file: /home/<you>/.cloudflared/<tunnel-id>.json
+       ingress:
+         - hostname: jsos.<your-domain>
+           path: ^/api/mcp/
+           service: http://localhost:3000
+         - service: http_status:404
+       ```
+     - Run `sudo cloudflared service install`, so the tunnel starts with the machine.
+   - **Tailscale Funnel** (free stable `<machine>.<tailnet>.ts.net` name, no domain needed):
+     - Funnel serves only on ports 443, 8443 and 10000; use 443. The `--set-path` flag exists only in recent versions, so run `tailscale version` first.
+     - Then run `tailscale funnel --bg --set-path /api/mcp/ http://127.0.0.1:3000/api/mcp/`. Run `tailscale funnel status` to check that only that path is served.
+3. **Check from outside.** All three of these must return 404 (`--path-as-is` stops curl from collapsing `../` before sending it):
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://<host>/
+   curl -s -o /dev/null -w '%{http_code}\n' https://<host>/api/mcp/wrong-token
+   curl -s -o /dev/null -w '%{http_code}\n' --path-as-is https://<host>/api/mcp/../new
+   ```
+   Then point the MCP Inspector at the real URL and call `save_job`: `npx @modelcontextprotocol/inspector`, transport "Streamable HTTP", URL `https://<host>/api/mcp/<MCP_SECRET>`.
+4. **Add the connector.** In claude.ai, go to **Settings**, then **Connectors**, then **Add custom connector**. Name it `Job Search OS`, set the URL to `https://<host>/api/mcp/<MCP_SECRET>`, and leave authentication empty. Check first that your claude.ai plan allows custom connectors. **The name must be exactly `Job Search OS`.** The shortlist page calls the connector by that name, and any other name or spelling shows up on the page as "connector not added".
+5. **Try it.** In a normal claude.ai chat, ask Claude to call `save_job` from Job Search OS with a real posting URL. The item appears in the queue on New Application, and once it is saved, its notes are on the job.
+
+Sending works only while this machine, `npm run dev` and the tunnel are all running. A click made while they are off still marks the row saved on the shortlist page, which then offers **Send to JSOS** to try again. Links to a job (`appUrl`) use `APP_URL`, so they open only on this machine.
+
 ### 7. Check everything works
 
 ```bash
