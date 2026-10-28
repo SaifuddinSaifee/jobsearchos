@@ -342,6 +342,8 @@ export const discoveredJobs = pgTable(
     queueId: uuid("queue_id").references(() => applicationQueue.id, { onDelete: "set null" }),
     /** Why it could not be added (a site that blocks fetching, a full queue); null when it was. */
     notAddedReason: text("not_added_reason"),
+    /** When it was removed from Discover; sending the same posting again brings it back. */
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

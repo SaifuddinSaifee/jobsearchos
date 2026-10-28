@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { applications, discoveredJobs } from "@/lib/db/schema";
-import { addDiscoveredAgain, listDiscovered } from "@/lib/discover/service";
+import { addDiscoveredAgain, dismissDiscovered, listDiscovered, restoreDiscovered } from "@/lib/discover/service";
 import { discoverState } from "@/lib/discover/types";
 import { emptyExtraction, type JobDraft } from "@/lib/jobs/schema";
 import { deleteJobs, saveJob } from "@/lib/jobs/service";
@@ -134,5 +134,30 @@ describe("where a discovered job is now", () => {
     expect(d.kick).toHaveBeenCalledOnce();
     expect(await only()).toMatchObject({ state: "reading", leadWith: "Voice agents" });
     expect(await db.select().from(discoveredJobs)).toHaveLength(1);
+  });
+});
+
+describe("removing from Discover", () => {
+  it("hides the listing, leaves the job in Jobs, and comes back on Undo", async () => {
+    const saved = await saveJob(draft(URL1), db);
+    if (!saved.ok) throw new Error("expected save");
+    await saveShortlistJob(pick, deps());
+    const { id } = await only();
+
+    expect(await dismissDiscovered([id], db)).toEqual([id]);
+    expect(await listDiscovered(db)).toEqual([]);
+    // Removing it twice removes nothing more, so Undo only restores what this removal hid.
+    expect(await dismissDiscovered([id], db)).toEqual([]);
+
+    await restoreDiscovered([id], db);
+    expect(await only()).toMatchObject({ id, state: "in_jobs", jobId: saved.jobId });
+  });
+
+  it("comes back when the same posting is sent again", async () => {
+    await queued();
+    const { id } = await only();
+    await dismissDiscovered([id], db);
+    await saveShortlistJob({ ...pick, fit: 91 }, deps());
+    expect(await only()).toMatchObject({ id, fit: 91 });
   });
 });

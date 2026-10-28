@@ -197,6 +197,13 @@
       "when": 1792512102010,
       "tag": "0027_discovered_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792736768189,
+      "tag": "0028_discovered_dismissed",
+      "breakpoints": true
     }
   ]
 }

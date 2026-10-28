@@ -1,4 +1,4 @@
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import { applicationQueue, applications, discoveredJobs, jobs } from "@/lib/db/schema";
 import { saveShortlistJob, type SaveJobDeps, type SaveJobResult } from "@/lib/shortlist/save";
@@ -8,6 +8,7 @@ import { discoverState, type DiscoveredJob } from "./types";
  * Discover: jobs that came from outside the app (today, picks from the Daily Job Shortlist on claude.ai), newest
  * first, each with where it is now. The job is found by its posting URL or through the queue item it was added as,
  * so a job saved under a slightly different URL, or as a duplicate of one already saved, still shows as in Jobs.
+ * Removed ones are left out.
  */
 export async function listDiscovered(db: Db = defaultDb()): Promise<DiscoveredJob[]> {
   const rows = await db
@@ -19,6 +20,7 @@ export async function listDiscovered(db: Db = defaultDb()): Promise<DiscoveredJo
     })
     .from(discoveredJobs)
     .leftJoin(applicationQueue, eq(applicationQueue.id, discoveredJobs.queueId))
+    .where(isNull(discoveredJobs.dismissedAt))
     .orderBy(desc(discoveredJobs.createdAt));
 
   const jobIds = [...new Set(rows.map((r) => r.jobId).filter((id): id is string => !!id))];
@@ -80,4 +82,24 @@ export async function addDiscoveredAgain(id: string, deps: SaveJobDeps = {}): Pr
     },
     { ...deps, db },
   );
+}
+
+/** Removes jobs from Discover (only the listing: a job already in Jobs stays there). Returns the ids removed. */
+export async function dismissDiscovered(ids: string[], db: Db = defaultDb()): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .update(discoveredJobs)
+    .set({ dismissedAt: new Date() })
+    .where(and(inArray(discoveredJobs.id, ids), isNull(discoveredJobs.dismissedAt)))
+    .returning({ id: discoveredJobs.id });
+  return rows.map((r) => r.id);
+}
+
+/** Puts removed jobs back on Discover (Undo). */
+export async function restoreDiscovered(ids: string[], db: Db = defaultDb()): Promise<void> {
+  if (ids.length === 0) return;
+  await db
+    .update(discoveredJobs)
+    .set({ dismissedAt: null })
+    .where(and(inArray(discoveredJobs.id, ids), isNotNull(discoveredJobs.dismissedAt)));
 }

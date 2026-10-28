@@ -1,0 +1,1 @@
+ALTER TABLE "discovered_jobs" ADD COLUMN "dismissed_at" timestamp with time zone;

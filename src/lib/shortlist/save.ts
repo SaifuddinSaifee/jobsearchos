@@ -83,7 +83,10 @@ async function activeQueueId(canonical: string, db: Db): Promise<string | null> 
   return null;
 }
 
-/** Remembers the pick for Discover. The latest send of the same posting refreshes its fields. */
+/**
+ * Remembers the pick for Discover. The latest send of the same posting refreshes its fields, and brings it back if
+ * it was removed from Discover (sending it again is asking for it).
+ */
 async function recordPick(input: SaveJobInput, canonicalUrl: string, result: SaveJobResult, db: Db) {
   const fields = {
     url: input.url,
@@ -101,6 +104,7 @@ async function recordPick(input: SaveJobInput, canonicalUrl: string, result: Sav
     leadWith: input.leadWith ?? "",
     applyHow: input.applyHow ?? "",
     notAddedReason: result.state === "not_added" ? result.reason : null,
+    dismissedAt: null,
     updatedAt: new Date(),
     ...(result.state === "queued" ? { queueId: result.queueId } : {}),
   };

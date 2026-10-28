@@ -630,8 +630,17 @@ User story: *I can see at a glance which jobs fit me best and why, and what I am
 
 ### Stage 8: Discover
 
-Started: **Discover** lists the jobs you send from the Daily Job Shortlist on claude.ai, newest first, marked
-**Claude.ai** as their source.
+Started: **Discover** lists the jobs you send from the Daily Job Shortlist on claude.ai, under a **Found by Claude**
+section, marked **Claude.ai** as their source.
+
+- The section header shows how many jobs it holds and how many need you, and clicking it hides or shows them. Each
+  source gets its own section, and whether it is open is remembered in this browser.
+- Inside, tabs split the jobs by the shortlist's track (AI/LLM, Solutions/FDE, APM/PM and so on), each with a count.
+  A search box matches title, company, location and the shortlist's lines. **Filters** narrow by status (needs you,
+  being read, in Jobs and not applied yet, applied or further), work mode, minimum fit and pay listed. **Sort** orders
+  by newest sent (the default), best fit, recently posted or company; the choice is remembered.
+- **Remove** takes a job off Discover (only the listing: a job already in Jobs stays there), with Undo. Sending the
+  same posting from claude.ai again brings it back.
 
 - Each card shows the title (linking to the posting), the company, the shortlist's fit score, its track, mode,
   location, pay and posting date, and its "why", "lead with" and "apply" lines.
