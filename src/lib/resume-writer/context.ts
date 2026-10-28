@@ -143,7 +143,10 @@ export function indexSource(record: CareerRecord): SourceItem[] {
     for (const r of e.roles) {
       const label = `${r.framings[0]?.title || "Role"} at ${e.name}`;
       for (const f of r.facts) {
-        const texts = f.wordings.filter((w) => w.form === "bullet").slice(0, WORDINGS_SHOWN).map((w) => w.text);
+        // The statement first, then the details it states (every tool and number of the fact), then its wordings.
+        const details = f.details.length > 0 ? `Details: ${f.details.map((d) => d.text).join(", ")}` : "";
+        const wordings = f.wordings.filter((w) => w.form === "bullet").slice(0, WORDINGS_SHOWN).map((w) => w.text);
+        const texts = [f.statement.trim(), details, ...wordings].filter(Boolean);
         if (texts.length > 0) add({ ref: f.id, kind: "fact", label, text: texts.join(" | ") });
       }
     }

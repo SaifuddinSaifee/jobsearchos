@@ -61,7 +61,7 @@ export function withLlmContext<T>(
   opts: { metadata?: Record<string, string | number> } = {},
 ): Promise<T> {
   const ctx: LlmContext = { action, runId: randomUUID(), ...Object.fromEntries(Object.entries(ids).filter(([, v]) => v)) };
-  const session = ctx.jobId ?? ctx.companyId ?? ctx.proposalId ?? ctx.documentId ?? ctx.queueItemId;
+  const session = ctx.jobId ?? ctx.companyId ?? ctx.proposalId ?? ctx.documentId ?? ctx.queueItemId ?? ctx.compactionId;
 
   let otel = trace.deleteSpan(context.active());
   if (session) otel = setSession(otel, { sessionId: session });

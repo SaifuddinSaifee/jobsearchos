@@ -195,7 +195,7 @@ export async function applyReviewedProposal(
   const { record, summary } = applyProposal(
     current.record,
     resolved,
-    { sourceId: source.id, label: source.label, newId: opts.newId ?? newId },
+    { sourceId: source.id, label: source.label, newId: opts.newId ?? newId, facts: proposal.facts },
     proposal.targetRole,
   );
 

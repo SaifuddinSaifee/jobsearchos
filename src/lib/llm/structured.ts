@@ -30,6 +30,12 @@ export type StructuredOptions = {
    * whose parts each stand alone, such as a review's scores and edits, where most of it is worth more than none.
    */
   salvage?: (partial: unknown) => unknown | null;
+  /**
+   * Text sent first, as its own system message ahead of the instructions and the schema, byte for byte the same across
+   * calls that share it (the career record, say). Providers cache a prompt's opening, so calls after the first pay the
+   * cached price for it. Anything that changes from call to call goes in `user`, never here.
+   */
+  prefix?: string;
   /** Attributes for the call's span in the trace, such as which attempt this is. Phoenix only. */
   traceAttributes?: Record<string, string | number | boolean>;
 };
@@ -59,6 +65,7 @@ ${JSON.stringify(jsonSchema)}`;
       max_tokens: opts.maxTokens ?? 16000,
       ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
       messages: [
+        ...(opts.prefix ? [{ role: "system" as const, content: opts.prefix }] : []),
         { role: "system", content: system },
         { role: "user", content: input.user },
       ],

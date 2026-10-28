@@ -25,6 +25,13 @@ import {
 } from "@/lib/career/queue";
 import { applyIfAutomatic } from "@/lib/career/review";
 import {
+  claimNextCompaction,
+  failCompaction,
+  processCompaction,
+  sweepStaleCompactions,
+  touchCompaction,
+} from "@/lib/career/compaction";
+import {
   claimNextGeneration,
   getGenerationRow,
   recoverInterruptedGenerations,
@@ -64,6 +71,11 @@ const INDEX_CONCURRENCY = 1;
 const INDEX_TIMEOUT_MS = 5 * 60_000;
 /** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
 const CAREER_TIMEOUT_MS = 5 * 60_000;
+/**
+ * Tidying the whole career record: one call per role and project to find repeats, and one per few facts to write their
+ * statements, so a long record makes a few dozen calls.
+ */
+const COMPACTION_TIMEOUT_MS = 20 * 60_000;
 /**
  * One phase of writing a resume: matching the job against the record, or writing it. Writing is three calls: the draft
  * at high effort (about 1 to 2 minutes), the review (about 20 seconds) and the revision (under a minute), measured at
@@ -206,6 +218,19 @@ export async function processCareer(
   }
 }
 
+/** Works out one claimed tidy of the career record; failures are recorded on its row. */
+export async function processCompactionJob(
+  id: string,
+  deps: { run?: typeof processCompaction; timeoutMs?: number } = {},
+): Promise<void> {
+  try {
+    const work = withLlmContext("compact-record", { compactionId: id }, () => (deps.run ?? processCompaction)(id));
+    await withTimeout(work, deps.timeoutMs ?? COMPACTION_TIMEOUT_MS, "Timed out after 20 minutes");
+  } catch (err) {
+    await failCompaction(id, err);
+  }
+}
+
 /**
  * Runs one claimed phase of a resume generation (matching, or writing); failures are recorded on its row by
  * `processGeneration`. `signal` stops it (when the user stops it): its model calls are cancelled and it returns at
@@ -264,6 +289,8 @@ type WorkerState = {
   career: Map<string, AbortController>;
   /** Resumes being written, each with the controller that stops it. */
   generating: Map<string, AbortController>;
+  /** The tidy of the career record being worked out, if any. */
+  compacting: Set<string>;
   /** Set once proposals cut off by the last shutdown have been put back. */
   recovered?: boolean;
   ticking: boolean;
@@ -274,10 +301,11 @@ const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), generating: new Map(), ticking: false, again: false, timer: null });
+  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), generating: new Map(), compacting: new Set(), ticking: false, again: false, timer: null });
   // A dev server that hot-reloaded from older code may hold a state without the search slots.
   s.searching ??= new Set();
   s.indexing ??= new Set();
+  s.compacting ??= new Set();
   if (!(s.career instanceof Map)) s.career = new Map();
   if (!(s.generating instanceof Map)) s.generating = new Map();
   // A worker already running before a hot reload has nothing to recover; only a fresh process does.
@@ -352,6 +380,10 @@ async function tick(): Promise<void> {
           const n = await recoverInterruptedGenerations();
           if (n > 0) console.log(`[queue] put back ${n} resume(s) interrupted by the last shutdown`);
         }
+        if (s.compacting.size === 0) {
+          const n = await sweepStaleCompactions(undefined, { all: true });
+          if (n > 0) console.log("[queue] put back the record tidy interrupted by the last shutdown");
+        }
       }
 
       await sweepStaleGenerations();
@@ -369,6 +401,22 @@ async function tick(): Promise<void> {
             void tick();
           });
       }
+      await sweepStaleCompactions();
+      if (s.compacting.size === 0) {
+        const compactionId = await claimNextCompaction();
+        if (compactionId) {
+          s.compacting.add(compactionId);
+          const beat = setInterval(() => void touchCompaction(compactionId).catch(() => {}), HEARTBEAT_MS);
+          void processCompactionJob(compactionId)
+            .catch((err) => console.error("[queue] unexpected tidy failure", compactionId, err))
+            .finally(() => {
+              clearInterval(beat);
+              s.compacting.delete(compactionId);
+              void tick();
+            });
+        }
+      }
+
       await sweepStaleProposals();
       // One at a time: a proposal is only prepared once the one before it has been reviewed.
       if (s.career.size === 0) {

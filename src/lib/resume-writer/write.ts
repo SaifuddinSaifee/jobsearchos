@@ -4,7 +4,7 @@ import { pickEducation, uniqueCertifications } from "@/lib/career/dedupe";
 import { guessAngle } from "@/lib/career/match";
 import { balanceBrackets, normalizeText, titleSimilarity, tokens } from "@/lib/career/normalize";
 import { toSpan } from "@/lib/career/dates";
-import type { CareerRecord, Education, Framing, Role } from "@/lib/career/schema";
+import type { CareerRecord, Education, Framing, Role, Wording } from "@/lib/career/schema";
 import { findBanned } from "@/lib/outreach/checks";
 import type { GenerationInstructions } from "@/lib/profile/schema";
 import { wordingsConflict } from "./clashes";
@@ -148,9 +148,17 @@ export function clipAtSentence(text: string, max: number): string {
 /** A line that lists tools ("Technologies: Python, SQL") is a skills line kept as a bullet, not something that was done. */
 const isSkillsLine = (text: string) => /^\s*(technologies|tech stack|skills)\s*:/i.test(text);
 
-/** The wordings of a fact that can be written as a bullet under a framing. */
-const bulletWordings = (role: Role, fact: Role["facts"][number], framingId: string | null) =>
-  fact.wordings.filter((w) => w.form === "bullet" && !isSkillsLine(w.text) && (framingId === null || wordingFitsFraming(role, w, framingId)));
+/**
+ * The wordings of a fact that can be written as a bullet under a framing. A fact left with no bullet wording (a tidy can
+ * leave only its statement) offers its statement, which fits any framing.
+ */
+function bulletWordings(role: Role, fact: Role["facts"][number], framingId: string | null): Wording[] {
+  const bullets = fact.wordings.filter((w) => w.form === "bullet" && !isSkillsLine(w.text));
+  if (bullets.length === 0 && fact.statement.trim()) {
+    return [{ id: `${fact.id}-statement`, text: fact.statement.trim(), framingId: null, form: "bullet", sources: fact.sources, provenance: fact.provenance }];
+  }
+  return bullets.filter((w) => framingId === null || wordingFitsFraming(role, w, framingId));
+}
 
 /** How much a fact answers of the job: the weight of the requirements it was matched to. */
 export const factWeigher = (requirements: Pick<Requirement, "refs" | "weight">[]) => (factId: string) =>

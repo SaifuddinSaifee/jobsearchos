@@ -17,6 +17,7 @@ export const LLM_ACTIONS = [
   "eval-resume-writer",
   "snapshot-job",
   "generate-resume",
+  "compact-record",
 ] as const;
 
 export const LLM_STEPS = [
@@ -35,6 +36,8 @@ export const LLM_STEPS = [
   "write-resume",
   "review-resume",
   "revise-resume",
+  "cluster-facts",
+  "describe-facts",
 ] as const;
 
 export type LlmAction = (typeof LLM_ACTIONS)[number];
@@ -55,4 +58,5 @@ export type LlmIds = {
   proposalId?: string;
   searchId?: string;
   queueItemId?: string;
+  compactionId?: string;
 };

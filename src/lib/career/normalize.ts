@@ -101,3 +101,6 @@ export function hash8(value: string): string {
   }
   return h.toString(16).padStart(8, "0");
 }
+
+/** The key a wording's text is recognised by when it comes back: same words apart from case and punctuation. */
+export const textKey = (text: string): string => hash8(normalizeText(text));

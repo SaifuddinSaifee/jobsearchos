@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { textKey } from "@/lib/career/normalize";
 import { applyProposal, checkRefs, resolveDecisions } from "@/lib/career/apply";
 import { extractFromProfile, type SourceExtract } from "@/lib/career/extract";
 import { assertTextFromSource, buildProposal } from "@/lib/career/proposal";
@@ -225,7 +226,9 @@ describe("your edits win", () => {
     const { next } = merge(first, x, { sourceId: SOURCE_B });
     const texts = next.record.employers[0].roles[0].facts.map((f) => f.wordings.map((w) => w.text));
     expect(JSON.stringify(texts.map((t) => t.slice(0, 1)))).toBe(before);
-    expect(texts[0]).toEqual(["Built the billing service", "built the billing service!"]);
+    // The same words apart from case and punctuation: only the source is added.
+    expect(texts[0]).toEqual(["Built the billing service"]);
+    expect(next.record.employers[0].roles[0].facts[0].sources.map((s) => s.sourceId)).toContain(SOURCE_B);
   });
 
   it("leaves a linked company alone once the user set it", () => {
@@ -303,7 +306,9 @@ describe("moving a bullet between facts", () => {
     });
     const facts = next.record.employers[0].roles[0].facts;
     expect(facts).toHaveLength(2);
-    expect(facts[0].wordings.map((w) => w.text)).toEqual(["Built the billing service", "Owned the billing platform end to end"]);
+    // One wording per slot: the one that carries more stays, the other is noted as seen.
+    expect(facts[0].wordings.map((w) => w.text)).toEqual(["Owned the billing platform end to end"]);
+    expect(facts[0].seen).toEqual(expect.arrayContaining(["Built the billing service", "Owned the billing platform end to end"].map(textKey)));
   });
 });
 

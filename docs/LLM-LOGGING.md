@@ -16,6 +16,7 @@ Each row carries its Phoenix trace id, so a call on the usage page can be found 
 - [Actions and steps](#actions-and-steps)
 - [The `llm_calls` table](#the-llm_calls-table)
 - [Prices and cost](#prices-and-cost)
+- [Prompt caching](#prompt-caching)
 - [Phoenix tracing](#phoenix-tracing)
 - [The AI usage page](#the-ai-usage-page)
 - [Scripts](#scripts)
@@ -61,12 +62,15 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | `refetch-job` | Server action (Refetch on a job) | `extract-job` |
 | `find-contacts` | Queue: `processSearch` | `extract-posting-people`, `find-people-web`, `rank-contacts` |
 | `index-resume` | Queue: `processIndex` | `parse-resume` (only for an unstructured upload) |
-| `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |
+| `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs`, `describe-facts` (statements and details for the facts the source changes) |
+| `compact-record` | Queue: `processCompactionJob` (Tidy the record) | `cluster-facts` (one per role and project with two or more items), `describe-facts` (one per 6 facts, asked once more for statements that fail their check) |
 | `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`: one call per 6 open requirements, all at the same time) and `read-requirements` (alongside them: what each requirement is and which are the job's core), `write-resume` (the draft, `WRITER_MODEL` at high effort with `WRITER_MAX_TOKENS`, retried once if unreadable; one cut off is written again at low effort with `WRITER_FALLBACK_MAX_TOKENS` and marked a fallback), `review-resume` (`REVIEW_MODEL`, 32,000 tokens, retried after rate limits; a cut-off review keeps its finished part), `revise-resume` (`WRITER_MODEL` with `REVISE_MAX_TOKENS`, when the review asks for a material edit or a code check found something; asked once). A stopped job is never retried |
 | `upload-resume` | `POST /api/resume/parse` | `parse-resume` |
 | `fill-job-details` | Server action | `extract-additional-details`, `extract-apply-notes` |
 | `research-company` | Server action | `research-company` |
 | `regroup-role` | Server action | `group-bullets` |
+
+The career record's steps (`group-bullets`, `classify-cover-paragraphs`, `cluster-facts`, `describe-facts`) all use `RECORD_MODEL` (DeepSeek V4.1 Flash by default), because a prompt cache is per model. `cluster-facts` and `describe-facts` send the record first as `prefix` (see Prompt caching).
 | `eval-resume`, `eval-jobs`, `snapshot-job` | Scripts | the step under test |
 | `eval-resume-writer` | Script `eval:writer` | `match-requirements`, `write-resume`, `review-resume`, `revise-resume`, with the case and config as trace metadata |
 
@@ -90,7 +94,7 @@ Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_cal
 | `duration_ms` | The call's latency, including the SDK's own retries and the waits between them |
 | `retry_count`, `retry_wait_ms` | How often the SDK retried the request (rate limits, failures on the way) and the time between tries. Counted by the client's `fetch` ([attempts.ts](../src/lib/llm/attempts.ts)). Null on calls recorded before 0023. A retry the caller makes itself (the writer's second draft, the review after a rate-limit wait) is a separate row |
 | `trace_id` | The Phoenix trace, null when tracing is off |
-| `job_id`, `company_id`, `document_id`, `document_version_id`, `proposal_id`, `search_id`, `queue_item_id` | What it was for. **Not foreign keys**: history outlives what it points at |
+| `job_id`, `company_id`, `document_id`, `document_version_id`, `proposal_id`, `search_id`, `queue_item_id`, `compaction_id` | What it was for. **Not foreign keys**: history outlives what it points at |
 
 Indexes: `created_at`, and `(job_id, created_at)` where the job is set.
 
@@ -101,6 +105,16 @@ Indexes: `created_at`, and `(job_id, created_at)` where the job is set.
 A model with no entry is **unpriced**: its calls are recorded with a null cost and the page counts them and says they are left out of spend. Prices come from [ai-models-for-jso.md](ai-models-for-jso.md); check them against Together's pricing page before relying on the dollar figures.
 
 Checked with live calls: completion tokens are reasoning tokens plus the visible answer (1933 vs 1177; on 2026-10-15, GLM-5.3 Flash 783 = 728 + about 55 and DeepSeek V4.1 Flash 744 = 674 + about 70), so thinking is already billed inside completion and is not added again.
+
+## Prompt caching
+
+`chatStructured` takes a `prefix`: text sent as the first system message, ahead of the step's instructions and its JSON schema. Providers cache the opening of a prompt, so calls after the first that start with the same bytes pay the cached input price for it (DeepSeek V4.1 Flash: $0.006 per million tokens instead of $0.30). The career steps pass `recordForPrompt(record)` ([prompt.ts](../src/lib/career/prompt.ts)): the record with one line per fact and its details, no ids, no export date, in the record's own order, so the same record gives the same bytes. Anything that changes per call goes in `user`, never in the prefix.
+
+Check that it works after a tidy: later calls of the run should show `cached_tokens` close to the prefix size.
+
+```sql
+select step, prompt_tokens, cached_tokens, cost_usd from llm_calls where action = 'compact-record' order by created_at;
+```
 
 ## Phoenix tracing
 
@@ -149,7 +163,7 @@ Queries are in [src/lib/usage/metrics.ts](../src/lib/usage/metrics.ts); componen
 ## Adding a model call
 
 1. Add the step to `LLM_STEPS` in `names.ts` and its label to `STEP_LABELS` (the compiler asks for it).
-2. Pass `step` in the options to `chatStructured` (it is required).
+2. Pass `step` in the options to `chatStructured` (it is required). If several calls share a long fixed text (the career record), pass it as `prefix` so it is cached.
 3. Make sure the code path runs inside `withLlmContext`. A new user action also needs an entry in `LLM_ACTIONS` and `ACTION_LABELS`.
 4. A new model needs an entry in `prices.ts`, or its calls show as unpriced.
 

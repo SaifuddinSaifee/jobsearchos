@@ -1,7 +1,8 @@
 import type { Fact, CareerRecord, Role, Wording, RecordItemKind } from "./schema";
-import type { BulletSuggestion } from "./proposal-schema";
+import { newClaims } from "./facts";
+import type { BULLET_WHY, BulletSuggestion } from "./proposal-schema";
 import type { ExtractedBullet } from "./extract";
-import { normalizeEmployer, normalizeText, normalizeTitle, skillKey, textSimilarity } from "./normalize";
+import { normalizeEmployer, normalizeText, normalizeTitle, skillKey, textKey, textSimilarity } from "./normalize";
 
 // Deterministic matching of incoming text against what the record already holds. No model: a model only sees what
 // is left over after this (step 5).
@@ -22,29 +23,40 @@ function findWording(facts: Fact[], pick: (w: Wording) => boolean): { fact: Fact
 /**
  * What to do with one incoming bullet, given the role it is going into (null for a new role).
  * 1. exact text already a wording: known (only the source is added);
- * 2. same words apart from case and punctuation: same fact, new wording;
- * 3. same editor block as an existing wording (copies of a document keep block ids) with similar text: same fact;
+ * 2. same words apart from case and punctuation as a wording, or as a text folded into a fact before: known;
+ * 3. same editor block as an existing wording (copies of a document keep block ids) with similar text: that fact;
  * 4. otherwise a new fact, until the model has looked at it.
+ * A bullet placed under a fact that states no number or name the fact lacks is known too (`joinFact`).
  */
 export function classifyBullet(role: Role | null, bullet: ExtractedBullet): BulletSuggestion {
   if (!role) return { to: "new" };
   const text = clean(bullet.text);
-  const norm = normalizeText(text);
 
   const exact = findWording(role.facts, (w) => clean(w.text) === text);
   if (exact) return { to: "known", factId: exact.fact.id, wordingId: exact.wording.id };
 
-  const near = findWording(role.facts, (w) => normalizeText(w.text) === norm);
-  if (near) return { to: "fact", factId: near.fact.id, why: "near" };
+  const key = textKey(text);
+  const seen = role.facts.find((f) => f.seen.includes(key) || f.wordings.some((w) => textKey(w.text) === key));
+  if (seen) return { to: "known", factId: seen.id, wordingId: null };
 
   if (bullet.blockId) {
     const lineage = findWording(
       role.facts,
       (w) => w.sources.some((s) => s.blockId === bullet.blockId) && textSimilarity(w.text, text) >= LINEAGE_SIMILARITY,
     );
-    if (lineage) return { to: "fact", factId: lineage.fact.id, why: "lineage" };
+    if (lineage) return joinFact(lineage.fact, text, "lineage").suggestion;
   }
   return { to: "new" };
+}
+
+/**
+ * A bullet that tells the same accomplishment as `fact`: known when it states no number or name the fact does not
+ * already hold (its text is not kept), otherwise a new wording of the fact, with what it adds.
+ */
+export function joinFact(fact: Fact, text: string, why: (typeof BULLET_WHY)[number]): { suggestion: BulletSuggestion; adds: string[] } {
+  const adds = newClaims(text, fact);
+  if (adds.length === 0) return { suggestion: { to: "known", factId: fact.id, wordingId: null }, adds };
+  return { suggestion: { to: "fact", factId: fact.id, why }, adds };
 }
 
 export const matchSkill = (record: CareerRecord, name: string) =>
@@ -141,6 +153,7 @@ export const removalKey = {
   employer: (name: string) => normalizeEmployer(name),
   role: (company: string, title: string) => `${normalizeEmployer(company)}|${normalizeTitle(title)}`,
   wording: (text: string) => normalizeText(text),
+  detail: (text: string) => normalizeText(text),
   skill: (name: string) => normalizeText(name),
   project: (name: string) => normalizeText(name),
   education: (institution: string, degree: string) => `${normalizeText(institution)}|${normalizeText(degree)}`,

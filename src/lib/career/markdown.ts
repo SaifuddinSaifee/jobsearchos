@@ -34,15 +34,23 @@ function roleSection(role: Role): string[] {
     lines.push("Told as:", ...role.framings.map(framingLine), "");
   }
   if (role.dateNotes.length > 0) lines.push("Date notes:", ...role.dateNotes.map((n) => `- ${n}`), "");
+  if (role.technologies.length > 0) lines.push(`Technologies: ${role.technologies.join(", ")}`, "");
 
   const framings = new Map(role.framings.map((f) => [f.id, f.title.trim()]));
   for (const fact of role.facts) {
+    // A fact with a statement leads with it, then its details and the wordings kept for each framing.
+    if (fact.statement.trim()) {
+      lines.push(`- ${indent(fact.statement, "  ")}`);
+      if (fact.details.length > 0) lines.push(`  - Details: ${fact.details.map((d) => d.text).join("; ")}`);
+      for (const w of fact.wordings) lines.push(wordingLines(w, framings, "  - Worded: "));
+      continue;
+    }
     const [first, ...rest] = fact.wordings;
     if (!first) continue;
     lines.push(wordingLines(first, framings, "- "));
     for (const w of rest) lines.push(wordingLines(w, framings, "  - Also worded: "));
   }
-  if (role.facts.some((f) => f.wordings.length > 0)) lines.push("");
+  if (role.facts.some((f) => f.wordings.length > 0 || f.statement.trim())) lines.push("");
   return lines;
 }
 

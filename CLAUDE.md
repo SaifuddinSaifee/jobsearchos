@@ -10,7 +10,7 @@ Resumes, cover letters and cold emails exist to get the user to the interview. W
 
 - **Keywords and gaps are the user's call.** Show the keywords and gaps a job calls for, including obvious inferred ones (AWS, Azure, GCP for "hands-on cloud"), with their weight. When the user picks one, or clicks Fix with AI on a gap, work it into the document (rewording existing experience where that is where it fits) and update the score.
 - **Do not build guards against it.** No refusing, blocking, watering down, "real gap, nothing added" outcomes, or asking the user to prove a claim before writing it. The user is responsible for what they send.
-- **This applies to writing, not to the record.** Bringing a document into the career record stays word for word from that document (`src/lib/career/`): the record never gets text no document had. Which documents go in is the user's choice, and that includes a generated resume they are happy with, added with one click.
+- **This applies to writing, not to the record.** Bringing a document into the career record stays word for word from that document (`src/lib/career/`): wordings and details are exact text from a document. The one exception is each fact's **statement**, a one-line merge of its wordings: the model writes it, `checkStatement` rejects any number or name not in the fact's wordings, and the user reviews it and can edit it. Which documents go in is the user's choice, and that includes a generated resume they are happy with, added with one click.
 
 # Code style: no symbol characters, use icons
 

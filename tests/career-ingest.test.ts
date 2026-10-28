@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { textKey } from "@/lib/career/normalize";
 import { eq, sql } from "drizzle-orm";
 
 process.env.DATABASE_URL ??= "postgres://unused";
@@ -372,7 +373,7 @@ describe("cover letters", () => {
 describe("grouping with the model", () => {
   it("puts reworded bullets on the fact they repeat, for roles that join one in the record", async () => {
     await resume("Base", acmeEng, { isBase: true });
-    await resume("PM", [{ ...acmePm[0], title: "Software Engineer", bullets: ["Designed and shipped the billing platform", "Brand new accomplishment"] }], { writtenOn: "2020-01-01" });
+    await resume("PM", [{ ...acmePm[0], title: "Software Engineer", bullets: ["Designed and shipped the billing platform on Stripe", "Brand new accomplishment"] }], { writtenOn: "2020-01-01" });
     await queueEverything(db);
     await applyReviewedProposal((await prepareNext())!, { db, newId });
 
@@ -385,14 +386,17 @@ describe("grouping with the model", () => {
     };
     const id = (await claimNextProposal(db))!;
     await processProposal(id, { db, parse: never, grouper });
-    expect(asked).toEqual([["Designed and shipped the billing platform", "Brand new accomplishment"]]);
+    expect(asked).toEqual([["Designed and shipped the billing platform on Stripe", "Brand new accomplishment"]]);
 
     const bullets = (await getOpenReview(db))!.proposal.employers[0].roles[0].bullets;
     expect(bullets[0].suggestion).toEqual({ to: "fact", factId: billing.id, why: "model" });
+    expect(bullets[0].adds).toEqual(["Stripe"]);
     expect(bullets[1].suggestion).toEqual({ to: "new" });
     await applyReviewedProposal(id, { db, newId });
     const facts = (await currentRecord(db)).record.employers[0].roles[0].facts;
-    expect(facts[0].wordings.map((w) => w.text)).toEqual(["Built the billing service", "Designed and shipped the billing platform"]);
+    // One wording per slot: the one that says more stays, and the other is kept as a source.
+    expect(facts[0].wordings.map((w) => w.text)).toEqual(["Designed and shipped the billing platform on Stripe"]);
+    expect(facts[0].seen).toContain(textKey("Built the billing service"));
   });
 
   it("fails the proposal when the model cannot be reached, so it can be retried", async () => {

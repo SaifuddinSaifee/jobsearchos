@@ -3,12 +3,13 @@ import type { RecordSummary } from "@/components/career/types";
 import { listDocumentOffers, type DocumentOffer } from "@/lib/career/offer";
 import { getCareerStatus } from "@/lib/career/review";
 import { getLatestRecord, listRecordVersions, listSourceInfo } from "@/lib/career/service";
+import { getOpenCompaction } from "@/lib/career/compaction";
 import { listDocuments, listJobOptions } from "@/lib/documents/service";
 
 export const dynamic = "force-dynamic";
 
 export default async function LibraryPage() {
-  const [docs, jobs, latest, versions, careerStatus, careerSources, offers] = await Promise.all([
+  const [docs, jobs, latest, versions, careerStatus, careerSources, offers, compaction] = await Promise.all([
     listDocuments(),
     listJobOptions(),
     getLatestRecord(),
@@ -16,6 +17,7 @@ export default async function LibraryPage() {
     getCareerStatus(),
     listSourceInfo(),
     listDocumentOffers(),
+    getOpenCompaction(),
   ]);
   const roles = latest?.record.employers.flatMap((e) => e.roles) ?? [];
   const record: RecordSummary | null = latest
@@ -50,6 +52,7 @@ export default async function LibraryPage() {
       careerStatus={careerStatus}
       careerRecord={latest?.record ?? null}
       careerSources={careerSources}
+      compaction={compaction}
       offers={offers.filter((o): o is Extract<DocumentOffer, { state: "new" }> => o.state === "new")}
       handled={{
         inRecord: offers.filter((o) => o.state === "in-record" || o.state === "nothing-new").length,

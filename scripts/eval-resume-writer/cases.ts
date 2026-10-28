@@ -31,7 +31,7 @@ function role(spec: RoleSpec): Role {
   let n = 0;
   const fact = (text: string, framingId: string | null, source: string) => {
     const id = `${spec.id}-x${++n}`;
-    return { id, provenance: mergeProvenance(), wordings: [{ id: `${id}w`, text, framingId, form: "bullet" as const, ...tracked(source) }] };
+    return { id, statement: "", details: [], sources: [], seen: [], provenance: mergeProvenance(), wordings: [{ id: `${id}w`, text, framingId, form: "bullet" as const, ...tracked(source) }] };
   };
   return {
     id: spec.id,
@@ -40,6 +40,7 @@ function role(spec: RoleSpec): Role {
     current: spec.end === "",
     location: spec.location,
     dateNotes: [],
+    technologies: [],
     framings,
     facts: [
       ...spec.main.facts.map((t) => fact(t, `${spec.id}-f1`, SOURCE)),
@@ -69,7 +70,7 @@ function record(roles: RoleSpec[], extras: Extras): CareerRecord {
     skills: extras.skills.flatMap(([category, names]) => names.map((name) => ({ id: id("k"), name, category, ...tracked(SOURCE) }))),
     projects: (extras.projects ?? []).map((p) => {
       const pid = id("p");
-      return { id: pid, name: p.name, description: p.description, url: p.url ?? "", technologies: p.technologies, wordings: [{ id: `${pid}w`, text: p.text, framingId: null, form: "bullet" as const, ...tracked(SOURCE) }], ...tracked(SOURCE) };
+      return { id: pid, name: p.name, description: p.description, url: p.url ?? "", technologies: p.technologies, wordings: [{ id: `${pid}w`, text: p.text, framingId: null, form: "bullet" as const, ...tracked(SOURCE) }], seen: [], ...tracked(SOURCE) };
     }),
     education: extras.education.map((e) => ({ id: id("ed"), details: "", ...e, ...tracked(SOURCE) })),
     certifications: (extras.certifications ?? []).map((c) => ({ id: id("c"), date: "", ...c, ...tracked(SOURCE) })),

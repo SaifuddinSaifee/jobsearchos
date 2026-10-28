@@ -23,6 +23,7 @@ function record(): CareerRecord {
             current: true,
             location: "Remote",
             dateNotes: ['Resume "Old" says Feb 2020'],
+            technologies: [],
             ...tracked,
             framings: [
               { id: "fr1", title: "Backend Engineer", angle: "Engineering", targetRoles: ["Platform"], ...tracked },
@@ -31,10 +32,14 @@ function record(): CareerRecord {
             facts: [
               {
                 id: "f1",
+                statement: "",
+                details: [],
+                sources: [],
+                seen: [],
                 provenance: { origin: "merge", user: [] },
                 wordings: [wording("w1", "Cut p95 latency by 40%", "fr1"), wording("w2", "Made the API faster")],
               },
-              { id: "f2", provenance: { origin: "merge", user: [] }, wordings: [wording("w3", "Line one\nLine two", null, "paragraph")] },
+              { id: "f2", statement: "", details: [], sources: [], seen: [], provenance: { origin: "merge", user: [] }, wordings: [wording("w3", "Line one\nLine two", null, "paragraph")] },
             ],
           },
         ],

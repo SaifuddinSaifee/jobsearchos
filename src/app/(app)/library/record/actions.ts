@@ -23,6 +23,8 @@ import {
 import { EditError } from "@/lib/career/edit";
 import { EditOpSchema } from "@/lib/career/edit-schema";
 import { editRecord, RecordConflict, restoreRecordVersion } from "@/lib/career/service";
+import { applyCompaction, dismissCompaction, saveCompactionAnswers, startCompaction } from "@/lib/career/compaction";
+import { CompactionAnswersSchema } from "@/lib/career/compact-schema";
 import { kickWorker, stopCareerProposal } from "@/lib/queue/worker";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; stale?: boolean };
@@ -187,5 +189,54 @@ export async function includeProfileAction() {
       status: outcome === null ? ("empty" as const) : outcome.status,
       reason: outcome?.status === "skipped" ? outcome.reason : null,
     };
+  });
+}
+
+/** Queues a tidy of the record (one statement per fact, repeats folded in), or returns the one already open. */
+export async function startCompactionAction() {
+  return run(async () => {
+    const out = await startCompaction();
+    kickWorker();
+    return out;
+  });
+}
+
+/** Starts a fresh tidy after one that failed. */
+export async function retryCompactionAction(compactionId: string) {
+  return run(async () => {
+    await dismissCompaction(Id.parse(compactionId));
+    const out = await startCompaction();
+    kickWorker();
+    return out;
+  });
+}
+
+/** Keeps the answers to a tidy's questions while the user reviews it. */
+export async function saveCompactionAnswersAction(compactionId: string, answers: unknown) {
+  return run(async () => {
+    await saveCompactionAnswers(Id.parse(compactionId), CompactionAnswersSchema.parse(answers));
+    return {};
+  });
+}
+
+/** Saves the answers, then the tidied record as a new version. */
+export async function applyCompactionAction(compactionId: string, answers: unknown) {
+  return run(async () => {
+    const id = Id.parse(compactionId);
+    await saveCompactionAnswers(id, CompactionAnswersSchema.parse(answers));
+    try {
+      return await applyCompaction(id);
+    } finally {
+      // When the record changed, the tidy was queued to be worked out again.
+      kickWorker();
+    }
+  });
+}
+
+/** Leaves the record as it is. */
+export async function dismissCompactionAction(compactionId: string) {
+  return run(async () => {
+    await dismissCompaction(Id.parse(compactionId));
+    return {};
   });
 }

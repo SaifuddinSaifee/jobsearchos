@@ -35,6 +35,11 @@ const EnvSchema = z.object({
   REVISE_MAX_TOKENS: z.coerce.number().int().min(4_000).default(16_000),
   /** Extraction, parsing, scoring, classification, summarization. */
   EXTRACTION_MODEL: z.string().default("zai-org/GLM-5.3-Flash"),
+  /**
+   * The career record's own steps: grouping bullets, reading cover letters, finding facts that repeat and writing fact
+   * statements. One model for all of them, because a prompt cache is per model and they share the record as a prefix.
+   */
+  RECORD_MODEL: z.string().default("deepseek-ai/DeepSeek-V4.1-Flash"),
   /** High-volume triage (discovery prefilter). */
   FAST_MODEL: z.string().default("zai-org/GLM-5.3-Flash"),
   // Embeddings only (Stage 5): local Ollama model, since Together has no serverless embeddings.

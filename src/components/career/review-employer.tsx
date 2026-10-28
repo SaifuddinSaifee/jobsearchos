@@ -11,6 +11,7 @@ import type { DecisionPatch } from "@/lib/career/decisions";
 import type { RoleSuggestion } from "@/lib/career/proposal-schema";
 import type { ResolvedBullet, ResolvedEmployer, ResolvedRole } from "@/lib/career/apply";
 import { formatDates } from "@/lib/career/dates";
+import { factLine } from "@/lib/career/facts";
 import type { CareerRecord, Role } from "@/lib/career/schema";
 import { cn } from "@/lib/utils";
 import { IncludeToggle } from "./include-toggle";
@@ -257,9 +258,11 @@ function BulletRow({
   const fact = target.to === "new" ? undefined : targetRole?.facts.find((f) => f.id === target.factId);
   const others = siblings.filter((s) => s.item.key !== item.key && s.target.to === "new" && !s.target.withKey);
   const joined = target.to === "new" && target.withKey ? siblings.find((s) => s.item.key === target.withKey) : undefined;
-  const canChoose = target.to !== "known" && ((targetRole && targetRole.facts.length > 0) || others.length > 0 || joined);
+  // A bullet whose exact text is in the record has nothing to choose; one that only says nothing new can still be kept as a wording.
+  const exact = target.to === "known" && target.wordingId !== null;
+  const canChoose = !exact && ((targetRole && targetRole.facts.length > 0) || others.length > 0 || joined);
 
-  const value = target.to === "fact" ? `fact:${target.factId}` : target.to === "new" && target.withKey ? `with:${target.withKey}` : "new";
+  const value = target.to === "fact" || target.to === "known" ? `fact:${target.factId}` : target.to === "new" && target.withKey ? `with:${target.withKey}` : "new";
   function choose(v: string) {
     if (v === "new") decide(item.key, { bullet: { to: "new" } });
     else if (v.startsWith("fact:")) decide(item.key, { bullet: { to: "fact", factId: v.slice(5), why: "user" } });
@@ -276,8 +279,10 @@ function BulletRow({
       <div className="flex items-start gap-2">
         <IncludeToggle included={included} onChange={(v) => decide(item.key, { include: v })} label={clip(item.text, 40)} />
         <p className={cn("min-w-0 flex-1", !included && "line-through")}>{item.text}</p>
-        {target.to === "known" ? (
+        {exact ? (
           <Badge variant="secondary">Already in your record</Badge>
+        ) : target.to === "known" ? (
+          <Badge variant="secondary">Nothing new</Badge>
         ) : target.to === "fact" ? (
           <Badge variant="secondary">Same fact, new wording</Badge>
         ) : joined ? (
@@ -289,8 +294,17 @@ function BulletRow({
       {item.removedBefore && <p className="pl-8 text-xs text-muted-foreground">You removed this before, so it starts out left out.</p>}
       {fact && target.to === "fact" && (
         <div className="space-y-0.5 pl-8 text-xs text-muted-foreground">
-          <p>{WHY[target.why]}</p>
-          <p className="border-l-2 pl-2">Already worded: {clip(fact.wordings[0]?.text ?? "")}</p>
+          <p>
+            {WHY[target.why]}
+            {item.adds && item.adds.length > 0 && ` It adds ${item.adds.join(", ")}.`}
+          </p>
+          <p className="border-l-2 pl-2">Already in the record: {clip(factLine(fact))}</p>
+        </div>
+      )}
+      {fact && target.to === "known" && !exact && (
+        <div className="space-y-0.5 pl-8 text-xs text-muted-foreground">
+          <p>It states no number or name this fact lacks, so only this source is added. Pick the fact below to keep the wording anyway.</p>
+          <p className="border-l-2 pl-2">Already in the record: {clip(factLine(fact))}</p>
         </div>
       )}
       {joined && (
@@ -303,7 +317,7 @@ function BulletRow({
             <option value="new">A new fact</option>
             {targetRole?.facts.map((f) => (
               <option key={f.id} value={`fact:${f.id}`}>
-                Same as: {clip(f.wordings[0]?.text ?? "", 70)}
+                Same as: {clip(factLine(f), 70)}
               </option>
             ))}
             {others.map((o) => (

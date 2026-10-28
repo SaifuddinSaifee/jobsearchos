@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Ban, ClipboardCheck, Download, FileUp, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
+import { Ban, Bot, ClipboardCheck, Download, FileUp, History, Library, Loader2, Play, RotateCcw, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
@@ -18,9 +18,11 @@ import type { DocumentOffer } from "@/lib/career/offer";
 import type { CareerStatus } from "@/lib/career/review";
 import type { CareerRecord } from "@/lib/career/schema";
 import type { SourceInfo } from "@/lib/career/service";
+import type { OpenCompaction } from "@/lib/career/compaction";
 import { FailureDialog } from "./failure-dialog";
 import { RecordBrowser } from "./record-browser";
 import { RecordOffers } from "./record-offers";
+import { RecordTidy } from "./record-tidy";
 import { SkipButton } from "./skip-button";
 import { RecordEditProvider } from "./record-edit";
 import { CAREER_STATUS_KEY, isPreparing, useCareerStatus } from "./use-career-status";
@@ -41,6 +43,7 @@ const REASON_LABEL: Record<RecordVersionItem["reason"], string> = {
   merge: "Merged",
   edit: "Edited",
   restore: "Restored",
+  compact: "Tidied",
 };
 
 export function RecordView({
@@ -49,6 +52,7 @@ export function RecordView({
   status,
   record,
   sources,
+  compaction,
   offers,
   handled,
 }: {
@@ -57,6 +61,8 @@ export function RecordView({
   status: CareerStatus;
   record: CareerRecord | null;
   sources: Record<string, SourceInfo>;
+  /** The tidy of the record in progress, waiting for review, or failed. */
+  compaction: OpenCompaction | null;
   /** Library documents not in the record that would add something to it. */
   offers: Extract<DocumentOffer, { state: "new" }>[];
   handled: { inRecord: number; leftOut: number };
@@ -70,10 +76,21 @@ export function RecordView({
         </p>
         <div className="flex shrink-0 gap-2">
           {summary && (
-            <Button variant="outline" nativeButton={false} render={<a href="/api/career/export" download />}>
-              <Download aria-hidden />
-              Export
-            </Button>
+            <>
+              <Button variant="outline" nativeButton={false} render={<a href="/api/career/export" download />}>
+                <Download aria-hidden />
+                Export
+              </Button>
+              <Button
+                variant="outline"
+                nativeButton={false}
+                title="One line per fact with its details, short enough to paste into another AI tool"
+                render={<a href="/api/career/export?for=ai" download />}
+              >
+                <Bot aria-hidden />
+                Export for AI
+              </Button>
+            </>
           )}
           <VersionsSheet versions={versions} latest={summary?.version ?? 0} />
         </div>
@@ -81,6 +98,7 @@ export function RecordView({
 
       <Progress initial={status} />
       <RecordOffers offers={offers} recordExists={summary !== null} handled={handled} />
+      {summary && <RecordTidy compaction={compaction} />}
       {summary && record ? (
         <RecordEditProvider version={summary.version} sources={sources}>
           <Summary summary={summary} />

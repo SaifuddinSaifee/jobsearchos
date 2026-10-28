@@ -24,7 +24,8 @@ import { normalizeEmployer } from "./normalize";
 import { modelClassifier, type Classifier } from "./cover";
 import { modelGrouper, type Grouper } from "./group";
 import { buildProposal } from "./proposal";
-import { classifyProposalParagraphs, groupProposal } from "./regroup";
+import { classifyProposalParagraphs, describeProposal, groupProposal } from "./regroup";
+import { modelDescriber, type Describer } from "./describe";
 import { isNothingNew } from "./nothing-new";
 import { currentRecord, getLatestRecord } from "./service";
 
@@ -303,6 +304,8 @@ export type ProcessDeps = {
   grouper?: Grouper;
   /** Labels the paragraphs of a cover letter. Injected for the same reason. */
   classifier?: Classifier;
+  /** Writes the statements and details of the facts a proposal changes. Injected for the same reason. */
+  describer?: Describer;
   now?: Date;
 };
 
@@ -381,15 +384,17 @@ export async function processProposal(id: string, deps: ProcessDeps = {}): Promi
     // Only bullets that matched nothing exactly are put to the model, and only for roles joining one already recorded.
     const grouper = deps.grouper ?? modelGrouper;
     const grouped = await groupProposal(built, current.record, grouper);
-    const proposal = await classifyProposalParagraphs(grouped, current.record, deps.classifier ?? modelClassifier, grouper);
+    const classified = await classifyProposalParagraphs(grouped, current.record, deps.classifier ?? modelClassifier, grouper);
     // Saving would only record where things were read, so there is nothing to review.
-    if (isNothingNew(proposal, current.record)) {
+    if (isNothingNew(classified, current.record)) {
+      const proposal = classified;
       await db
         .update(careerProposals)
         .set({ status: "dismissed", proposal, baseVersion: current.version, note: "Nothing new in this source, so it was left out without asking.", error: null, finishedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(careerProposals.id, id), eq(careerProposals.status, "running")));
       return;
     }
+    const proposal = await describeProposal(classified, current.record, deps.describer ?? modelDescriber);
     await db
       .update(careerProposals)
       .set({ status: "ready", proposal, baseVersion: current.version, note, error: null, finishedAt: new Date(), updatedAt: new Date() })

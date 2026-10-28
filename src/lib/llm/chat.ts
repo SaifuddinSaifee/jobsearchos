@@ -122,6 +122,7 @@ export async function chatCompletion<T>(params: ChatParams, meta: ChatMeta<T>): 
         proposalId: ctx?.proposalId ?? null,
         searchId: ctx?.searchId ?? null,
         queueItemId: ctx?.queueItemId ?? null,
+        compactionId: ctx?.compactionId ?? null,
       });
     }
   });

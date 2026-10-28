@@ -339,7 +339,9 @@ Resumes, cover letters and emails, kept as text you can read and search, not as 
 - Four tabs: **Resumes, Cover letters, Emails, Career record** (see Career record, below). Each document shows what it is for (job and company), its date, where it
   came from, how many versions it has, and (for an uploaded resume) whether it is still being read into sections.
 - **Add** a document three ways: upload a PDF or DOCX, paste text, or start blank (a resume can start as a copy of your base
-  resume). Link it to a job, and add the role, date and the job description it was written for.
+  resume). Link it to a job, and add the role, date and the job description it was written for. A chosen file shows as a
+  card (name, type, size, "Ready to add") with Replace and Remove. The title fills in with the file name, and you can
+  change it. The job stays at "No job" unless you pick one.
 - An uploaded resume is read into headings, bullets and sections, then the AI structures it in the background (roles with
   title, company and dates) and saves that as a new version. Text the AI has no place for (Publications, Languages) is kept.
   If you edit it before that finishes, your version is left alone. Uploading the same file twice is caught.
@@ -362,10 +364,28 @@ One record of everything you have done, merged from your resumes, cover letters,
 as a PDF. It lives in the **Career record** tab of the Library. It has no length limit and is never sent anywhere. It is
 the base the writer will use to pick the right facts and wording for a job.
 
+- **One statement per fact.** Each fact holds one statement (the fact in one line, merged from its wordings), the
+  details it states (numbers with what they measure, tools, teams and specifics, each an exact phrase from a wording),
+  at most one wording per framing and form (an engineering bullet, a product bullet, a story), and every document that
+  told it. A wording that says nothing new is not kept as text: its document is kept as a source and its words are
+  remembered, so the same text coming back is recognised. "Technologies:" lines go to their role and to skills, not into
+  facts. The statement is the one text in the record the AI writes: every number and name in it must be in the fact's
+  wordings, it is shown for review, and **Edit statement** makes it yours (a later merge never changes it). Details can be
+  removed one by one.
+- **Tidy the record.** **Tidy the record** (Career record tab) brings a record built before statements existed to this
+  shape: repeated skills, schools, certifications and achievements become one; facts that tell the same work are joined
+  (the AI only chooses which, by id); each fact gets its statement and details; one wording is kept per framing; and
+  project bullets that repeat are joined. It runs in the background (a few minutes) and then shows how many facts and
+  wordings it comes to, the export size before and after, each role's facts as they will read, and **Numbers that
+  disagree** (one fact giving 66.7% and 150% for the same thing): pick the right value and the other leaves the details,
+  the wordings that give it and the statement. **Apply** saves it as a new version (restore the one before to undo);
+  **Leave as it is** dismisses it. If the record changes before you apply, it is worked out again.
 - **Export as Markdown.** **Export** (next to Versions) downloads the whole record as one structured Markdown file
-  ("Career record - date.md"): each employer and role with its dates, the titles it was told under, every fact with all
-  its wordings, then skills by category, projects, education, certifications, achievements and reasons for applying.
-  Internal ids, sources and removed items are left out. It is the record as it is now; nothing is saved or sent.
+  ("Career record - date.md"): each employer and role with its dates, the titles it was told under and its technologies,
+  every fact with its statement, details and wordings, then skills by category, projects, education, certifications,
+  achievements and reasons for applying. **Export for AI** downloads the short form a model reads (one line per fact
+  with its details), to paste into another tool. Internal ids, sources and removed items are left out. It is the record
+  as it is now; nothing is saved or sent.
 - **You choose what goes in.** Nothing is added on its own, and nothing is sent to the AI until you add it. The tab
   lists **Not in your record**: every resume and cover letter that is not in the record and would add something to it,
   with what it would add, worked out for free by comparing words ("2 of 4 bullets are already in your record. New: 2
@@ -411,14 +431,18 @@ the base the writer will use to pick the right facts and wording for a job.
 - **Versions.** Every merge, edit and restore is a new version; restoring an old one saves it as a new version and marks
   the merges since as undone, so you can review them again.
 - Employers are linked to the Companies directory when a company of that name exists. Nothing is created there.
-- **Reworded bullets.** A bullet that matches nothing exactly is put to the AI, which only chooses whether it repeats a
-  fact you already have (or another new bullet); it cannot write or change text. If you move a role under a different
+- **Reworded bullets.** A bullet with the same words as one already in the record (apart from case and punctuation) is
+  already in your record. One that matches nothing is put to the AI, which only chooses whether it repeats a fact you
+  already have (or another new bullet); it cannot write or change text. A bullet placed on a fact that states no number
+  or name the fact lacks is "Nothing new": only its document is added (pick the fact in review to keep the wording
+  anyway). One that adds something says what ("It adds Stripe"), and the fact's statement and details are written again
+  with it. If you move a role under a different
   role, "Compare bullets with this role" re-checks its bullets against it.
 - **Cover letters.** Each paragraph is labelled a story about a job (kept under that role and fact), a reason for
   applying to the company (the company is the one the letter is linked to), a general reason, or filler that is skipped.
   You can change any label, role or fact. Reasons are listed under "Reasons for applying".
-- A resume with no structure is read by the AI before it is compared. Merges never rewrite text: every wording is word
-  for word from its source.
+- A resume with no structure is read by the AI before it is compared. Merges never rewrite text: every wording and
+  detail is word for word from its source. Only statements are written, and only from the fact's own wordings.
 - **From the editor.** A resume or cover letter that is not in the record shows a short card above the page: what
   adding it would bring (the same free summary), with **Add to record** (one click, no review), **Review first**, **Not
   now** (hides the card until the next version) and **Never for this document**. The header always has **Add to career

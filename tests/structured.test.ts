@@ -52,6 +52,15 @@ describe("chatStructured", () => {
     expect(args.messages[0].content).toContain('"name"');
   });
 
+  it("sends a prefix first, ahead of the instructions and the schema, so it can be cached", async () => {
+    create.mockResolvedValue(reply('{"name":"Ada"}'));
+    await chatStructured(Schema, input, { ...opts, prefix: "THE RECORD" });
+    const messages = create.mock.calls[0][0].messages;
+    expect(messages.map((m: { role: string }) => m.role)).toEqual(["system", "system", "user"]);
+    expect(messages[0].content).toBe("THE RECORD");
+    expect(messages[1].content).toContain('"name"');
+  });
+
   it("passes the running job's abort signal to the request, so stopping the job cancels it", async () => {
     create.mockResolvedValue(reply('{"name":"Ada"}'));
     const controller = new AbortController();

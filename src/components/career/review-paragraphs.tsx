@@ -7,6 +7,7 @@ import type { ResolvedParagraph } from "@/lib/career/apply";
 import type { ParagraphChoice } from "@/lib/career/proposal-schema";
 import { roleChoices } from "@/lib/career/role-choices";
 import type { CareerRecord } from "@/lib/career/schema";
+import { factLine } from "@/lib/career/facts";
 import { cn } from "@/lib/utils";
 import { IncludeToggle } from "./include-toggle";
 import type { Decide } from "./review-employer";
@@ -98,7 +99,7 @@ function ParagraphCard({
               <option value="">A new fact</option>
               {role.facts.map((f) => (
                 <option key={f.id} value={f.id}>
-                  Same as: {clip(f.wordings[0]?.text ?? "", 90)}
+                  Same as: {clip(factLine(f), 90)}
                 </option>
               ))}
             </NativeSelect>

@@ -16,6 +16,7 @@ export const ACTION_LABELS: Record<RecordedAction, string> = {
   "eval-resume-writer": "Resume writer eval (script)",
   "snapshot-job": "Job snapshot (script)",
   "generate-resume": "Write a resume for a job",
+  "compact-record": "Tidy the career record",
   unknown: "Unattributed",
 };
 
@@ -35,6 +36,8 @@ export const STEP_LABELS: Record<LlmStep, string> = {
   "write-resume": "Write the resume",
   "review-resume": "Review the resume",
   "revise-resume": "Revise the resume after review",
+  "cluster-facts": "Find facts that repeat",
+  "describe-facts": "Write fact statements and details",
 };
 
 /** Rows keep working after a name is retired from the code, so unknown keys show as they are stored. */

@@ -50,8 +50,8 @@ export function record(): CareerRecord {
       { id: "skill2", name: "Figma", category: "Design", sources: [], provenance: mergeProvenance() },
     ],
     projects: [
-      { id: "proj1", name: "Ledger toy", description: "A payments ledger", url: "", technologies: ["SQL"], wordings: [], sources: [], provenance: mergeProvenance() },
-      { id: "proj2", name: "Garden app", description: "Plant watering reminders", url: "", technologies: ["Swift"], wordings: [], sources: [], provenance: mergeProvenance() },
+      { id: "proj1", name: "Ledger toy", description: "A payments ledger", url: "", technologies: ["SQL"], wordings: [], seen: [], sources: [], provenance: mergeProvenance() },
+      { id: "proj2", name: "Garden app", description: "Plant watering reminders", url: "", technologies: ["Swift"], wordings: [], seen: [], sources: [], provenance: mergeProvenance() },
     ],
     certifications: [{ id: "cert1", name: "AWS Solutions Architect", issuer: "Amazon", date: "2023", sources: [], provenance: mergeProvenance() }],
     education: [{ id: "edu1", institution: "State University", degree: "BSc", field: "Computer Science", start: "2014", end: "2018", details: "", sources: [], provenance: mergeProvenance() }],

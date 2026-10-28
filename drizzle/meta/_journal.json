@@ -204,6 +204,13 @@
       "when": 1792736768189,
       "tag": "0028_discovered_dismissed",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793178366814,
+      "tag": "0029_career_compactions",
+      "breakpoints": true
     }
   ]
 }

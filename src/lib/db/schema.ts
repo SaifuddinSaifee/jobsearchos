@@ -26,6 +26,7 @@ import type { IndexStatus } from "@/lib/resume/types";
 import type { GenerationChoices, GenerationSource, GenerationStatus, GenerationSteps, Requirement, ReviewOptions } from "@/lib/resume-writer/types";
 import type {
   CareerRecord,
+  CompactionStatus,
   ProposalStatus,
   RecordVersionReason,
   SourceKind,
@@ -830,6 +831,38 @@ export const careerProposals = pgTable(
 );
 
 /**
+ * One tidy of the career record: the record compacted to one statement per fact and one wording per slot, waiting for
+ * review. Doubles as its work queue, like `career_proposals`. Applying it saves a new version (reason "compact"), so it
+ * can be undone by restoring the version before.
+ */
+export const careerCompactions = pgTable(
+  "career_compactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    status: text("status").$type<CompactionStatus>().notNull().default("queued"),
+    /** The record version it was computed against. */
+    baseVersion: integer("base_version"),
+    result: jsonb("result").$type<unknown>(),
+    /** The user's answer to each question, by question id: the detail id to keep. */
+    answers: jsonb("answers").$type<Record<string, string>>().notNull().default({}),
+    appliedVersionId: uuid("applied_version_id"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while it runs. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("career_compactions_status_idx").on(t.status, t.createdAt),
+    uniqueIndex("career_compactions_one_open_idx")
+      .on(sql`(1)`)
+      .where(sql`${t.status} in ('queued', 'running', 'ready')`),
+  ],
+);
+
+/**
  * One row per model call, numbers only: which step and action it was for, the model and settings, token counts, cost,
  * time and outcome. Prompts and replies are never stored here (they live in Phoenix). Kept forever. The ids link a
  * call to what it was for but are deliberately not foreign keys, so usage history survives deleting or merging them.
@@ -866,6 +899,7 @@ export const llmCalls = pgTable(
     proposalId: uuid("proposal_id"),
     searchId: uuid("search_id"),
     queueItemId: uuid("queue_item_id"),
+    compactionId: uuid("compaction_id"),
   },
   (t) => [
     index("llm_calls_created_idx").on(t.createdAt),
@@ -876,6 +910,7 @@ export const llmCalls = pgTable(
 export type CareerRecordVersionRow = typeof careerRecordVersions.$inferSelect;
 export type CareerSourceRow = typeof careerSources.$inferSelect;
 export type CareerProposalRow = typeof careerProposals.$inferSelect;
+export type CareerCompactionRow = typeof careerCompactions.$inferSelect;
 
 export type LlmCallRow = typeof llmCalls.$inferSelect;
 export type NewLlmCall = typeof llmCalls.$inferInsert;
