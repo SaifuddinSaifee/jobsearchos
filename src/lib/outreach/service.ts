@@ -17,7 +17,7 @@ import { getFileBytes, putFile } from "@/lib/storage/local";
 import {
   attachmentOptions,
   attachmentRows,
-  baseDocumentId,
+  defaultDocumentId,
   checkRefs,
   checkSize,
   draftAttachments,
@@ -699,7 +699,7 @@ export async function getDraft(jobId: string, db: Db = defaultDb()): Promise<Dra
  * `bodyDoc`: the body with its formatting, from the composer's editor. When given, the plain-text `body` is made from it
  * (whatever `body` says), so the two always agree. Without it the body is plain text.
  * `contactId`: leave out to keep the current value, null to clear it. `attachments`: leave out to keep them, or the
- * full list in order ([] for none). A new draft starts with the base resume attached unless `attachments` says
+ * full list in order ([] for none). A new draft starts with the resume written for the job (else the base resume) attached unless `attachments` says
  * otherwise. Library documents are attached by reference; what actually goes out for each (its original file, or a PDF
  * made at send time) is settled when the email is sent.
  */
@@ -737,8 +737,8 @@ export async function saveDraft(
   if (chosen !== undefined) {
     await db.transaction((tx) => setAttachments(row.id, chosen, tx));
   } else if (!existing) {
-    const base = await baseDocumentId(db);
-    if (base) await setAttachments(row.id, [{ documentId: base }], db);
+    const start = await defaultDocumentId(jobId, db);
+    if (start) await setAttachments(row.id, [{ documentId: start }], db);
   }
   return toDraftDTO(row, db);
 }
@@ -1026,7 +1026,7 @@ export async function getOutreachData(jobId: string, db: Db = defaultDb()): Prom
     listContacts(jobId, db),
     getDraft(jobId, db),
     attachmentOptions(jobId, db),
-    baseDocumentId(db),
+    defaultDocumentId(jobId, db),
     listSent(jobId, db),
     sentToday(db),
     getColdEmailSettings(db),

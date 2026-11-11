@@ -148,6 +148,69 @@
       "when": 1791922763466,
       "tag": "0020_llm_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792000194533,
+      "tag": "0021_record_offers",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792003872895,
+      "tag": "0022_resume_generations",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792049592182,
+      "tag": "0023_llm_retries_work_ms",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792106508182,
+      "tag": "0024_review_choices",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792442275784,
+      "tag": "0025_job_apply_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792507321084,
+      "tag": "0026_queue_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792512102010,
+      "tag": "0027_discovered_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792736768189,
+      "tag": "0028_discovered_dismissed",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793178366814,
+      "tag": "0029_career_compactions",
+      "breakpoints": true
     }
   ]
 }

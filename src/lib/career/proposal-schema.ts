@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DETAIL_KINDS } from "./schema";
 
 // What a merge proposes, and what the user decides about it. Client-safe: no database or server imports, so the
 // review screen can use the same types and the same `resolveDecisions` as the server does when saving.
@@ -20,8 +21,11 @@ export const RoleSuggestionSchema = z.discriminatedUnion("to", [
 export const BULLET_WHY = ["lineage", "near", "model", "user"] as const;
 
 export const BulletSuggestionSchema = z.discriminatedUnion("to", [
-  /** The exact text is already a wording of this fact; only the source is added. */
-  z.object({ to: z.literal("known"), factId: z.string(), wordingId: z.string() }),
+  /**
+   * The fact already says this: the exact text is one of its wordings (`wordingId`), or it was folded in before, or it
+   * states no number or name the fact does not (`wordingId` null). Only the source is added.
+   */
+  z.object({ to: z.literal("known"), factId: z.string(), wordingId: z.string().nullable() }),
   /** Same accomplishment as this fact, new wording. */
   z.object({ to: z.literal("fact"), factId: z.string(), why: z.enum(BULLET_WHY) }),
   /** A new fact. `withKey` makes it the same new fact as another bullet of this role (that bullet's key). */
@@ -40,6 +44,29 @@ export const BulletItemSchema = z.object({
   text: z.string(),
   suggestion: BulletSuggestionSchema,
   removedBefore: z.boolean(),
+  /** For a bullet joining a fact: the numbers and names it states that the fact does not. */
+  adds: z.array(z.string()).optional(),
+});
+
+/** A detail as read from a wording, before it gets an id in the record. */
+export const DetailInputSchema = z.object({
+  kind: z.enum(DETAIL_KINDS),
+  text: z.string().min(1),
+  measures: z.string(),
+});
+
+/**
+ * The statement and details written for one fact this proposal changes: an existing fact (`factId`) gaining a bullet,
+ * or the new fact a bullet starts (`bulletKey`). `findings` are what `checkStatement` found; a statement with findings is
+ * not used.
+ */
+export const FactUpdateSchema = z.object({
+  factId: z.string().nullable(),
+  bulletKey: z.string().nullable(),
+  before: z.string(),
+  statement: z.string(),
+  findings: z.array(z.string()),
+  details: z.array(DetailInputSchema),
 });
 
 export const RoleItemSchema = z.object({
@@ -59,6 +86,8 @@ export const RoleItemSchema = z.object({
   dateNote: z.string().nullable(),
   removedBefore: z.boolean(),
   bullets: z.array(BulletItemSchema),
+  /** Names from the role's "Technologies:" lines, which are kept on the role rather than as facts. */
+  technologies: z.array(z.string()).default([]),
 });
 
 export const EmployerItemSchema = z.object({
@@ -131,6 +160,8 @@ export const ProposalSchema = z.object({
   achievements: z.array(AchievementItemSchema),
   /** Paragraphs of a cover letter. Absent in proposals made before cover letters were read. */
   paragraphs: z.array(ParagraphItemSchema).default([]),
+  /** Statements and details for the facts this proposal changes. Absent in proposals made before facts had them. */
+  facts: z.array(FactUpdateSchema).default([]),
 });
 
 /**
@@ -154,6 +185,8 @@ export type RoleSuggestion = z.infer<typeof RoleSuggestionSchema>;
 export type BulletSuggestion = z.infer<typeof BulletSuggestionSchema>;
 export type SimpleSuggestion = z.infer<typeof SimpleSuggestionSchema>;
 export type BulletItem = z.infer<typeof BulletItemSchema>;
+export type DetailInput = z.infer<typeof DetailInputSchema>;
+export type FactUpdate = z.infer<typeof FactUpdateSchema>;
 export type RoleItem = z.infer<typeof RoleItemSchema>;
 export type EmployerItem = z.infer<typeof EmployerItemSchema>;
 export type SkillItem = z.infer<typeof SkillItemSchema>;

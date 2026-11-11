@@ -1,6 +1,7 @@
 import type { IdGen } from "@/lib/documents/build";
 import { formatDates, mergeDates } from "./dates";
-import { normalizeEmployer, normalizeText, normalizeTitle } from "./normalize";
+import { fitSlots, slotsOf } from "./facts";
+import { normalizeEmployer, normalizeText, normalizeTitle, textKey } from "./normalize";
 import type {
   AchievementItem,
   BulletItem,
@@ -12,6 +13,7 @@ import type {
   ParagraphChoice,
   ParagraphItem,
   EmployerSuggestion,
+  FactUpdate,
   ProjectItem,
   Proposal,
   RoleItem,
@@ -21,7 +23,9 @@ import type {
 } from "./proposal-schema";
 import {
   mergeProvenance,
+  newFact,
   type CareerRecord,
+  type Detail,
   type Employer,
   type Fact,
   type Framing,
@@ -108,7 +112,7 @@ export function resolveDecisions(proposal: Proposal, decisions: Decisions, recor
         else if (target.to !== "new" && targetRole) {
           const wanted = target;
           const fact = targetRole.facts.find((f) => f.id === wanted.factId);
-          const wordingOk = wanted.to === "known" ? fact?.wordings.some((w) => w.id === wanted.wordingId) : true;
+          const wordingOk = wanted.to === "known" && wanted.wordingId ? fact?.wordings.some((w) => w.id === wanted.wordingId) : true;
           if (!fact || !wordingOk) target = { to: "new" };
         }
         return { item: b, target, included: roleIncluded && isIncluded(b, decisions) };
@@ -204,7 +208,13 @@ export function checkRefs(record: CareerRecord, resolved: Resolved): string[] {
 
 // ---- Applying ----
 
-export type ApplyContext = { sourceId: string; label: string; newId: IdGen };
+export type ApplyContext = {
+  sourceId: string;
+  label: string;
+  newId: IdGen;
+  /** Statements and details written for the facts this proposal touches (`Proposal.facts`). */
+  facts?: FactUpdate[];
+};
 
 export type ApplySummary = {
   employersAdded: number;
@@ -316,6 +326,7 @@ export function applyProposal(
         url: p.item.url,
         technologies: p.item.technologies,
         wordings: [],
+        seen: [],
         sources: [],
         provenance: mergeProvenance(),
       };
@@ -330,10 +341,12 @@ export function applyProposal(
     }
     addRef(project.sources, ref);
     for (const b of p.item.bullets) {
-      const existing = project.wordings.find((w) => w.text.trim() === b.text.trim());
+      const key = textKey(b.text);
+      const existing = project.wordings.find((w) => textKey(w.text) === key);
       const bref = { sourceId: ctx.sourceId, blockId: b.blockId };
       if (existing) addRef(existing.sources, bref);
-      else project.wordings.push(newWording(ctx, b.text, null, bref));
+      else if (!project.seen.includes(key)) project.wordings.push(newWording(ctx, b.text, null, bref));
+      if (!project.seen.includes(key)) project.seen.push(key);
     }
   }
 
@@ -414,18 +427,18 @@ export function applyProposal(
       const wantedRole = p.choice.roleId;
       const role = next.employers.flatMap((e) => e.roles).find((r) => r.id === wantedRole);
       if (!role) continue;
-      const same = role.facts.flatMap((f) => f.wordings).find((w) => w.text.trim() === text.trim());
-      if (same) {
-        addRef(same.sources, ref);
+      const seen = role.facts.find((f) => f.seen.includes(textKey(text)) || f.wordings.some((w) => w.text.trim() === text.trim()));
+      if (seen) {
+        knownAgain(seen, text, ref);
         summary.alreadyKnown++;
         continue;
       }
       const wording: Wording = { ...newWording(ctx, text, null, ref), form: "paragraph" };
       const wantedFact = p.choice.factId;
       const fact = wantedFact ? role.facts.find((f) => f.id === wantedFact) : undefined;
-      if (fact) fact.wordings.push(wording);
+      if (fact) fitSlots(addDetails(fact, [], [wording], ctx), slotsOf(role.framings));
       else {
-        role.facts.push({ id: ctx.newId(), wordings: [wording], provenance: mergeProvenance() });
+        role.facts.push(fitSlots(newFact(ctx.newId(), [wording]), slotsOf(role.framings)));
         summary.factsAdded++;
       }
       summary.storiesAdded++;
@@ -479,6 +492,7 @@ function applyRole(employer: Employer, rr: ResolvedRole, ctx: ApplyContext, targ
       current: item.current,
       location: item.location,
       dateNotes: [],
+      technologies: [],
       framings: [],
       facts: [],
       sources: [],
@@ -498,6 +512,9 @@ function applyRole(employer: Employer, rr: ResolvedRole, ctx: ApplyContext, targ
     if (!role.location && item.location && !userEdited(role.provenance, "location")) role.location = item.location;
   }
   addRef(role.sources, ref);
+  for (const t of item.technologies) {
+    if (!role.technologies.some((x) => normalizeText(x) === normalizeText(t))) role.technologies.push(t);
+  }
 
   let framing: Framing | undefined;
   if (rr.target.to === "same" && rr.target.framingId) {
@@ -532,28 +549,60 @@ function applyRole(employer: Employer, rr: ResolvedRole, ctx: ApplyContext, targ
     const bref: SourceRef = { sourceId: ctx.sourceId, blockId: rb.item.blockId };
     const text = rb.item.text;
 
-    // Looked up again on the record being written, so the same text is never added twice.
-    const same = role.facts.flatMap((f) => f.wordings).find((w) => w.text.trim() === text.trim());
-    if (same) {
-      addRef(same.sources, bref);
+    const wantedFact = factId(rb.target);
+    // Looked up again on the record being written, so the same text is never added twice: as a wording, as a text
+    // folded into a fact before, or as a point that says nothing its fact does not already say.
+    const seen =
+      role.facts.find((f) => f.seen.includes(textKey(text)) || f.wordings.some((w) => w.text.trim() === text.trim())) ??
+      (rb.target.to === "known" ? role.facts.find((f) => f.id === wantedFact) : undefined);
+    if (seen) {
+      knownAgain(seen, text, bref);
       summary.alreadyKnown++;
       continue;
     }
-    const wantedFact = factId(rb.target);
     const joined = rb.target.to === "new" && rb.target.withKey ? created.get(rb.target.withKey) : undefined;
     const fact: Fact | undefined = joined ?? (wantedFact ? role.facts.find((f) => f.id === wantedFact) : undefined);
+    const update = ctx.facts?.find((u) => (fact && !joined ? u.factId === fact.id : u.factId === null && u.bulletKey === (rb.target.to === "new" && rb.target.withKey ? rb.target.withKey : rb.item.key)));
+    const wording = newWording(ctx, text, framing.id, bref);
     if (fact) {
-      fact.wordings.push(newWording(ctx, text, framing.id, bref));
+      addDetails(fact, update?.details ?? [], [wording], ctx);
+      if (update) setStatement(fact, update);
+      fitSlots(fact, slotsOf(role.framings));
     } else {
-      const made: Fact = {
-        id: ctx.newId(),
-        wordings: [newWording(ctx, text, framing.id, bref)],
-        provenance: mergeProvenance(),
-      };
-      role.facts.push(made);
+      const made = newFact(ctx.newId(), []);
+      addDetails(made, update?.details ?? [], [wording], ctx);
+      if (update) setStatement(made, update);
+      role.facts.push(fitSlots(made, slotsOf(role.framings)));
       created.set(rb.item.key, made);
       summary.factsAdded++;
     }
     summary.wordingsAdded++;
   }
+}
+
+/** A text the fact already holds came again: only where it was read is added. */
+function knownAgain(fact: Fact, text: string, ref: SourceRef) {
+  const wording = fact.wordings.find((w) => w.text.trim() === text.trim());
+  if (wording) addRef(wording.sources, ref);
+  addRef(fact.sources, ref);
+  const key = textKey(text);
+  if (!fact.seen.includes(key)) fact.seen.push(key);
+}
+
+/** Adds wordings and the details read from them (each detail must be in one of the fact's wordings). */
+function addDetails(fact: Fact, details: FactUpdate["details"], wordings: Wording[], ctx: ApplyContext): Fact {
+  fact.wordings.push(...wordings);
+  for (const w of wordings) for (const s of w.sources) addRef(fact.sources, s);
+  for (const d of details) {
+    if (fact.details.some((x) => x.kind === d.kind && normalizeText(x.text) === normalizeText(d.text))) continue;
+    const detail: Detail = { id: ctx.newId(), kind: d.kind, text: d.text, measures: d.measures, sources: wordings.flatMap((w) => w.sources), provenance: mergeProvenance() };
+    fact.details.push(detail);
+  }
+  return fact;
+}
+
+/** A written statement replaces the old one, unless the user wrote that one or the new one failed its check. */
+function setStatement(fact: Fact, update: FactUpdate) {
+  if (!update.statement.trim() || update.findings.length > 0 || fact.provenance.user.includes("statement")) return;
+  fact.statement = update.statement.trim();
 }

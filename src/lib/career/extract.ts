@@ -3,6 +3,7 @@ import type { DocJSON } from "@/lib/documents/build";
 import { parseDates } from "@/lib/documents/convert/doc-to-profile";
 import { children, plainText, sectionsOf, textOf } from "@/lib/documents/read";
 import { cleanDatesText, formatDates } from "./dates";
+import { splitOutsideBrackets } from "./normalize";
 
 // Reads a source into plain pieces for merging. Unlike `docToProfile`, this keeps the id of every role, project,
 // skills line and bullet, so a wording in the record can point back at the exact block it came from.
@@ -104,12 +105,7 @@ const listBullets = (section: DocJSON) =>
     .filter((c) => c.type === "bulletList")
     .flatMap((l) => bulletsOf(l));
 
-function splitItems(text: string): string[] {
-  return text
-    .split(/\s*,\s*/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+const splitItems = splitOutsideBrackets;
 
 /** An editor document as pieces for the career record. No model call. Custom sections and summaries are not read. */
 export function extractFromDoc(doc: DocJSON): SourceExtract {

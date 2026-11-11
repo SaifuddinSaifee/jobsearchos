@@ -9,7 +9,6 @@ import {
   documents,
   documentVersions,
   profileVersions,
-  resumeIndexes,
   type CareerProposalRow,
   type CareerSourceRow,
 } from "@/lib/db/schema";
@@ -25,7 +24,8 @@ import { normalizeEmployer } from "./normalize";
 import { modelClassifier, type Classifier } from "./cover";
 import { modelGrouper, type Grouper } from "./group";
 import { buildProposal } from "./proposal";
-import { classifyProposalParagraphs, groupProposal } from "./regroup";
+import { classifyProposalParagraphs, describeProposal, groupProposal } from "./regroup";
+import { modelDescriber, type Describer } from "./describe";
 import { isNothingNew } from "./nothing-new";
 import { currentRecord, getLatestRecord } from "./service";
 
@@ -36,7 +36,7 @@ import { currentRecord, getLatestRecord } from "./service";
 export const PROPOSAL_STALE_SECONDS = 120;
 export const PROPOSAL_MAX_ATTEMPTS = 3;
 /** Shortest text worth sending to the model to be structured. */
-const MIN_TEXT_TO_STRUCTURE = 80;
+export const MIN_TEXT_TO_STRUCTURE = 80;
 
 /** Lower runs first. Cover letters go last so their stories have roles to attach to. */
 export const PRIORITY = { base: 0, resume: 1, profile: 2, linkedin: 3, coverLetter: 4 } as const;
@@ -58,12 +58,27 @@ export const profileIsEmpty = (p: Profile) =>
   p.certifications.length === 0 &&
   p.achievements.length === 0;
 
+export type EnqueueOptions = {
+  /** Apply it as suggested once it is prepared, instead of waiting for review (the one-click add). */
+  autoApply?: boolean;
+  /** The user asked for it by hand: queue it even if the same content was left out before. */
+  force?: boolean;
+};
+
 /**
  * Registers a source (once per document version, profile version or content) and queues a proposal for it. A source
- * whose content is already in the record, or that the user chose to leave out, is skipped; a proposal that is
- * already open, or that the user set aside to review later, is left alone; one that failed is queued again; one that was undone or superseded starts a new one.
+ * whose content is already in the record is skipped, and so is one the user chose to leave out unless `force`; a
+ * proposal that is already open is left alone (but takes `autoApply`); one that failed, or that the user set aside
+ * to review later, is queued again; one that was undone or superseded starts a new one.
  */
-export async function enqueueSource(source: NewSource, priority: number, db: DbOrTx, existingSourceId?: string): Promise<EnqueueOutcome> {
+export async function enqueueSource(
+  source: NewSource,
+  priority: number,
+  db: DbOrTx,
+  existingSourceId?: string,
+  opts: EnqueueOptions = {},
+): Promise<EnqueueOutcome> {
+  const autoApply = opts.autoApply ?? false;
   const [done] = await db
     .select({ id: careerSources.id, status: careerProposals.status })
     .from(careerSources)
@@ -72,7 +87,7 @@ export async function enqueueSource(source: NewSource, priority: number, db: DbO
       and(
         eq(careerSources.kind, source.kind!),
         eq(careerSources.contentSha256, source.contentSha256),
-        inArray(careerProposals.status, ["applied", "dismissed"]),
+        inArray(careerProposals.status, opts.force ? ["applied"] : ["applied", "dismissed"]),
       ),
     )
     .limit(1);
@@ -106,22 +121,24 @@ export async function enqueueSource(source: NewSource, priority: number, db: DbO
     .where(eq(careerProposals.sourceId, row.id))
     .orderBy(desc(careerProposals.createdAt))
     .limit(1);
-  if (latest && ["queued", "running", "ready", "skipped"].includes(latest.status)) {
+  if (latest && ["queued", "running", "ready"].includes(latest.status)) {
+    if (autoApply && !latest.autoApply) await db.update(careerProposals).set({ autoApply: true, updatedAt: new Date() }).where(eq(careerProposals.id, latest.id));
     return { status: "open", proposalId: latest.id, sourceId: row.id };
   }
-  if (latest?.status === "failed") {
+  if (latest?.status === "skipped" && !opts.force) return { status: "open", proposalId: latest.id, sourceId: row.id };
+  if (latest?.status === "failed" || latest?.status === "skipped") {
     await db
       .update(careerProposals)
-      .set({ status: "queued", error: null, note: null, attempts: 0, startedAt: null, finishedAt: null, updatedAt: new Date() })
+      .set({ status: "queued", autoApply, error: null, note: null, attempts: 0, startedAt: null, finishedAt: null, updatedAt: new Date() })
       .where(eq(careerProposals.id, latest.id));
     return { status: "queued", proposalId: latest.id, sourceId: row.id };
   }
-  const [created] = await db.insert(careerProposals).values({ sourceId: row.id, priority }).returning();
+  const [created] = await db.insert(careerProposals).values({ sourceId: row.id, priority, autoApply }).returning();
   return { status: "queued", proposalId: created.id, sourceId: row.id };
 }
 
 /** Queues the latest version of a resume or cover letter. Anything else (emails, deleted documents) is ignored. */
-export async function enqueueDocumentSource(documentId: string, db: DbOrTx = defaultDb()): Promise<EnqueueOutcome | null> {
+export async function enqueueDocumentSource(documentId: string, db: DbOrTx = defaultDb(), opts: EnqueueOptions = {}): Promise<EnqueueOutcome | null> {
   const [doc] = await db.select().from(documents).where(and(eq(documents.id, documentId), isNull(documents.deletedAt)));
   if (!doc || (doc.kind !== "resume" && doc.kind !== "cover_letter")) return null;
   const [version] = await db
@@ -152,38 +169,9 @@ export async function enqueueDocumentSource(documentId: string, db: DbOrTx = def
     },
     priority,
     db,
+    undefined,
+    opts,
   );
-}
-
-/**
- * Offers a document that was just created or saved to the career record, once a record exists (until then, building
- * the record covers every document). A resume that is still being structured is offered when that is done, a
- * document with nothing to read is left alone, and an older pending version is replaced by this one. The review
- * decides what, if anything, joins the record.
- */
-export async function offerDocumentToRecord(documentId: string, db: DbOrTx = defaultDb()): Promise<EnqueueOutcome | null> {
-  if (!(await getLatestRecord(db))) return null;
-  const [doc] = await db.select().from(documents).where(and(eq(documents.id, documentId), isNull(documents.deletedAt)));
-  if (!doc || (doc.kind !== "resume" && doc.kind !== "cover_letter")) return null;
-  const [version] = await db
-    .select()
-    .from(documentVersions)
-    .where(eq(documentVersions.documentId, documentId))
-    .orderBy(desc(documentVersions.version))
-    .limit(1);
-  if (!version) return null;
-
-  if (doc.kind === "cover_letter") {
-    if (extractCoverLetter(version.content).paragraphs.length === 0) return null;
-  } else {
-    const [index] = await db.select({ status: resumeIndexes.status }).from(resumeIndexes).where(eq(resumeIndexes.documentVersionId, version.id));
-    if (index && (index.status === "queued" || index.status === "running")) return null;
-    if (hasStructure(version.content)) {
-      const x = extractFromDoc(version.content);
-      if (x.roles.length + x.projects.length + x.skills.length + x.education.length + x.certifications.length + x.achievements.length === 0) return null;
-    } else if (version.plainText.trim().length < MIN_TEXT_TO_STRUCTURE) return null;
-  }
-  return enqueueDocumentSource(documentId, db);
 }
 
 /** Queues the latest saved Profile, unless it is still empty. */
@@ -212,20 +200,30 @@ export async function offerProfileToRecord(db: DbOrTx = defaultDb()): Promise<En
 }
 
 /**
- * Queues every library resume (base first, then newest first) and the Profile. Safe to run again: what is already
- * in the record or open for review is left alone.
+ * Queues the resumes and cover letters the user chose for the record: the base resume first, then the others newest
+ * first (cover letters go last on their own, by priority). With `autoApply` each is added as suggested once prepared;
+ * otherwise each waits for review. A choice of "Not now" or "never" on a document is cleared, since adding it is the
+ * newer answer. Returns what happened to each, by outcome.
  */
-export async function startBuild(db: DbOrTx = defaultDb()): Promise<{ queued: number; skipped: number }> {
+export async function addDocumentsToRecord(
+  documentIds: string[],
+  opts: { autoApply?: boolean } = {},
+  db: DbOrTx = defaultDb(),
+): Promise<{ queued: number; open: number; skipped: number }> {
+  if (documentIds.length === 0) return { queued: 0, open: 0, skipped: 0 };
   const rows = await db
     .select({ id: documents.id })
     .from(documents)
-    .where(and(isNull(documents.deletedAt), inArray(documents.kind, ["resume", "cover_letter"])))
+    .where(and(inArray(documents.id, documentIds), isNull(documents.deletedAt), inArray(documents.kind, ["resume", "cover_letter"])))
     .orderBy(desc(documents.isBase), desc(documents.writtenOn), desc(documents.createdAt));
-  const outcomes: (EnqueueOutcome | null)[] = [];
-  for (const r of rows) outcomes.push(await enqueueDocumentSource(r.id, db));
-  outcomes.push(await enqueueProfileSource(db));
-  const real = outcomes.filter((o): o is EnqueueOutcome => o !== null);
-  return { queued: real.filter((o) => o.status === "queued").length, skipped: real.filter((o) => o.status === "skipped").length };
+  const outcomes: EnqueueOutcome[] = [];
+  for (const r of rows) {
+    await db.update(documents).set({ recordChoice: null, recordChoiceVersionId: null }).where(eq(documents.id, r.id));
+    const out = await enqueueDocumentSource(r.id, db, { autoApply: opts.autoApply, force: true });
+    if (out) outcomes.push(out);
+  }
+  const count = (status: EnqueueOutcome["status"]) => outcomes.filter((o) => o.status === status).length;
+  return { queued: count("queued"), open: count("open"), skipped: count("skipped") };
 }
 
 /**
@@ -306,6 +304,8 @@ export type ProcessDeps = {
   grouper?: Grouper;
   /** Labels the paragraphs of a cover letter. Injected for the same reason. */
   classifier?: Classifier;
+  /** Writes the statements and details of the facts a proposal changes. Injected for the same reason. */
+  describer?: Describer;
   now?: Date;
 };
 
@@ -384,15 +384,17 @@ export async function processProposal(id: string, deps: ProcessDeps = {}): Promi
     // Only bullets that matched nothing exactly are put to the model, and only for roles joining one already recorded.
     const grouper = deps.grouper ?? modelGrouper;
     const grouped = await groupProposal(built, current.record, grouper);
-    const proposal = await classifyProposalParagraphs(grouped, current.record, deps.classifier ?? modelClassifier, grouper);
+    const classified = await classifyProposalParagraphs(grouped, current.record, deps.classifier ?? modelClassifier, grouper);
     // Saving would only record where things were read, so there is nothing to review.
-    if (isNothingNew(proposal, current.record)) {
+    if (isNothingNew(classified, current.record)) {
+      const proposal = classified;
       await db
         .update(careerProposals)
         .set({ status: "dismissed", proposal, baseVersion: current.version, note: "Nothing new in this source, so it was left out without asking.", error: null, finishedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(careerProposals.id, id), eq(careerProposals.status, "running")));
       return;
     }
+    const proposal = await describeProposal(classified, current.record, deps.describer ?? modelDescriber);
     await db
       .update(careerProposals)
       .set({ status: "ready", proposal, baseVersion: current.version, note, error: null, finishedAt: new Date(), updatedAt: new Date() })

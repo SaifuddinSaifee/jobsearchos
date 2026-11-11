@@ -1,0 +1,2 @@
+ALTER TABLE "resume_generations" ADD COLUMN "choices" jsonb DEFAULT '{"framings":{},"wordings":{}}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "resume_generations" ADD COLUMN "review_options" jsonb DEFAULT '{"roles":[],"clashes":[]}'::jsonb NOT NULL;

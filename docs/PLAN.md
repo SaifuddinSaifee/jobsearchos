@@ -231,6 +231,11 @@ source_runs        (id, source_id, started_at, finished_at, found, new, errors)
 
 ## Stage 4: Resume, cover letter and cold email generation (about 1.5–2 weeks)
 
+> **Status:** the resume is built, on request from a job, written from the career record rather than the profile. See
+> [generate-resume.md](generate-resume.md) for what it does and how it was built. The cover letter and cold email are next;
+> the accuracy-check idea below was replaced by tying every bullet to the record facts it came from, and by the match
+> and gaps panel planned after it.
+
 **Goal:** tailored, accurate content that is quick to copy into the user's template.
 
 - Written by **MiniMax M3** (`WRITER_MODEL`). Generation input: profile version + job + generation instructions (+ retrieved references once Stage 5 lands)

@@ -8,7 +8,7 @@ import {
   localToday,
   relativeDays,
 } from "@/lib/jobs/format";
-import { safeHref, sourceLabel } from "@/lib/jobs/links";
+import { applyNoteHref, safeHref, sourceLabel } from "@/lib/jobs/links";
 import { STATUSES, TABS, isClosed, statusRank, tabCounts } from "@/lib/jobs/status";
 import { resolveShortcut, type KeyInfo } from "@/components/jobs/table/shortcuts";
 
@@ -83,6 +83,14 @@ describe("links", () => {
     expect(safeHref("http://a.com")).toBe("http://a.com/");
     for (const bad of ["javascript:alert(1)", "data:text/html,<b>", "/relative", "garbage", "", null, undefined, "ftp://x"]) {
       expect(safeHref(bad)).toBeNull();
+    }
+  });
+  it("turns an apply note's link into a mailto or a web link, and nothing else", () => {
+    expect(applyNoteHref("jobs@acme.com")).toEqual({ href: "mailto:jobs@acme.com", email: true });
+    expect(applyNoteHref(" mailto:jobs@acme.com ")).toEqual({ href: "mailto:jobs@acme.com", email: true });
+    expect(applyNoteHref("https://forms.gle/abc")).toEqual({ href: "https://forms.gle/abc", email: false });
+    for (const bad of ["javascript:alert(1)", "mailto:", "jobs at acme", "", "a@b"]) {
+      expect(applyNoteHref(bad)).toBeNull();
     }
   });
   it("labels sources", () => {

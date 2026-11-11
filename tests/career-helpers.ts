@@ -28,6 +28,10 @@ export function profileWith(experience: Partial<Profile["experience"][number]>[]
 export function fact(id: string, wordings: [string, string, string[]?][]): Fact {
   return {
     id,
+    statement: "",
+    details: [],
+    sources: [],
+    seen: [],
     provenance: mergeProvenance(),
     wordings: wordings.map(([wid, text, blocks]) => ({
       id: wid,
@@ -49,6 +53,7 @@ export function role(over: Partial<Role> & { title?: string } = {}): Role {
     current: false,
     location: "",
     dateNotes: [],
+    technologies: [],
     framings: [
       { id: "fr1", title, angle: "Engineering", targetRoles: [], sources: [{ sourceId: SOURCE_A, blockId: null }], provenance: mergeProvenance() },
     ],

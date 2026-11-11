@@ -78,7 +78,16 @@ export const GenerationInstructionsSchema = z.object({
       maxChars: z.number().int().positive().nullable(),
     }),
   ),
+  /**
+   * Show what the job asks for, lined up against the career record, before writing a resume. On unless this is false
+   * (rows saved before this existed have no value); turned off from that screen ("Don't show this step again").
+   */
+  reviewRequirements: z.boolean().optional(),
 });
+
+/** Whether to show the requirements for review before writing a resume. */
+export const reviewsRequirements = (g: Pick<GenerationInstructions, "reviewRequirements"> | null | undefined): boolean =>
+  g?.reviewRequirements !== false;
 
 export type Profile = z.infer<typeof ProfileSchema>;
 export type Preferences = z.infer<typeof PreferencesSchema>;

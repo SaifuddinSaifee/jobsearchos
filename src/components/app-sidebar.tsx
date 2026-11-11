@@ -4,6 +4,7 @@ import { Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
+import { ResumeTracker } from "@/components/resume-writer/resume-tracker";
 import { CareerTracker } from "@/components/career/career-tracker";
 import { NAV, isActive } from "@/components/nav";
 import { QueueTracker } from "@/components/queue/queue-tracker";
@@ -48,6 +49,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <QueueTracker />
         <SearchTracker />
+        <ResumeTracker />
         <CareerTracker />
         <SidebarMenu>
           <SidebarMenuItem>

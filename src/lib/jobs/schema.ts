@@ -12,6 +12,21 @@ export const AdditionalDetailSchema = z.object({
 });
 export type AdditionalDetail = z.infer<typeof AdditionalDetailSchema>;
 
+/**
+ * What a note on applying is about: where or how to send the application (a form, an email address, "do not apply on
+ * this site"), what to send or put in it, a deadline, or anything else the posting asks of applicants.
+ */
+export const APPLY_NOTE_KINDS = ["where", "include", "deadline", "other"] as const;
+export type ApplyNoteKind = (typeof APPLY_NOTE_KINDS)[number];
+
+/** One instruction from the posting on how to apply, with the link or email address it names ("" if none). */
+export const ApplyNoteSchema = z.object({
+  kind: z.enum(APPLY_NOTE_KINDS),
+  text: z.string(),
+  link: z.string(),
+});
+export type ApplyNote = z.infer<typeof ApplyNoteSchema>;
+
 export const JobExtractionSchema = z.object({
   company: z.string(),
   title: z.string(),
@@ -24,6 +39,7 @@ export const JobExtractionSchema = z.object({
   salaryPeriod: z.string(),
   postedAt: z.string(),
   applicationUrl: z.string(),
+  applyNotes: z.array(ApplyNoteSchema),
   aboutCompany: z.string(),
   responsibilities: z.array(z.string()),
   requirements: z.object({
@@ -49,6 +65,7 @@ export const JobEditSchema = JobExtractionSchema.extend({
   salaryPeriod: z.string().max(20),
   postedAt: z.string().max(10),
   applicationUrl: z.string().max(2_000),
+  applyNotes: z.array(z.object({ kind: z.enum(APPLY_NOTE_KINDS), text: Line, link: z.string().max(2_000) })).max(30),
   aboutCompany: z.string().max(20_000),
   responsibilities: Lines,
   requirements: z.object({ required: Lines, preferred: Lines }),
@@ -108,8 +125,8 @@ export const JobDraftSchema = JobExtractionSchema.extend({
   rawFileId: z.string().nullable(),
   rawText: z.string(),
   /** The model's output before the user's edits (stored in the snapshot). */
-  /** Optional: model output from before additional details existed has no such field. */
-  normalized: JobExtractionSchema.partial({ additionalDetails: true }),
+  /** Optional: model output from before additional details or apply notes existed has no such field. */
+  normalized: JobExtractionSchema.partial({ additionalDetails: true, applyNotes: true }),
 });
 export type JobDraft = z.infer<typeof JobDraftSchema>;
 
@@ -126,6 +143,7 @@ export function emptyExtraction(): JobExtraction {
     salaryPeriod: "",
     postedAt: "",
     applicationUrl: "",
+    applyNotes: [],
     aboutCompany: "",
     responsibilities: [],
     requirements: { required: [], preferred: [] },

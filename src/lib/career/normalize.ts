@@ -40,6 +40,41 @@ export function normalizeTitle(title: string): string {
     .trim();
 }
 
+/** A list split on commas, except the ones inside brackets: "AWS (EC2, S3), Docker" is two items, not four. */
+export function splitOutsideBrackets(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") depth++;
+    else if ((ch === ")" || ch === "]") && depth > 0) depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+/** An item whose brackets do not match, mended: a bracket left open is closed, a closing one with no opener is dropped. */
+export function balanceBrackets(text: string): string {
+  let out = "";
+  let open = 0;
+  for (const ch of text) {
+    if (ch === "(") open++;
+    else if (ch === ")") {
+      if (open === 0) continue;
+      open--;
+    }
+    out += ch;
+  }
+  return `${out.trimEnd()}${")".repeat(open)}`.replace(/\(\s*\)/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** The same skill under any word order or separator: "TypeScript/JavaScript" and "JavaScript/TypeScript" share a key. */
+export const skillKey = (name: string): string => normalizeText(name).split(" ").sort().join(" ");
+
 const STOP = new Set(["a", "an", "the", "of", "and", "or", "for", "to", "in", "at", "on", "with"]);
 
 export function tokens(value: string, normalize: (v: string) => string = normalizeText): Set<string> {
@@ -66,3 +101,6 @@ export function hash8(value: string): string {
   }
   return h.toString(16).padStart(8, "0");
 }
+
+/** The key a wording's text is recognised by when it comes back: same words apart from case and punctuation. */
+export const textKey = (text: string): string => hash8(normalizeText(text));

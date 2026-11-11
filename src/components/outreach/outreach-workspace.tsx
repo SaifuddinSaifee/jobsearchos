@@ -43,7 +43,7 @@ export function OutreachWorkspace({ job, initial }: { job: JobHead; initial: Out
   const [reuseId, setReuseId] = useState<string | null>(null);
   const [options, setOptions] = useState<AttachmentOption[]>(initial.options);
   const defaultAttachments = (list: AttachmentOption[]) => list.filter((o) => o.documentId !== null && o.documentId === initial.defaultAttachmentId);
-  // A saved draft keeps what it had (including nothing); a new one starts with the base resume attached.
+  // A saved draft keeps what it had (including nothing); a new one starts with the job's resume (else the base resume) attached.
   const [attachments, setAttachments] = useState<DraftAttachmentDTO[]>(() => (initial.draft ? initial.draft.attachments : defaultAttachments(initial.options)));
   // The attachments as they will really go out, made when the send dialog opens (a PDF has no size until it exists).
   const [prepared, setPrepared] = useState<DraftAttachmentDTO[] | null>(null);

@@ -68,6 +68,19 @@ describe("extractForDocument", () => {
     expect(out.text).toContain("Staff Engineer at Acme");
   });
 
+  it("reads a markdown file, keeping headings and bullets", async () => {
+    const md = "# Jane Doe\n[jane@x.com](mailto:jane@x.com) | **Berlin**\n\n## Talks and Writing\n- Gave a *great* talk\n- Wrote [a post](https://x.com)\n";
+    const out = await extractForDocument(Buffer.from(md), "jane.md", "", { markdown: true });
+    expect(out).toMatchObject({ kind: "md", mime: "text/markdown" });
+    expect(out.text).toBe("Jane Doe\njane@x.com | Berlin\n\nTalks and Writing\n- Gave a great talk\n- Wrote a post");
+    expect([...out.headings]).toEqual(["Talks and Writing"]);
+  });
+
+  it("only reads markdown when asked, and refuses an empty one", async () => {
+    await expect(extractForDocument(Buffer.from("# Hi"), "a.md", "text/markdown")).rejects.toThrow(/PDF and DOCX/);
+    await expect(extractForDocument(Buffer.from("---\n"), "a.md", "", { markdown: true })).rejects.toThrow(/No text/);
+  });
+
   it("refuses other types and oversize files", async () => {
     await expect(extractForDocument(Buffer.from("x"), "notes.txt", "text/plain")).rejects.toThrow(/PDF and DOCX/);
     await expect(extractForDocument(Buffer.alloc(11 * 1024 * 1024), "big.pdf", "application/pdf")).rejects.toThrow(/10 MB/);
@@ -142,7 +155,7 @@ describe("createFromUpload", () => {
   });
 
   it("rejects what it cannot read, without leaving anything behind", async () => {
-    await expect(createFromUpload({ bytes: Buffer.from("hello"), name: "a.txt", mime: "text/plain", kind: "resume" }, { db })).rejects.toThrow(/PDF and DOCX/);
+    await expect(createFromUpload({ bytes: Buffer.from("hello"), name: "a.txt", mime: "text/plain", kind: "resume" }, { db })).rejects.toThrow(/PDF, DOCX and Markdown/);
     expect(await db.select().from(documents)).toHaveLength(0);
     expect(await db.select().from(files)).toHaveLength(0);
   });

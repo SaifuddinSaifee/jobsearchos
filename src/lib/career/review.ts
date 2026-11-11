@@ -82,12 +82,15 @@ export async function regroupRole(
   return { proposal: next, decisions: nextDecisions };
 }
 
-/** Leaves a source out of the record. The next one is prepared. */
+/**
+ * Leaves a source out of the record: one waiting for review, queued, failed, or set aside before review. The next one
+ * is prepared. A document left out is not offered again, but can still be added by hand.
+ */
 export async function dismissProposal(proposalId: string, db: DbOrTx = defaultDb()): Promise<void> {
   const rows = await db
     .update(careerProposals)
     .set({ status: "dismissed", finishedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(careerProposals.id, proposalId), inArray(careerProposals.status, ["ready", "queued", "failed"])))
+    .where(and(eq(careerProposals.id, proposalId), inArray(careerProposals.status, ["ready", "queued", "failed", "skipped"])))
     .returning({ id: careerProposals.id });
   if (rows.length === 0) throw new ProposalError("This source can no longer be left out.");
 }
@@ -192,7 +195,7 @@ export async function applyReviewedProposal(
   const { record, summary } = applyProposal(
     current.record,
     resolved,
-    { sourceId: source.id, label: source.label, newId: opts.newId ?? newId },
+    { sourceId: source.id, label: source.label, newId: opts.newId ?? newId, facts: proposal.facts },
     proposal.targetRole,
   );
 
@@ -220,6 +223,30 @@ export async function applyReviewedProposal(
       throw new ProposalError("Your record changed while you were saving. Reload and try again.", true);
     }
     throw err;
+  }
+}
+
+/**
+ * The second half of a one-click add: once a proposal marked `autoApply` is prepared, it is applied as suggested,
+ * without waiting for review. Returns true when it was applied. If it cannot be (the record changed under it and it
+ * was queued again, or anything else went wrong), it is left as it is: queued again, or waiting for review.
+ */
+export async function applyIfAutomatic(proposalId: string, opts: { db?: Db; newId?: IdGen } = {}): Promise<boolean> {
+  const db = opts.db ?? defaultDb();
+  const row = await getProposalRow(proposalId, db);
+  if (!row || row.status !== "ready" || !row.autoApply) return false;
+  try {
+    await applyReviewedProposal(proposalId, opts);
+    return true;
+  } catch (err) {
+    if (!(err instanceof ProposalError)) console.error("[career] could not add a source on its own:", err instanceof Error ? err.message : err);
+    if (!(err instanceof ProposalError && err.stale)) {
+      await db
+        .update(careerProposals)
+        .set({ note: "This could not be added on its own, so it waits for your review.", updatedAt: new Date() })
+        .where(and(eq(careerProposals.id, proposalId), eq(careerProposals.status, "ready")));
+    }
+    return false;
   }
 }
 

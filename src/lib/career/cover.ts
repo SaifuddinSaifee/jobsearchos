@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { env } from "@/lib/env";
 import { chatStructured } from "@/lib/llm/structured";
 import { PARAGRAPH_KINDS, type ParagraphKind } from "./proposal-schema";
 import { MAX_ROLES_SHOWN, type RoleChoice } from "./role-choices";
@@ -74,7 +75,7 @@ export function makeClassifier(chat: typeof chatStructured = chatStructured): Cl
     let last: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 3000, step: "classify-cover-paragraphs" });
+        const result = await chat(schema, { system: SYSTEM, user }, { maxTokens: 3000, step: "classify-cover-paragraphs", model: env().RECORD_MODEL });
         return readClasses(result.items, paragraphs, shown);
       } catch (err) {
         last = err;

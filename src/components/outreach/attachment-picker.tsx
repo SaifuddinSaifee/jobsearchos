@@ -41,8 +41,8 @@ function Size({ a }: { a: AttachmentOption }) {
 
 /**
  * What goes with the email: any number of library resumes and cover letters (the base resume is chosen by default),
- * a new resume uploaded for this job (stored, filed under the job and indexed), and other files uploaded for this
- * email alone (a proposal, a writing sample), which go exactly as they are.
+ * a new resume uploaded for this job (stored, filed under the job), and other files uploaded for this email alone (a
+ * proposal, a writing sample), which go exactly as they are.
  */
 export function AttachmentPicker({
   jobId,
@@ -91,7 +91,7 @@ export function AttachmentPicker({
       const data = await post("/api/outreach/resume", file);
       onResumeUploaded(data.resume as AttachmentOption);
       void queryClient.invalidateQueries({ queryKey: RESUME_INDEXES_KEY });
-      toast.success("Resume uploaded and attached. It is saved in your library and being indexed for search.");
+      toast.success("Resume uploaded and attached. It is saved in your library.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {

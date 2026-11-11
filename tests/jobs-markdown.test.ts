@@ -15,6 +15,7 @@ const job: MarkdownJob = {
   source: "greenhouse",
   postingUrl: "https://boards.greenhouse.io/acme/jobs/1",
   applyUrl: "https://boards.greenhouse.io/acme/jobs/1/apply",
+  applyNotes: [],
   responsibilities: ["Build APIs", "Own\non-call"],
   requirements: { required: ["3y Go", "SQL"], preferred: ["Kafka"] },
   additionalDetails: [
@@ -121,5 +122,26 @@ describe("additional details", () => {
 
   it("leaves the section out when there is nothing", () => {
     expect(jobToMarkdown({ ...job, additionalDetails: [] })).not.toContain("Additional details");
+  });
+});
+
+describe("apply notes", () => {
+  it("lists them under How to apply before the responsibilities, with the link when the text does not already name it", () => {
+    const md = jobToMarkdown({
+      ...job,
+      applyNotes: [
+        { kind: "where", text: "Do not apply here; use the\nGoogle Form", link: "https://forms.gle/abc" },
+        { kind: "include", text: "Send your portfolio to jobs@acme.com", link: "jobs@acme.com" },
+        { kind: "other", text: " ", link: "" },
+      ],
+    });
+    expect(md).toContain(
+      "## How to apply\n\n- **Where to apply:** Do not apply here; use the Google Form (https://forms.gle/abc)\n- **Include:** Send your portfolio to jobs@acme.com\n\n",
+    );
+    expect(md.indexOf("## How to apply")).toBeLessThan(md.indexOf("## Responsibilities"));
+  });
+
+  it("leaves the section out when there is nothing", () => {
+    expect(jobToMarkdown(job)).not.toContain("How to apply");
   });
 });

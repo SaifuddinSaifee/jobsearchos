@@ -2,8 +2,9 @@ import type { IdGen } from "@/lib/documents/build";
 import { mergeDates } from "./dates";
 import { removalKey } from "./dedupe";
 import type { EditOp } from "./edit-schema";
+import { fitSlots, isEmptyFact, slotsOf } from "./facts";
 import { normalizeText } from "./normalize";
-import type { CareerRecord, Fact, Framing, Provenance, RecordItemKind, Role, SourceRef, Wording } from "./schema";
+import { newFact, type CareerRecord, type Fact, type Framing, type Provenance, type RecordItemKind, type Role, type SourceRef, type Wording } from "./schema";
 
 // Applying one hand edit to the record. Pure. Anything the user touches is marked as theirs, so a later merge never
 // overwrites it, and anything they delete leaves a tombstone, so a later merge proposes leaving it out.
@@ -64,6 +65,18 @@ function findWording(record: CareerRecord, wordingId: string): Located & { fact:
   throw new EditError("That wording is no longer in your record.");
 }
 
+function findDetail(record: CareerRecord, detailId: string) {
+  for (const employer of record.employers) {
+    for (const role of employer.roles) {
+      for (const fact of role.facts) {
+        const detail = fact.details.find((d) => d.id === detailId);
+        if (detail) return { employer, role, fact, detail };
+      }
+    }
+  }
+  throw new EditError("That detail is no longer in your record.");
+}
+
 function findFraming(record: CareerRecord, framingId: string): Located & { framing: Framing } {
   for (const employer of record.employers) {
     for (const role of employer.roles) {
@@ -108,20 +121,20 @@ export function applyEdit(record: CareerRecord, op: EditOp, ctx: EditContext): {
       const from = findWording(next, op.wordingId);
       from.fact.wordings = from.fact.wordings.filter((w) => w.id !== op.wordingId);
       if (op.toFactId === null) {
-        from.role.facts.push({ id: ctx.newId(), wordings: [from.wording], provenance: userMade() });
+        from.role.facts.push(newFact(ctx.newId(), [from.wording], userMade()));
       } else {
         const to = findFact(next, op.toFactId);
         if (to.role.id !== from.role.id) throw new EditError("A wording can only move to a fact of the same role.");
         to.fact.wordings.push(from.wording);
       }
-      from.role.facts = from.role.facts.filter((f) => f.wordings.length > 0);
+      from.role.facts = from.role.facts.filter((f) => !isEmptyFact(f));
       note = `Moved a wording at ${from.employer.name}`;
       break;
     }
     case "deleteWording": {
       const { employer, role, fact, wording } = findWording(next, op.wordingId);
       fact.wordings = fact.wordings.filter((w) => w.id !== op.wordingId);
-      role.facts = role.facts.filter((f) => f.wordings.length > 0);
+      role.facts = role.facts.filter((f) => !isEmptyFact(f));
       tombstone(next, "wording", removalKey.wording(wording.text), ctx);
       note = `Deleted a wording at ${employer.name}`;
       break;
@@ -129,7 +142,7 @@ export function applyEdit(record: CareerRecord, op: EditOp, ctx: EditContext): {
     case "addFact": {
       const { employer, role } = findRole(next, op.roleId);
       const framingId = op.framingId && role.framings.some((f) => f.id === op.framingId) ? op.framingId : null;
-      role.facts.push({ id: ctx.newId(), wordings: [newWording(ctx, op.text, framingId)], provenance: userMade() });
+      role.facts.push(newFact(ctx.newId(), [newWording(ctx, op.text, framingId)], userMade()));
       note = `Added a fact at ${employer.name}`;
       break;
     }
@@ -143,8 +156,29 @@ export function applyEdit(record: CareerRecord, op: EditOp, ctx: EditContext): {
         if (same) for (const s of w.sources) addRef(same.sources, s);
         else into.fact.wordings.push(w);
       }
+      for (const d of from.fact.details) {
+        if (!into.fact.details.some((x) => x.kind === d.kind && normalizeText(x.text) === normalizeText(d.text))) into.fact.details.push(d);
+      }
+      for (const s of from.fact.sources) addRef(into.fact.sources, s);
+      for (const k of from.fact.seen) if (!into.fact.seen.includes(k)) into.fact.seen.push(k);
+      if (!into.fact.statement.trim()) into.fact.statement = from.fact.statement;
+      fitSlots(into.fact, slotsOf(into.role.framings));
       from.role.facts = from.role.facts.filter((f) => f.id !== op.factId);
       note = `Merged two facts at ${from.employer.name}`;
+      break;
+    }
+    case "editStatement": {
+      const { employer, fact } = findFact(next, op.factId);
+      fact.statement = op.text;
+      touch(fact.provenance, "statement");
+      note = `Edited a statement at ${employer.name}`;
+      break;
+    }
+    case "deleteDetail": {
+      const found = findDetail(next, op.detailId);
+      found.fact.details = found.fact.details.filter((d) => d.id !== op.detailId);
+      tombstone(next, "detail", removalKey.detail(found.detail.text), ctx);
+      note = `Deleted a detail at ${found.employer.name}`;
       break;
     }
     case "deleteFact": {
@@ -194,6 +228,7 @@ export function applyEdit(record: CareerRecord, op: EditOp, ctx: EditContext): {
         current: role.current,
         location: role.location,
         dateNotes: [],
+        technologies: [...role.technologies],
         framings: [framing],
         facts: [],
         sources: structuredClone(framing.sources),
@@ -204,9 +239,9 @@ export function applyEdit(record: CareerRecord, op: EditOp, ctx: EditContext): {
       for (const fact of role.facts) {
         const moving = fact.wordings.filter((w) => w.framingId === framing.id);
         fact.wordings = fact.wordings.filter((w) => w.framingId !== framing.id);
-        for (const w of moving) split.facts.push({ id: ctx.newId(), wordings: [w], provenance: structuredClone(fact.provenance) });
+        for (const w of moving) split.facts.push(newFact(ctx.newId(), [w], structuredClone(fact.provenance)));
       }
-      role.facts = role.facts.filter((f) => f.wordings.length > 0);
+      role.facts = role.facts.filter((f) => !isEmptyFact(f));
       employer.roles.push(split);
       note = `Split ${framing.title} into its own role at ${employer.name}`;
       break;
@@ -237,6 +272,7 @@ export function applyEdit(record: CareerRecord, op: EditOp, ctx: EditContext): {
         } else into.role.framings.push(f);
       }
       into.role.facts.push(...from.role.facts);
+      for (const t of from.role.technologies) if (!into.role.technologies.some((x) => normalizeText(x) === normalizeText(t))) into.role.technologies.push(t);
       into.employer.roles = into.employer.roles.filter((r) => r.id !== op.roleId);
       note = `Merged two roles at ${into.employer.name}`;
       break;

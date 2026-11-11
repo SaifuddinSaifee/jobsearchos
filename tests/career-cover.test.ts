@@ -1,3 +1,5 @@
+// The model name is read from the environment, which needs a database URL to load; no database is used.
+process.env.DATABASE_URL ??= "postgres://unused";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { applyProposal, checkRefs, resolveDecisions } from "@/lib/career/apply";

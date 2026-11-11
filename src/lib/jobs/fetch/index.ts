@@ -14,6 +14,12 @@ export type FetchJobOptions = {
   fetcher?: Fetcher;
   render?: (url: string) => Promise<string>;
   onStep?: (step: FetchStep) => void;
+  /**
+   * When the job board's API says the posting is not found, stop there instead of reading the page. For a posting that
+   * was read through that API before, not found means it was taken down, and the page is then usually a list of other
+   * jobs that would be read as if it were the posting.
+   */
+  goneIsFinal?: boolean;
 };
 
 /** ATS API, then JSON-LD, then HTML/Readability, then Playwright. Cheapest, most reliable method first. */
@@ -52,6 +58,7 @@ export async function fetchJob(input: string, opts: FetchJobOptions = {}): Promi
     } catch (err) {
       // A known ATS whose API fails (not found, blocked) falls through to the page itself.
       if (!(err instanceof FetchError)) throw err;
+      if (opts.goneIsFinal && err.code === "not_found") throw err;
     }
   }
 

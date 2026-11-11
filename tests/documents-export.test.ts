@@ -203,8 +203,45 @@ const hasChromium = (() => {
   }
 })();
 
+/** A resume whose certifications and achievements are short, as they usually are, and one that is not. */
+function withRows(long = false): Profile {
+  const p = profile();
+  p.certifications = [
+    { name: "Foundations of User Experience", issuer: "Google", date: "" },
+    { name: "Responsive Web Design", issuer: "freeCodeCamp", date: "" },
+    { name: long ? "AWS Certified AI Practitioner, Amazon Web Services, issued 2025, credential 0123456789" : "AWS Certified AI Practitioner", issuer: "", date: "" },
+  ];
+  p.achievements = ["Smart India Hackathon '22 (Winner)", "MumbaiHacks '23 (GenAI Track winner)", "BobHacks"];
+  return p;
+}
+const CERT_ROW = "Foundations of User Experience, Google | Responsive Web Design, freeCodeCamp | AWS Certified AI Practitioner";
+const WIN_ROW = "Smart India Hackathon '22 (Winner) | MumbaiHacks '23 (GenAI Track winner) | BobHacks";
+
+describe("certifications and achievements", () => {
+  it("are one line each in Word, the items in order with a divider a parser can see", async () => {
+    const text = (await mammoth.extractRawText({ buffer: await renderDocx(resume(withRows()), settings) })).value.replace(/ {2,}/g, " ");
+    expect(text).toContain(`CERTIFICATIONS\n\n${CERT_ROW}\n\nACHIEVEMENTS\n\n${WIN_ROW}`);
+  });
+});
+
 describe.skipIf(!hasChromium)("renderPdf", () => {
   const pdfText = async (bytes: Buffer) => (await extractText(await getDocumentProxy(new Uint8Array(bytes)), { mergePages: true })).text;
+
+  // Two rows of equal columns read as a table to an extractor, which then read down the columns: each item is checked
+  // to come after its own heading and in order, by the extractor the app itself uses to read a resume.
+  it("puts certifications and achievements on one line each, read in order under their headings", async () => {
+    const lines = (await pdfText((await renderPdf(resume(withRows()), settings, { title: "Ada" })).bytes)).split("\n").map((l) => l.replace(/\s+/g, " ").trim());
+    expect(lines.slice(lines.indexOf("CERTIFICATIONS"), lines.indexOf("CERTIFICATIONS") + 4)).toEqual(["CERTIFICATIONS", CERT_ROW, "ACHIEVEMENTS", WIN_ROW]);
+    // An item too long to share the line moves whole to the next one.
+    const long = (await pdfText((await renderPdf(resume(withRows(true)), settings, { title: "Ada" })).bytes)).split("\n").map((l) => l.replace(/\s+/g, " ").trim());
+    const at = long.indexOf("CERTIFICATIONS");
+    expect(long.slice(at, at + 4)).toEqual([
+      "CERTIFICATIONS",
+      "Foundations of User Experience, Google | Responsive Web Design, freeCodeCamp |",
+      "AWS Certified AI Practitioner, Amazon Web Services, issued 2025, credential 0123456789",
+      "ACHIEVEMENTS",
+    ]);
+  }, 60_000);
 
   it("makes a one page A4 PDF with real text in order", async () => {
     const out = await renderPdf(resume(), settings, { title: "Ada" });

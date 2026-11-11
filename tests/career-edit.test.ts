@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { textKey } from "@/lib/career/normalize";
 import { applyProposal, resolveDecisions } from "@/lib/career/apply";
 import { applyEdit, EditError } from "@/lib/career/edit";
 import { EditOpSchema, type EditOp } from "@/lib/career/edit-schema";
@@ -71,13 +72,30 @@ describe("wordings and facts", () => {
     expect(() => applyEdit(r, { op: "moveWording", wordingId: r1.facts[0].wordings[0].id, toFactId: r2.facts[0].id }, ctx())).toThrow(EditError);
   });
 
-  it("merges two facts, keeping every wording", () => {
+  it("merges two facts into one wording per slot, keeping every text as seen", () => {
     const r = base();
     const [a, b] = r.employers[0].roles[0].facts;
     const { record } = edit(r, { op: "mergeFacts", factId: a.id, intoFactId: b.id });
     const facts = record.employers[0].roles[0].facts;
     expect(facts).toHaveLength(1);
-    expect(facts[0].wordings.map((w) => w.text).sort()).toEqual(["Built the billing service", "Cut build times by 40%"]);
+    expect(facts[0].wordings.map((w) => w.text)).toEqual(["Cut build times by 40%"]);
+    expect(facts[0].seen).toEqual(expect.arrayContaining(["Built the billing service", "Cut build times by 40%"].map(textKey)));
+  });
+
+  it("edits a statement and keeps it as the user's", () => {
+    const r = base();
+    const f = r.employers[0].roles[0].facts[0];
+    const { record } = edit(r, { op: "editStatement", factId: f.id, text: "Built the billing service" });
+    expect(record.employers[0].roles[0].facts[0].statement).toBe("Built the billing service");
+    expect(record.employers[0].roles[0].facts[0].provenance.user).toContain("statement");
+  });
+
+  it("deletes a detail and remembers it", () => {
+    const r = base();
+    r.employers[0].roles[0].facts[0].details = [{ id: "d1", kind: "tool", text: "Stripe", measures: "", sources: [], provenance: { origin: "merge", user: [] } }];
+    const { record } = edit(r, { op: "deleteDetail", detailId: "d1" });
+    expect(record.employers[0].roles[0].facts[0].details).toEqual([]);
+    expect(record.removed).toEqual([expect.objectContaining({ kind: "detail", key: "stripe" })]);
   });
 
   it("adds a fact by hand", () => {
@@ -261,7 +279,8 @@ describe("a later merge respects the edits", () => {
     const { record } = mergeInto(edited, second("Built the billing service"));
     const texts = record.employers[0].roles[0].facts.flatMap((f) => f.wordings.map((x) => x.text));
     expect(texts).toContain("Built and ran the billing service");
-    expect(texts).toContain("Built the billing service");
+    // The old text was seen before, so it comes back as a source only.
+    expect(texts).not.toContain("Built the billing service");
   });
 
   it("proposes leaving out what was deleted, and respects an explicit include", () => {

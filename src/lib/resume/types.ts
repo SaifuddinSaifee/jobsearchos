@@ -1,32 +1,29 @@
-/** Client-safe types for the resume search index (no database or server imports). */
+/** Client-safe types for reading resumes into sections (no database or server imports). */
 
 export type IndexStatus = "queued" | "running" | "ready" | "failed";
 
-/** Where a library resume is in the search-index pipeline (the state of its latest version). */
+/** Where a library resume is in being read into sections (the state of its latest version). */
 export type IndexInfo = {
   id: string;
   documentId: string;
   versionId: string;
   status: IndexStatus;
-  chunkCount: number;
   note: string | null;
   error: string | null;
 };
 
 export const isIndexActive = (status: IndexStatus | undefined) => status === "queued" || status === "running";
 
-/** What the index says about a resume, in words. */
-export function indexLabel(info: IndexInfo | undefined): string {
-  if (!info) return "Not indexed";
-  switch (info.status) {
+/** What reading says about a resume, in words. Null when there is nothing to say: it is read, or never needed it. */
+export function indexLabel(info: IndexInfo | undefined): string | null {
+  switch (info?.status) {
     case "queued":
-      return "Waiting to index";
+      return "Waiting to be read";
     case "running":
-      return "Indexing";
-    case "ready":
-      if (info.chunkCount === 0) return "Nothing to index yet";
-      return `Indexed, ${info.chunkCount} ${info.chunkCount === 1 ? "section" : "sections"}`;
+      return "Reading into sections";
     case "failed":
-      return "Indexing failed";
+      return "Could not be read";
+    default:
+      return null;
   }
 }

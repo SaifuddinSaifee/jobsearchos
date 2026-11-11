@@ -1,8 +1,11 @@
 import type { Classifier } from "./cover";
 import { roleChoices } from "./role-choices";
-import { classifyBullet } from "./dedupe";
+import { classifyBullet, joinFact } from "./dedupe";
+import { newClaims } from "./facts";
 import type { Grouper } from "./group";
-import type { BulletItem, EmployerItem, ParagraphItem, Proposal, RoleItem } from "./proposal-schema";
+import type { DescribeInput, Describer } from "./describe";
+import { recordForPrompt } from "./prompt";
+import type { BulletItem, EmployerItem, FactUpdate, ParagraphItem, Proposal, RoleItem } from "./proposal-schema";
 import type { CareerRecord, Role } from "./schema";
 
 // Putting the model's answers into a proposal. Pure apart from the model call, which is injected.
@@ -12,7 +15,7 @@ import type { CareerRecord, Role } from "./schema";
  * the model for what is left. Returns the bullets with their new suggestions. Bullets the model does not place stay new.
  */
 export async function groupRoleBullets(item: RoleItem, target: Role | null, grouper: Grouper): Promise<BulletItem[]> {
-  const settled = item.bullets.map((b): BulletItem => ({ ...b, suggestion: classifyBullet(target, b) }));
+  const settled = item.bullets.map((b): BulletItem => withAdds(target, { ...b, suggestion: classifyBullet(target, b) }));
   if (!target) return settled;
   const open = settled.filter((b) => b.suggestion.to === "new");
   if (open.length === 0) return settled;
@@ -20,10 +23,22 @@ export async function groupRoleBullets(item: RoleItem, target: Role | null, grou
   return settled.map((b) => {
     const a = b.suggestion.to === "new" ? answers.get(b.key) : undefined;
     if (!a) return b;
-    if (a.factId) return { ...b, suggestion: { to: "fact", factId: a.factId, why: "model" } };
+    const fact = a.factId ? target.facts.find((f) => f.id === a.factId) : undefined;
+    if (fact) {
+      const { suggestion, adds } = joinFact(fact, b.text, "model");
+      return { ...b, suggestion, adds };
+    }
     if (a.withKey) return { ...b, suggestion: { to: "new", withKey: a.withKey } };
     return b;
   });
+}
+
+/** Notes what a bullet joining a fact adds to it, for the review. */
+function withAdds(role: Role | null, b: BulletItem): BulletItem {
+  if (b.suggestion.to !== "fact" || !role) return b;
+  const factId = b.suggestion.factId;
+  const fact = role.facts.find((f) => f.id === factId);
+  return fact ? { ...b, adds: newClaims(b.text, fact) } : b;
 }
 
 const roleOf = (record: CareerRecord, employer: EmployerItem, role: RoleItem): Role | null => {
@@ -87,4 +102,46 @@ export async function classifyProposalParagraphs(
   }
   paragraphs = paragraphs.map((p) => (factFor.has(p.key) ? { ...p, suggestion: { ...p.suggestion, factId: factFor.get(p.key)! } } : p));
   return { ...proposal, paragraphs };
+}
+
+/**
+ * Writes the statement and details of every fact the proposal would change, as suggested: an existing fact a bullet
+ * joins (with its wordings and the new ones), and each new fact (with the bullets that join it). One model call per few
+ * facts, with the record as the shared prefix. If the model fails, the proposal goes ahead without them: the facts keep
+ * their old statement, and new ones show their first wording until a statement is written.
+ */
+export async function describeProposal(proposal: Proposal, record: CareerRecord, describe: Describer): Promise<Proposal> {
+  const inputs: (DescribeInput & { factId: string | null; bulletKey: string | null; before: string })[] = [];
+  for (const e of proposal.employers) {
+    for (const r of e.roles) {
+      const target = roleOf(record, e, r);
+      const joining = new Map<string, string[]>();
+      for (const b of r.bullets) {
+        if (b.removedBefore) continue;
+        if (b.suggestion.to === "fact") joining.set(b.suggestion.factId, [...(joining.get(b.suggestion.factId) ?? []), b.text]);
+      }
+      for (const [factId, texts] of joining) {
+        const fact = target?.facts.find((f) => f.id === factId);
+        if (!fact) continue;
+        inputs.push({ key: `fact:${factId}`, factId, bulletKey: null, before: fact.statement, wordings: [...fact.wordings.map((w) => w.text), ...texts] });
+      }
+      for (const b of r.bullets) {
+        if (b.removedBefore || b.suggestion.to !== "new" || b.suggestion.withKey) continue;
+        const joined = r.bullets.filter((x) => x.suggestion.to === "new" && x.suggestion.withKey === b.key).map((x) => x.text);
+        inputs.push({ key: `new:${b.key}`, factId: null, bulletKey: b.key, before: "", wordings: [b.text, ...joined] });
+      }
+    }
+  }
+  if (inputs.length === 0) return proposal;
+  try {
+    const written = await describe(inputs, recordForPrompt(record));
+    const facts: FactUpdate[] = inputs.flatMap((i) => {
+      const w = written.get(i.key);
+      return w ? [{ factId: i.factId, bulletKey: i.bulletKey, before: i.before, statement: w.statement, findings: w.findings, details: w.details }] : [];
+    });
+    return { ...proposal, facts };
+  } catch (err) {
+    console.error("[career] could not write fact statements:", err instanceof Error ? err.message : err);
+    return { ...proposal, warnings: [...proposal.warnings, "Statements for these facts could not be written, so each shows its first wording until it has one."] };
+  }
 }

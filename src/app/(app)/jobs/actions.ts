@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withLlmContext } from "@/lib/llm/context";
-import { deleteJobs, fillAdditionalDetails, restoreDeleted, updateJob } from "@/lib/jobs/service";
+import { deleteJobs, fillAdditionalDetails, fillApplyNotes, restoreDeleted, updateJob } from "@/lib/jobs/service";
+import { refetchJob, undoRefetch } from "@/lib/jobs/refetch";
+import { kickWorker, stopGenerationJob } from "@/lib/queue/worker";
+import { JobExtractionSchema } from "@/lib/jobs/schema";
 import { STATUS_VALUES } from "@/lib/jobs/status";
 import {
   changeStatus,
@@ -85,8 +88,14 @@ export async function updateJobAction(jobId: string, edit: unknown) {
   return run(async () => updateJob(Id.parse(jobId), edit));
 }
 
+/** Deletes jobs, and cancels the model calls of any resume that was being written for one of them. */
 export async function deleteJobsAction(jobIds: string[]) {
-  return run(async () => ({ deleted: await deleteJobs(z.array(Id).min(1).max(MAX_BULK).parse(jobIds)) }));
+  return run(async () => {
+    const { deleted, stoppedGenerations } = await deleteJobs(z.array(Id).min(1).max(MAX_BULK).parse(jobIds));
+    for (const id of stoppedGenerations) stopGenerationJob(id);
+    if (stoppedGenerations.length) kickWorker();
+    return { deleted };
+  });
 }
 
 const DeletedSchema = z.object({
@@ -103,5 +112,34 @@ export async function fillAdditionalDetailsAction(jobId: string) {
   return run(async () => {
     const id = Id.parse(jobId);
     return { details: await withLlmContext("fill-job-details", { jobId: id }, () => fillAdditionalDetails(id)) };
+  });
+}
+
+/** Reads the saved posting text again (one LLM call) to find its instructions on how to apply. */
+export async function fillApplyNotesAction(jobId: string) {
+  return run(async () => {
+    const id = Id.parse(jobId);
+    return { notes: await withLlmContext("fill-job-details", { jobId: id }, () => fillApplyNotes(id)) };
+  });
+}
+
+/**
+ * Gets the job's posting again (its link, or the saved text with `from: "saved-text"`) and replaces its details with a
+ * fresh extraction. A site that cannot be fetched comes back as an outcome so the panel can offer the saved text.
+ */
+export async function refetchJobAction(jobId: string, from: "auto" | "saved-text" = "auto") {
+  return run(async () => {
+    const id = Id.parse(jobId);
+    const source = z.enum(["auto", "saved-text"]).parse(from);
+    return { outcome: await withLlmContext("refetch-job", { jobId: id }, () => refetchJob(id, source)) };
+  });
+}
+
+/** Puts a refetched job's details back as they were before the refetch. */
+export async function undoRefetchAction(jobId: string, undo: unknown) {
+  return run(async () => {
+    const id = Id.parse(jobId);
+    const parsed = z.object({ fields: JobExtractionSchema, restoreSnapshotId: Id.nullable() }).parse(undo);
+    return await undoRefetch(id, parsed);
   });
 }

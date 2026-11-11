@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { enqueueProfileSource, startBuild } from "@/lib/career/queue";
+import { addDocumentsToRecord, enqueueProfileSource } from "@/lib/career/queue";
+import { OfferError, setRecordChoice } from "@/lib/career/offer";
+import { enqueueAfterCreate } from "@/lib/documents/queue";
+import { createVersion, DocumentError } from "@/lib/documents/service";
+import { RECORD_CHOICES } from "@/lib/documents/types";
 import { withLlmContext } from "@/lib/llm/context";
 import { DecisionsSchema } from "@/lib/career/proposal-schema";
 import {
@@ -19,6 +23,8 @@ import {
 import { EditError } from "@/lib/career/edit";
 import { EditOpSchema } from "@/lib/career/edit-schema";
 import { editRecord, RecordConflict, restoreRecordVersion } from "@/lib/career/service";
+import { applyCompaction, dismissCompaction, saveCompactionAnswers, startCompaction } from "@/lib/career/compaction";
+import { CompactionAnswersSchema } from "@/lib/career/compact-schema";
 import { kickWorker, stopCareerProposal } from "@/lib/queue/worker";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string; stale?: boolean };
@@ -31,6 +37,7 @@ async function run<T extends object>(fn: () => Promise<T>): Promise<Result<T>> {
     return { ok: true, ...out };
   } catch (err) {
     if (err instanceof ProposalError) return { ok: false, error: err.message, stale: err.stale };
+    if (err instanceof OfferError || err instanceof DocumentError) return { ok: false, error: err.message };
     if (err instanceof EditError) return { ok: false, error: err.message, stale: true };
     if (err instanceof RecordConflict) return { ok: false, error: "Your record changed since you opened it. It has been reloaded.", stale: true };
     if (err instanceof z.ZodError) return { ok: false, error: err.issues[0]?.message ?? "Invalid input" };
@@ -50,12 +57,39 @@ export async function restoreRecordVersionAction(versionId: string) {
   });
 }
 
-/** Queues every library resume and the Profile, to be reviewed one at a time. */
-export async function startBuildAction() {
+/**
+ * Adds the chosen resumes and cover letters to the record. With `autoApply` (the one-click add) each is added as
+ * suggested once prepared; otherwise each waits for review, one at a time.
+ */
+export async function addDocumentsAction(documentIds: string[], autoApply: boolean) {
   return run(async () => {
-    const out = await startBuild();
+    const ids = z.array(Id).min(1, "Choose at least one document").max(500).parse(documentIds);
+    const out = await addDocumentsToRecord(ids, { autoApply: z.boolean().parse(autoApply) });
     kickWorker();
     return out;
+  });
+}
+
+/**
+ * Adds the document open in the editor, as it is now: what the editor holds is saved as a version first (the editor
+ * has already saved its draft before calling this), so the record gets exactly what is on the page.
+ */
+export async function addOpenDocumentAction(documentId: string, autoApply: boolean) {
+  return run(async () => {
+    const id = Id.parse(documentId);
+    const made = await createVersion(id, { reason: "manual", note: "Saved to add to the career record" });
+    if (made.created) await enqueueAfterCreate(id);
+    const out = await addDocumentsToRecord([id], { autoApply: z.boolean().parse(autoApply) });
+    kickWorker();
+    return out;
+  });
+}
+
+/** "Not now" (for this version), "never" (for every version), or null to be asked again. */
+export async function setRecordChoiceAction(documentId: string, choice: string | null) {
+  return run(async () => {
+    await setRecordChoice(Id.parse(documentId), z.enum(RECORD_CHOICES).nullable().parse(choice));
+    return {};
   });
 }
 
@@ -155,5 +189,54 @@ export async function includeProfileAction() {
       status: outcome === null ? ("empty" as const) : outcome.status,
       reason: outcome?.status === "skipped" ? outcome.reason : null,
     };
+  });
+}
+
+/** Queues a tidy of the record (one statement per fact, repeats folded in), or returns the one already open. */
+export async function startCompactionAction() {
+  return run(async () => {
+    const out = await startCompaction();
+    kickWorker();
+    return out;
+  });
+}
+
+/** Starts a fresh tidy after one that failed. */
+export async function retryCompactionAction(compactionId: string) {
+  return run(async () => {
+    await dismissCompaction(Id.parse(compactionId));
+    const out = await startCompaction();
+    kickWorker();
+    return out;
+  });
+}
+
+/** Keeps the answers to a tidy's questions while the user reviews it. */
+export async function saveCompactionAnswersAction(compactionId: string, answers: unknown) {
+  return run(async () => {
+    await saveCompactionAnswers(Id.parse(compactionId), CompactionAnswersSchema.parse(answers));
+    return {};
+  });
+}
+
+/** Saves the answers, then the tidied record as a new version. */
+export async function applyCompactionAction(compactionId: string, answers: unknown) {
+  return run(async () => {
+    const id = Id.parse(compactionId);
+    await saveCompactionAnswers(id, CompactionAnswersSchema.parse(answers));
+    try {
+      return await applyCompaction(id);
+    } finally {
+      // When the record changed, the tidy was queued to be worked out again.
+      kickWorker();
+    }
+  });
+}
+
+/** Leaves the record as it is. */
+export async function dismissCompactionAction(compactionId: string) {
+  return run(async () => {
+    await dismissCompaction(Id.parse(compactionId));
+    return {};
   });
 }

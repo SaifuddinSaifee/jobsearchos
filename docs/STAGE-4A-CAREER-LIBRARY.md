@@ -223,7 +223,7 @@ Built so far:
   resume parser when its turn comes. The same text twice is refused with 409. The Profile can be included by hand, and
   a saved Profile is offered as a source automatically once a record exists (content only: a note or preferences change
   gives the same content and is skipped).
-- **Step 8, editor feed and side panel** (`offerDocumentToRecord`, `panel.ts`, `record-panel.tsx`). Once a record exists,
+- **Step 8, editor feed and side panel** (`panel.ts`, `record-panel.tsx`; the feed was replaced in step 9). Once a record exists,
   `enqueueAfterCreate` also offers a created or saved resume or cover letter to the record. A resume that is still being
   indexed (and so maybe structured) waits, and the worker offers it when its index finishes; a document with nothing to
   read is skipped; a newer version of a document supersedes the older proposal still pending for it. A proposal that
@@ -233,6 +233,27 @@ Built so far:
   was read from, else by employer, title and dates), lists its facts and wordings (those that fit the title on the page
   first), and inserts one as a bullet at the end of the role (`insertBullet`, one undo step). It floats at the right of
   the page, because docking it next to an A4 sheet does not fit the page column.
+- **Step 9, the user chooses what goes in** (`offer.ts`, `offer-summary.ts`, `record-offer.tsx`, `record-offers.tsx`,
+  migration `0021_record_offers`). Step 8's automatic feed is gone: offering every saved document cost a model call
+  per save, and most tailored copies are not worth keeping. Saving a document now only queues it to be read into
+  sections. Instead, `getDocumentOffers` works out for each resume and cover letter, without a model, where it stands
+  (being read, empty, new, nothing new, being added, waiting for review, set aside, failed, left out in review, in the
+  record) and, when it is new, a summary from `buildProposal` before grouping (bullets in the record word for word,
+  worded differently, new; new jobs, titles, skills and so on; cover letter paragraphs already in the record). It is
+  batched (a few queries for the whole Library). The Career record tab lists the new ones with checkboxes (this is
+  also the first build, so "Build from your library" and "Look for new sources" are gone); the editor shows a card with
+  Add to record, Review first, Not now and Never for this document, and a header button. `documents.record_choice`
+  holds "later" (for one version, `record_choice_version_id`) or "never". Adding (`addDocumentsToRecord`) clears that
+  choice, queues even content left out before (`force`), and with `autoApply` sets `career_proposals.auto_apply`: once
+  the worker has prepared it, `applyIfAutomatic` applies it as suggested with no review, so a batch goes straight
+  through. If it cannot be applied (the record changed under it), it is prepared again, or waits for review. Adding from
+  the editor first saves the draft as a version, so the record gets what is on the page. The Profile is still offered
+  on its own when saved.
+- **Resume embeddings removed** (same migration). `resume_chunks` is dropped, with `chunk_count` and `embedding_model` on
+  `resume_indexes`; nothing ever searched them, and the career record is what writing will draw on. `resume_indexes`
+  remains the queue that reads an unstructured upload into sections (`parse-resume`), and its badge shows only while a
+  resume is being read or when reading failed. `src/lib/resume/embed.ts` (the Ollama client) is kept for an index of the
+  record, if writing turns out to need one.
 - **Decisions made while building:** a role with several framings keeps one set of facts; "which wordings fit a framing"
   is derived (`framing.ts`) from the framing a wording was written for plus the sources that told the role under that
   framing, so no extra field is stored. Employers are never created in the Companies directory, only linked.
@@ -420,6 +441,9 @@ reuses the same pieces later.
 ---
 
 ## Then: Stage 4 writing
+
+> The resume part is built: see [generate-resume.md](generate-resume.md). It writes from the career record only (or the base
+> resume while the record is empty), on request from a job, and links the result to the job.
 
 Stage 4 generation takes: the job, the company profile, the career record (or the profile if there is none),
 retrieved past wording (Stage 5), and your generation instructions. It writes the resume, cover letter and email as

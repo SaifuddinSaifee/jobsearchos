@@ -14,18 +14,19 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-  vector,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { ColdEmailSettings } from "@/lib/email/settings-schema";
-import type { AdditionalDetail, JobDraft } from "@/lib/jobs/schema";
+import type { AdditionalDetail, ApplyNote, JobDraft } from "@/lib/jobs/schema";
 import type { DocJSON } from "@/lib/documents/build";
 import type { PageSettings } from "@/lib/documents/page-settings";
-import type { DocumentKind, DocumentOrigin, VersionReason } from "@/lib/documents/types";
+import type { DocumentKind, DocumentOrigin, RecordChoice, VersionReason } from "@/lib/documents/types";
 import type { LlmCallStatus, RecordedAction, LlmStep } from "@/lib/llm/names";
 import type { IndexStatus } from "@/lib/resume/types";
+import type { GenerationChoices, GenerationSource, GenerationStatus, GenerationSteps, Requirement, ReviewOptions } from "@/lib/resume-writer/types";
 import type {
   CareerRecord,
+  CompactionStatus,
   ProposalStatus,
   RecordVersionReason,
   SourceKind,
@@ -198,6 +199,11 @@ export const jobs = pgTable(
     requirements: jsonb("requirements").$type<JobRequirements>().notNull(),
     /** Everything else worth keeping from the posting (benefits, interview process...), grouped under headings. */
     additionalDetails: jsonb("additional_details").$type<AdditionalDetail[]>().notNull().default([]),
+    /**
+     * The posting's instructions on how to apply (use this form, email this address, include a portfolio...). Null for
+     * jobs saved before this was extracted, so the panel can offer to look for them; [] when the posting has none.
+     */
+    applyNotes: jsonb("apply_notes").$type<ApplyNote[]>(),
     technologies: text("technologies").array().notNull(),
     origin: jobOrigin("origin").notNull().default("manual"),
     status: jobStatus("status").notNull().default("saved"),
@@ -285,6 +291,8 @@ export const applicationQueue = pgTable(
     input: text("input").notNull(),
     /** For pasted text: an optional URL used for de-duplication. */
     sourceUrl: text("source_url"),
+    /** Copied into the application's notes when the job is saved (e.g. the Daily Job Shortlist's "lead with"). */
+    notes: text("notes"),
     /** What to show in lists: the URL, then "Company - Title" once known. */
     label: text("label").notNull(),
     status: queueStatus("status").notNull().default("queued"),
@@ -302,6 +310,45 @@ export const applicationQueue = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("application_queue_status_idx").on(t.status, t.createdAt)],
+);
+
+/**
+ * Jobs that came from outside the app rather than being pasted, shown on Discover. Today the only source is the Daily
+ * Job Shortlist on claude.ai ("Claude.ai"), whose "Saved to JSOS" button calls the MCP tool `save_job`. One row per
+ * posting (canonical URL): sending it again refreshes the row. Kept apart from the queue, which gets cleared, so
+ * Discover remembers what arrived; where the job is now (queued, needs review, in Jobs) is looked up when listing.
+ */
+export const discoveredJobs = pgTable(
+  "discovered_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    canonicalUrl: text("canonical_url").notNull().unique(),
+    url: text("url").notNull(),
+    source: text("source").notNull(),
+    /** The source's own id for it (the shortlist row id). */
+    externalId: text("external_id"),
+    title: text("title").notNull().default(""),
+    company: text("company").notNull().default(""),
+    location: text("location").notNull().default(""),
+    mode: text("mode").notNull().default(""),
+    pay: text("pay").notNull().default(""),
+    /** As the source gave it, YYYY-MM-DD or empty. */
+    posted: text("posted").notNull().default(""),
+    track: text("track").notNull().default(""),
+    fit: integer("fit"),
+    why: text("why").notNull().default(""),
+    leadWith: text("lead_with").notNull().default(""),
+    applyHow: text("apply_how").notNull().default(""),
+    /** The queue item it was last added as, if any. */
+    queueId: uuid("queue_id").references(() => applicationQueue.id, { onDelete: "set null" }),
+    /** Why it could not be added (a site that blocks fetching, a full queue); null when it was. */
+    notAddedReason: text("not_added_reason"),
+    /** When it was removed from Discover; sending the same posting again brings it back. */
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("discovered_jobs_created_idx").on(t.createdAt)],
 );
 
 /** Bookmarks for the job boards and career pages visited every day; `last_opened_at` drives the daily round. */
@@ -490,6 +537,58 @@ export const contactSearches = pgTable(
 );
 
 /**
+ * A resume being written for a job, from asking for it to opening it in the editor. It runs in the same background
+ * worker as the other queues, in two parts with the user's review between them (see `src/lib/resume-writer/types.ts`).
+ * `requirements` is what the job asks for, lined up against the source, kept so the score panel can reuse it.
+ * `bullet_facts` says which record facts each bullet of the resume was written from, by editor block id. At most one
+ * generation per job is open (working or waiting for review) at a time; a finished one stays as history.
+ */
+export const resumeGenerations = pgTable(
+  "resume_generations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    /** The resume it is written into: set from the start when regenerating, else once it is first saved. */
+    documentId: uuid("document_id").references(() => documents.id),
+    status: text("status").$type<GenerationStatus>().notNull().default("queued"),
+    source: text("source").$type<GenerationSource>().notNull().default("record"),
+    /** The career record version it was matched against (null when written from the base resume). */
+    recordVersion: integer("record_version"),
+    baseVersionId: uuid("base_version_id").references(() => documentVersions.id),
+    requirements: jsonb("requirements").$type<Requirement[]>().notNull().default([]),
+    /** The telling of each role and the wording of each disputed number the user chose (or the recommended ones). */
+    choices: jsonb("choices").$type<GenerationChoices>().notNull().default({ framings: {}, wordings: {} }),
+    /** What the review screen offers besides the requirements: the tellings of each role, the numbers the record disagrees on. */
+    reviewOptions: jsonb("review_options").$type<ReviewOptions>().notNull().default({ roles: [], clashes: [] }),
+    /** Go straight on to writing, without waiting for the user's review. */
+    skipReview: boolean("skip_review").notNull().default(false),
+    steps: jsonb("steps").$type<GenerationSteps>().notNull().default({}),
+    bulletFacts: jsonb("bullet_facts").$type<Record<string, string[]>>().notNull().default({}),
+    notes: jsonb("notes").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    /** Time spent working on it, matching plus writing, without the wait for the user's review. Null until a phase finishes. */
+    workMs: integer("work_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while it is being worked on. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("resume_generations_status_idx").on(t.status, t.createdAt),
+    index("resume_generations_job_idx").on(t.jobId, t.createdAt),
+    uniqueIndex("resume_generations_one_open_idx")
+      .on(t.jobId)
+      .where(sql`${t.status} in ('queued', 'matching', 'review', 'writing_queued', 'writing')`),
+  ],
+);
+
+export type ResumeGenerationRow = typeof resumeGenerations.$inferSelect;
+
+/**
  * Everything the user writes: resumes, cover letters and emails, stored as content (an editor document), not as files.
  * The base resume is the one with `is_base`. Deleting is soft (`deleted_at`). `legacy_past_resume_id` and
  * `outreach_email_id` tie a row to what it was made from, so the backfill can run again without duplicating.
@@ -517,6 +616,12 @@ export const documents = pgTable(
     /** Set only when the file is kept anyway: imported past resumes and resumes uploaded in the email composer. */
     sourceFileId: uuid("source_file_id").references(() => files.id),
     pageSettings: jsonb("page_settings").$type<Partial<PageSettings>>().notNull().default({}),
+    /**
+     * What the user said about adding this document to the career record: "later" (Not now) for the version in
+     * `record_choice_version_id` only, or "never" for every version. Null means it is offered as usual.
+     */
+    recordChoice: text("record_choice").$type<RecordChoice>(),
+    recordChoiceVersionId: uuid("record_choice_version_id"),
     legacyPastResumeId: uuid("legacy_past_resume_id")
       .unique()
       .references(() => pastResumes.id),
@@ -535,6 +640,7 @@ export const documents = pgTable(
     index("documents_job_idx").on(t.jobId),
     index("documents_source_sha_idx").on(t.sourceSha256),
     check("documents_base_is_resume", sql`not ${t.isBase} or ${t.kind} = 'resume'`),
+    check("documents_record_choice", sql`${t.recordChoice} is null or ${t.recordChoice} in ('later', 'never')`),
   ],
 );
 
@@ -588,9 +694,10 @@ export type DocumentDraftRow = typeof documentDrafts.$inferSelect;
 export type DocumentVersionRow = typeof documentVersions.$inferSelect;
 
 /**
- * Where each resume (a version of a library document) is in the search-index pipeline: split it into sections,
- * embed them. One row per document version, worked off by the same background worker as the job queue. Rows keyed
- * by `file_id` are from before the library existed; they are kept as they were and no longer used.
+ * Where each resume (a version of a library document) is in being read: an upload with no sections is read into
+ * sections by the model, so it can be edited and added to the career record. One row per document version, worked
+ * off by the same background worker as the job queue. Rows keyed by `file_id` are from before the library existed;
+ * they are kept as they were and no longer used.
  */
 export const resumeIndexes = pgTable(
   "resume_indexes",
@@ -604,8 +711,6 @@ export const resumeIndexes = pgTable(
     /** Something worth telling the user even though indexing succeeded. */
     note: text("note"),
     error: text("error"),
-    chunkCount: integer("chunk_count").notNull().default(0),
-    embeddingModel: text("embedding_model"),
     attempts: integer("attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -622,33 +727,6 @@ export const resumeIndexes = pgTable(
       .on(t.documentVersionId)
       .where(sql`${t.documentVersionId} is not null`),
     check("resume_indexes_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
-  ],
-);
-
-/** One searchable piece of a resume (a job, a project, the skills list...) with its embedding. */
-export const resumeChunks = pgTable(
-  "resume_chunks",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    fileId: uuid("file_id").references(() => files.id),
-    documentVersionId: uuid("document_version_id").references(() => documentVersions.id),
-    ordinal: integer("ordinal").notNull(),
-    section: text("section").notNull(),
-    label: text("label").notNull(),
-    text: text("text").notNull(),
-    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
-    embeddingModel: text("embedding_model").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("resume_chunks_file_ordinal_idx")
-      .on(t.fileId, t.ordinal)
-      .where(sql`${t.fileId} is not null`),
-    uniqueIndex("resume_chunks_version_ordinal_idx")
-      .on(t.documentVersionId, t.ordinal)
-      .where(sql`${t.documentVersionId} is not null`),
-    index("resume_chunks_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
-    check("resume_chunks_one_key", sql`num_nonnulls(${t.fileId}, ${t.documentVersionId}) = 1`),
   ],
 );
 
@@ -725,6 +803,8 @@ export const careerProposals = pgTable(
     status: text("status").$type<ProposalStatus>().notNull().default("queued"),
     /** Lower runs first (base resume, other resumes, profile, LinkedIn, cover letters). */
     priority: integer("priority").notNull().default(1),
+    /** Added with one click: once prepared, it is applied as suggested instead of waiting for review. */
+    autoApply: boolean("auto_apply").notNull().default(false),
     /** The record version this proposal was computed against. */
     baseVersion: integer("base_version"),
     proposal: jsonb("proposal").$type<unknown>(),
@@ -747,6 +827,38 @@ export const careerProposals = pgTable(
     uniqueIndex("career_proposals_one_open_idx")
       .on(sql`(1)`)
       .where(sql`${t.status} in ('running', 'ready')`),
+  ],
+);
+
+/**
+ * One tidy of the career record: the record compacted to one statement per fact and one wording per slot, waiting for
+ * review. Doubles as its work queue, like `career_proposals`. Applying it saves a new version (reason "compact"), so it
+ * can be undone by restoring the version before.
+ */
+export const careerCompactions = pgTable(
+  "career_compactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    status: text("status").$type<CompactionStatus>().notNull().default("queued"),
+    /** The record version it was computed against. */
+    baseVersion: integer("base_version"),
+    result: jsonb("result").$type<unknown>(),
+    /** The user's answer to each question, by question id: the detail id to keep. */
+    answers: jsonb("answers").$type<Record<string, string>>().notNull().default({}),
+    appliedVersionId: uuid("applied_version_id"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Doubles as the worker's heartbeat while it runs. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("career_compactions_status_idx").on(t.status, t.createdAt),
+    uniqueIndex("career_compactions_one_open_idx")
+      .on(sql`(1)`)
+      .where(sql`${t.status} in ('queued', 'running', 'ready')`),
   ],
 );
 
@@ -776,6 +888,9 @@ export const llmCalls = pgTable(
     reasoningTokens: integer("reasoning_tokens"),
     costUsd: doublePrecision("cost_usd"),
     durationMs: integer("duration_ms").notNull(),
+    /** How often the client retried the request (rate limits, failures on the way), and the time spent between tries. Null on calls recorded before these were. */
+    retryCount: integer("retry_count"),
+    retryWaitMs: integer("retry_wait_ms"),
     traceId: text("trace_id"),
     jobId: uuid("job_id"),
     companyId: uuid("company_id"),
@@ -784,6 +899,7 @@ export const llmCalls = pgTable(
     proposalId: uuid("proposal_id"),
     searchId: uuid("search_id"),
     queueItemId: uuid("queue_item_id"),
+    compactionId: uuid("compaction_id"),
   },
   (t) => [
     index("llm_calls_created_idx").on(t.createdAt),
@@ -794,12 +910,12 @@ export const llmCalls = pgTable(
 export type CareerRecordVersionRow = typeof careerRecordVersions.$inferSelect;
 export type CareerSourceRow = typeof careerSources.$inferSelect;
 export type CareerProposalRow = typeof careerProposals.$inferSelect;
+export type CareerCompactionRow = typeof careerCompactions.$inferSelect;
 
 export type LlmCallRow = typeof llmCalls.$inferSelect;
 export type NewLlmCall = typeof llmCalls.$inferInsert;
 
 export type ResumeIndexRow = typeof resumeIndexes.$inferSelect;
-export type ResumeChunkRow = typeof resumeChunks.$inferSelect;
 
 export type ContactSearchRow = typeof contactSearches.$inferSelect;
 export type ContactRow = typeof contacts.$inferSelect;

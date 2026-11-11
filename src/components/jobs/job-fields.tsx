@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { REMOTE_TYPES, type JobExtraction } from "@/lib/jobs/schema";
+import { cn } from "@/lib/utils";
+import { APPLY_NOTE_KINDS, REMOTE_TYPES, type JobExtraction } from "@/lib/jobs/schema";
+import { APPLY_NOTE_KIND } from "./apply-notes";
 
 function Text({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
   return (
@@ -79,6 +81,7 @@ export function JobFields({ form }: { form: UseFormReturn<JobExtraction> }) {
       <Text label="Application URL" htmlFor="f-applicationUrl">
         <Input id="f-applicationUrl" {...register("applicationUrl")} />
       </Text>
+      <ApplyNotesField form={form} />
 
       <Controller
         control={control}
@@ -130,6 +133,55 @@ export function JobFields({ form }: { form: UseFormReturn<JobExtraction> }) {
         />
       </div>
     </>
+  );
+}
+
+/** The posting's instructions on how to apply, each with its kind and the link or email address it names. */
+function ApplyNotesField({ form }: { form: UseFormReturn<JobExtraction> }) {
+  const { control, register } = form;
+  const { fields, append, remove } = useFieldArray({ control, name: "applyNotes" });
+
+  return (
+    <fieldset
+      className={cn(
+        "space-y-3 rounded-lg border p-3 transition-colors",
+        fields.length > 0 && "border-amber-500/40 bg-amber-500/10",
+      )}
+    >
+      <legend className="px-1 text-sm font-medium">How to apply</legend>
+      <p className="text-xs text-muted-foreground">
+        Instructions from the posting such as a form or email address to apply through, or what to include. Shown next to
+        the apply links.
+      </p>
+      {fields.map((f, i) => (
+        <div
+          key={f.id}
+          className="grid gap-2 sm:grid-cols-[9rem_1fr_auto] animate-in fade-in slide-in-from-top-1 duration-200 motion-reduce:animate-none"
+        >
+          <NativeSelect aria-label={`Kind of note ${i + 1}`} {...register(`applyNotes.${i}.kind`)}>
+            {APPLY_NOTE_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {APPLY_NOTE_KIND[k].label}
+              </option>
+            ))}
+          </NativeSelect>
+          <Input aria-label={`Note ${i + 1}`} placeholder="Apply through the Google Form, not this site" {...register(`applyNotes.${i}.text`)} />
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove note ${i + 1}`} onClick={() => remove(i)}>
+            <X />
+          </Button>
+          <Input
+            aria-label={`Link or email for note ${i + 1}`}
+            placeholder="Link or email address (optional)"
+            className="sm:col-start-2"
+            {...register(`applyNotes.${i}.link`)}
+          />
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => append({ kind: "where", text: "", link: "" })}>
+        <Plus />
+        Add note
+      </Button>
+    </fieldset>
   );
 }
 

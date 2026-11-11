@@ -1,6 +1,7 @@
 "use client";
 
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { FileText, MoreHorizontal, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,12 +16,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { safeHref } from "@/lib/jobs/links";
 import type { JobRow } from "@/lib/jobs/types";
+import { cn } from "@/lib/utils";
 import { copyMarkdown, downloadMarkdown, loadJobMarkdown } from "../markdown-actions";
 import { useJobsActions } from "./context";
 import { StatusItems } from "./status-menu";
 
 export function RowActions({ job }: { job: JobRow }) {
-  const { openJob, editJob, changeStatus, deleteJobs } = useJobsActions();
+  const { openJob, editJob, changeStatus, deleteJobs, refetchJob, refetching } = useJobsActions();
+  const busy = refetching.has(job.jobId);
   const posting = safeHref(job.postingUrl);
   const apply = safeHref(job.applyUrl);
 
@@ -36,6 +39,14 @@ export function RowActions({ job }: { job: JobRow }) {
         <DropdownMenuItem onClick={() => editJob(job.jobId)}>
           <Pencil aria-hidden />
           Edit job
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={busy} onClick={() => refetchJob(job.jobId)}>
+          <RefreshCw aria-hidden className={cn(busy && "animate-spin motion-reduce:animate-none")} />
+          {busy ? "Refetching..." : "Refetch job"}
+        </DropdownMenuItem>
+        <DropdownMenuItem render={<Link href={`/jobs/${job.jobId}/resume`} />}>
+          <FileText aria-hidden />
+          Resume for this job
         </DropdownMenuItem>
         {posting && (
           <DropdownMenuItem render={<a href={posting} target="_blank" rel="noopener noreferrer" />}>

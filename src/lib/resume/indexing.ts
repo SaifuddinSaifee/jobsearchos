@@ -1,24 +1,20 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import {
   documents,
   documentVersions,
-  resumeChunks,
   resumeIndexes,
   type DocumentRow,
   type DocumentVersionRow,
   type ResumeIndexRow,
 } from "@/lib/db/schema";
-import { chunkDocument } from "@/lib/documents/convert/chunk-document";
 import { docToProfile } from "@/lib/documents/convert/doc-to-profile";
 import { keepCustomSections } from "@/lib/documents/convert/keep-custom";
 import { profileToDoc } from "@/lib/documents/convert/profile-to-doc";
 import { hasStructure, sectionsOf } from "@/lib/documents/read";
 import { addStructuredVersion, getDocument, getVersion, latestVersion } from "@/lib/documents/service";
-import { env } from "@/lib/env";
 import { addLlmIds } from "@/lib/llm/context";
 import type { Profile } from "@/lib/profile/schema";
-import { embedQuery, embedTexts } from "./embed";
 import { parseResume } from "./parse";
 import type { IndexInfo } from "./types";
 
@@ -34,7 +30,6 @@ const toInfo = (r: ResumeIndexRow, documentId: string): IndexInfo => ({
   documentId,
   versionId: r.documentVersionId as string,
   status: r.status,
-  chunkCount: r.chunkCount,
   note: r.note,
   error: r.error,
 });
@@ -60,7 +55,7 @@ export async function enqueueVersionIndex(versionId: string, opts: { force?: boo
   return toInfo(requeued ?? row, version.documentId);
 }
 
-/** Queues the latest version of a document. Resumes only: letters and emails are not embedded. */
+/** Queues the latest version of a document to be read. Resumes only: letters and emails are never structured by the model. */
 export async function enqueueDocumentIndex(documentId: string, opts: { force?: boolean } = {}, db: Db = defaultDb()): Promise<IndexInfo | null> {
   const doc = await getDocument(documentId, db);
   if (!doc || doc.kind !== "resume") return null;
@@ -145,7 +140,6 @@ export async function touchIndex(id: string, db: Db = defaultDb()) {
 export type IndexDeps = {
   db?: Db;
   parse?: (text: string) => Promise<Profile>;
-  embed?: (texts: string[]) => Promise<number[][]>;
 };
 
 /** A resume that came from an upload and is still only headings, bullets and paragraphs is worth structuring once. */
@@ -155,10 +149,9 @@ function needsStructuring(doc: DocumentRow, version: DocumentVersionRow): boolea
 }
 
 /**
- * Indexes one claimed version end to end. An unstructured upload is first structured by the model and replaced by a
- * structured version (which is queued on its own, so this index then ends with no sections of its own). Otherwise the
- * version is split into sections, each embedded and stored. Structuring is allowed to fail (the text is then split by
- * paragraph and the user is told); embedding is not, because without it there is nothing to search.
+ * Reads one claimed version. An unstructured upload is structured by the model and replaced by a structured version
+ * (which is queued on its own and needs no model). Structuring is allowed to fail: the resume then stays as it was
+ * uploaded and the user is told. Anything else needs no model and is done at once.
  */
 export async function processResumeIndex(indexId: string, deps: IndexDeps = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
@@ -178,92 +171,32 @@ export async function processResumeIndex(indexId: string, deps: IndexDeps = {}):
         const parsed = await (deps.parse ?? parseResume)(version.plainText);
         const fromModel = profileToDoc(parsed);
         if (sectionsOf(fromModel).length === 0) {
-          note = "The model found no sections in this resume. It was split by paragraph instead.";
+          note = "The model found no sections in this resume. It was kept as it was uploaded.";
         } else {
           const next = await addStructuredVersion(doc.id, version.id, keepCustomSections(fromModel, version.content), db);
           if (next) {
             await enqueueVersionIndex(next.id, {}, db);
             await db
               .update(resumeIndexes)
-              .set({ status: "ready", note: "Replaced by a structured version.", chunkCount: 0, error: null, finishedAt: new Date(), updatedAt: new Date() })
+              .set({ status: "ready", note: "Replaced by a structured version.", error: null, finishedAt: new Date(), updatedAt: new Date() })
               .where(eq(resumeIndexes.id, indexId));
             return;
           }
-          note = "This was edited before it could be structured, so it was indexed as it is.";
+          note = "This was edited before it could be structured, so it was kept as it is.";
         }
       } catch (err) {
-        note = `Could not structure this resume (${err instanceof Error ? err.message : "unknown error"}). It was split by paragraph instead.`;
+        note = `Could not structure this resume (${err instanceof Error ? err.message : "unknown error"}). It was kept as it was uploaded.`;
       }
     }
 
-    const chunks = chunkDocument(version.content);
-    if (chunks.length === 0) {
-      // A new, blank resume has nothing to search yet. That is not an error; it is indexed when it has some text.
-      await db.transaction(async (tx) => {
-        await tx.delete(resumeChunks).where(eq(resumeChunks.documentVersionId, versionId));
-        await tx
-          .update(resumeIndexes)
-          .set({ status: "ready", parsed: docToProfile(version.content), note: note ?? "There is no text to index yet.", error: null, chunkCount: 0, finishedAt: new Date(), updatedAt: new Date() })
-          .where(eq(resumeIndexes.id, indexId));
-      });
-      return;
-    }
-
-    const vectors = await (deps.embed ?? ((t: string[]) => embedTexts(t)))(chunks.map((c) => `${c.label}\n${c.text}`));
-    const model = env().EMBEDDING_MODEL;
-    await db.transaction(async (tx) => {
-      await tx.delete(resumeChunks).where(eq(resumeChunks.documentVersionId, versionId));
-      await tx
-        .insert(resumeChunks)
-        .values(chunks.map((c, i) => ({ documentVersionId: versionId, ordinal: i, section: c.section, label: c.label, text: c.text, embedding: vectors[i], embeddingModel: model })));
-      await tx
-        .update(resumeIndexes)
-        .set({ status: "ready", parsed: docToProfile(version.content), note, error: null, chunkCount: chunks.length, embeddingModel: model, finishedAt: new Date(), updatedAt: new Date() })
-        .where(eq(resumeIndexes.id, indexId));
-    });
+    await db
+      .update(resumeIndexes)
+      .set({ status: "ready", parsed: docToProfile(version.content), note, error: null, finishedAt: new Date(), updatedAt: new Date() })
+      .where(eq(resumeIndexes.id, indexId));
   } catch (err) {
     await db
       .update(resumeIndexes)
-      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not read this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
       .where(eq(resumeIndexes.id, indexId));
   }
-}
-
-export type ResumeMatch = { documentId: string; versionId: string; title: string; section: string; label: string; text: string; score: number };
-
-/**
- * The resume sections closest in meaning to a query (a job description, a requirement, a question), best first.
- * Only the latest version of each library resume is searched. `score` is cosine similarity, 1 being identical. This
- * is the retrieval the writer will use to pick which of the user's real experience to draw on.
- */
-export async function searchResumeChunks(
-  query: string,
-  opts: { limit?: number; documentIds?: string[] } = {},
-  deps: { db?: Db; embedQuery?: (q: string) => Promise<number[]> } = {},
-): Promise<ResumeMatch[]> {
-  const db = deps.db ?? defaultDb();
-  const vector = JSON.stringify(await (deps.embedQuery ?? ((q: string) => embedQuery(q)))(query));
-  const distance = sql<number>`${resumeChunks.embedding} <=> ${vector}::vector`;
-  const rows = await db
-    .select({
-      documentId: documents.id,
-      versionId: documentVersions.id,
-      title: documents.title,
-      section: resumeChunks.section,
-      label: resumeChunks.label,
-      text: resumeChunks.text,
-      distance,
-    })
-    .from(resumeChunks)
-    .innerJoin(documentVersions, eq(documentVersions.id, resumeChunks.documentVersionId))
-    .innerJoin(documents, and(eq(documents.id, documentVersions.documentId), isNull(documents.deletedAt), eq(documents.kind, "resume")))
-    .where(
-      and(
-        sql`${documentVersions.version} = (select max(v.version) from document_versions v where v.document_id = ${documents.id})`,
-        opts.documentIds ? inArray(documents.id, opts.documentIds) : undefined,
-      ),
-    )
-    .orderBy(distance, desc(documentVersions.version))
-    .limit(opts.limit ?? 8);
-  return rows.map(({ distance: d, ...r }) => ({ ...r, score: 1 - Number(d) }));
 }
