@@ -90,6 +90,14 @@ export const CONTENT_CSS = `
 .rs-bullet{padding-left:.1em}
 .rs-bullet > p{margin:0}
 
+/* Certifications and achievements are short: one line, items an even space apart with a divider between them, rather
+   than a list. Not columns: two rows of equal columns read as a table to pdftotext, which then read down the columns and
+   put achievements before their own heading. An item keeps together where it fits, and its divider goes with it. */
+.rs-section:is([data-kind="certifications"],[data-kind="achievements"]) > .rs-bullets{list-style:none;padding-left:0;text-align:left}
+.rs-section:is([data-kind="certifications"],[data-kind="achievements"]) > .rs-bullets > .rs-bullet{display:inline-block;max-width:100%;padding-left:0}
+.rs-section:is([data-kind="certifications"],[data-kind="achievements"]) > .rs-bullets > .rs-bullet > p{display:inline}
+.rs-section:is([data-kind="certifications"],[data-kind="achievements"]) > .rs-bullets > .rs-bullet:not(:last-child)::after{content:" | ";white-space:pre;margin:0 .4em;color:#888}
+
 .rs-divider{border:0;border-top:1px solid #999;margin:var(--rs-item-gap) 0}
 .rs-page > p + p,.rs-page > p + .rs-bullets,.rs-page > .rs-bullets + p{margin-top:.85em}
 `;

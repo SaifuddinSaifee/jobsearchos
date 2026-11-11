@@ -10,6 +10,7 @@ import {
   Plus,
   Split,
   Trash2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { formatDates } from "@/lib/career/dates";
+import { factLine } from "@/lib/career/facts";
 import { wordingFitsFraming } from "@/lib/career/framing";
 import type { CareerRecord, Employer, Fact, Role, Wording } from "@/lib/career/schema";
 import { cn } from "@/lib/utils";
@@ -376,18 +378,81 @@ function RoleMenu({ employer, role }: { employer: Employer; role: Role }) {
 function FactRow({ role, fact, framingId }: { role: Role; fact: Fact; framingId: string | null }) {
   const { ask, run } = useRecordEdit();
   const wordings = framingId ? fact.wordings.filter((w) => wordingFitsFraming(role, w, framingId)) : fact.wordings;
-  if (wordings.length === 0) return null;
+  // A fact left with only its statement shows under every framing; otherwise under the framings it has wording for.
+  if (wordings.length === 0 && (fact.wordings.length > 0 || !fact.statement.trim())) return null;
+  const statementEdited = fact.provenance.user.includes("statement");
   const otherFacts = role.facts.filter((f) => f.id !== fact.id);
   const framingOptions = [{ value: "", label: "No particular framing" }, ...role.framings.map((f) => ({ value: f.id, label: f.title }))];
 
   return (
     <li className={cn("rounded-md border bg-background px-3 py-2 transition-colors duration-100 hover:border-foreground/25", ENTER)}>
-      <ul className="space-y-2">
-        {wordings.map((w) => (
-          <WordingRow key={w.id} role={role} fact={fact} wording={w} />
-        ))}
-      </ul>
+      {fact.statement.trim() && (
+        <div className="mb-2 space-y-1.5 border-b pb-2">
+          <p className="text-sm font-medium">
+            {fact.statement}
+            {statementEdited && (
+              <Badge variant="outline" className="ml-1.5 align-middle font-normal">
+                Edited by you
+              </Badge>
+            )}
+          </p>
+          {fact.details.length > 0 && (
+            <ul className="flex flex-wrap gap-1" aria-label="Details this fact states">
+              {fact.details.map((d) => (
+                <li key={d.id}>
+                  <Badge variant={d.kind === "metric" ? "secondary" : "outline"} className="gap-0.5 pr-0.5 font-normal" title={d.measures || undefined}>
+                    {d.text}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-4 rounded-full"
+                      aria-label={`Remove the detail ${d.text}`}
+                      onClick={() =>
+                        ask({
+                          title: "Remove this detail?",
+                          description: `"${d.text}" leaves this fact. A later merge will propose leaving it out.`,
+                          fields: [],
+                          submitLabel: "Remove",
+                          destructive: true,
+                          onSubmit: () => run({ op: "deleteDetail", detailId: d.id }),
+                        })
+                      }
+                    >
+                      <X className="size-3" aria-hidden />
+                    </Button>
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {wordings.length > 0 && (
+        <ul className="space-y-2">
+          {wordings.map((w) => (
+            <WordingRow key={w.id} role={role} fact={fact} wording={w} />
+          ))}
+        </ul>
+      )}
       <div className="mt-1 flex flex-wrap gap-1">
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          onClick={() =>
+            ask({
+              title: fact.statement.trim() ? "Edit the statement" : "Write a statement",
+              description: "The fact in one line. Yours wins: a later merge will not change it.",
+              fields: [{ name: "text", label: "Statement", kind: "textarea", value: fact.statement || (fact.wordings[0]?.text ?? "") }],
+              submitLabel: "Save",
+              onSubmit: (v) => run({ op: "editStatement", factId: fact.id, text: String(v.text) }),
+            })
+          }
+        >
+          <Pencil aria-hidden />
+          {fact.statement.trim() ? "Edit statement" : "Write a statement"}
+        </Button>
         <Button
           type="button"
           size="xs"
@@ -423,7 +488,7 @@ function FactRow({ role, fact, framingId }: { role: Role; fact: Fact; framingId:
                     label: "Merge into",
                     kind: "select",
                     value: otherFacts[0].id,
-                    options: otherFacts.map((f) => ({ value: f.id, label: clip(f.wordings[0]?.text ?? "Empty fact") })),
+                    options: otherFacts.map((f) => ({ value: f.id, label: clip(factLine(f) || "Empty fact") })),
                   },
                 ],
                 submitLabel: "Merge",
@@ -510,7 +575,7 @@ function WordingRow({ role, fact, wording }: { role: Role; fact: Fact; wording: 
                         kind: "select",
                         value: otherFacts[0]?.id ?? "",
                         options: [
-                          ...otherFacts.map((f) => ({ value: f.id, label: `Fact: ${clip(f.wordings[0]?.text ?? "Empty fact")}` })),
+                          ...otherFacts.map((f) => ({ value: f.id, label: `Fact: ${clip(factLine(f) || "Empty fact")}` })),
                           ...(fact.wordings.length > 1 ? [{ value: "", label: "A fact of its own" }] : []),
                         ],
                       },

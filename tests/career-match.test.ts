@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { textKey } from "@/lib/career/normalize";
 import { matchEmployer, matchRole, guessAngle } from "@/lib/career/match";
 import { classifyBullet, isRemoved, removalKey } from "@/lib/career/dedupe";
 import { normalizeEmployer, normalizeTitle, titleSimilarity } from "@/lib/career/normalize";
@@ -109,6 +110,10 @@ describe("guessAngle", () => {
     ["Growth Marketer", "Marketing"],
     ["Account Executive", "Sales"],
     ["Technical Program Manager", "Program"],
+    ["Product Engineer (AI / Full-Stack)", "Engineering"],
+    ["Senior Product Manager, Workflow Automation", "Product"],
+    ["Engineering Manager", "Engineering"],
+    ["Software Engineer - Product", "Engineering"],
     ["Wizard", ""],
   ])("%s is %s", (title, angle) => {
     expect(guessAngle(title)).toBe(angle);
@@ -129,11 +134,20 @@ describe("classifyBullet", () => {
   it("knows exact text", () => {
     expect(classifyBullet(r, { blockId: null, text: "  Reduced churn by 12%  " })).toEqual({ to: "known", factId: "f2", wordingId: "w2" });
   });
-  it("treats case and punctuation differences as the same fact with a new wording", () => {
-    expect(classifyBullet(r, { blockId: null, text: "reduced churn by 12" })).toEqual({ to: "fact", factId: "f2", why: "near" });
+  it("treats case and punctuation differences as the text it already has", () => {
+    expect(classifyBullet(r, { blockId: null, text: "reduced churn by 12" })).toEqual({ to: "known", factId: "f2", wordingId: null });
   });
-  it("links an edited copy of the same editor block", () => {
+  it("knows a text folded into a fact before, though no wording holds it now", () => {
+    const folded = structuredClone(r);
+    folded.facts[1].seen = [textKey("Cut churn by twelve percent")];
+    expect(classifyBullet(folded, { blockId: null, text: "Cut churn by twelve percent." })).toEqual({ to: "known", factId: "f2", wordingId: null });
+  });
+  it("links an edited copy of the same editor block, as known when it adds nothing", () => {
     const got = classifyBullet(r, { blockId: "b1", text: "Led launch of self-serve onboarding flow" });
+    expect(got).toEqual({ to: "known", factId: "f1", wordingId: null });
+  });
+  it("links an edited copy of the same editor block as a new wording when it adds a number", () => {
+    const got = classifyBullet(r, { blockId: "b1", text: "Led launch of self-serve onboarding flow for 300 teams" });
     expect(got).toEqual({ to: "fact", factId: "f1", why: "lineage" });
   });
   it("does not link a reused block id whose text is unrelated", () => {

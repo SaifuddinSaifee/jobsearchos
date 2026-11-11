@@ -7,11 +7,11 @@ export const RESUME_INDEXES_KEY = ["resume-indexes"] as const;
 
 async function fetchIndexes(): Promise<IndexInfo[]> {
   const res = await fetch("/api/resume-indexes");
-  if (!res.ok) throw new Error("Could not load resume indexes");
+  if (!res.ok) throw new Error("Could not load resume reading status");
   return (await res.json()).indexes;
 }
 
-/** Where every library resume is in the search-index pipeline, by document id. Polls quickly while one is working and not at all otherwise. */
+/** Where every library resume is in being read into sections, by document id. Polls quickly while one is working and not at all otherwise. */
 export function useResumeIndexes() {
   const q = useQuery({
     queryKey: RESUME_INDEXES_KEY,

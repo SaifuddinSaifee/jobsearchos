@@ -1,0 +1,414 @@
+import { z } from "zod";
+import { describe, expect, it, vi } from "vitest";
+
+process.env.DATABASE_URL ??= "postgres://unused";
+vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
+
+import {
+  RESUME_BANNED_EXTRA,
+  answerSchema,
+  buildPrompt,
+  checkWriting,
+  pickFraming,
+  planWriting,
+  recommendFraming,
+  readWriting,
+  shareBullets,
+  skillTerms,
+  tidy,
+  type WriterAnswer,
+} from "@/lib/resume-writer/write";
+import { fact, role } from "./career-helpers";
+import { framing, job, record, withMap } from "./resume-writer-helpers";
+import { proofStrength } from "@/lib/resume-writer/proof";
+
+describe("pickFraming", () => {
+  it("picks the framing with the job's angle, then the closest title", () => {
+    const r = record().employers[0].roles[0];
+    expect(pickFraming(r, "Product Manager")!.id).toBe("fPm");
+    expect(pickFraming(r, "Senior Software Engineer")!.id).toBe("fEng");
+    expect(pickFraming(role({ framings: [] }), "x")).toBeNull();
+  });
+});
+
+describe("proofStrength", () => {
+  it("counts saying how the work was checked: tests, evals, accuracy, an approval step", () => {
+    expect(proofStrength("Shipped a chatbot, checked by a 50+ edge-case test suite") - proofStrength("Shipped a chatbot with a 50+ edge-case suite")).toBe(1);
+    expect(proofStrength("Publishes release notes after approval in a Slack modal")).toBeGreaterThan(proofStrength("Publishes release notes from a Slack modal"));
+  });
+});
+
+describe("shareBullets", () => {
+  const roles = (...demand: number[]) => demand.map((d) => ({ demand: d, cap: 10 }));
+
+  it("gives each role bullets by how much it has to say for the job, within the total", () => {
+    // The record behind the Great Question resume: the latest role has most of what the job asks for.
+    expect(shareBullets([{ demand: 8, cap: 9 }, { demand: 4, cap: 4 }, { demand: 2, cap: 2 }], 14)).toEqual([8, 4, 2]);
+    // A second job that is the relevant one gets the most, whatever its place.
+    expect(shareBullets(roles(2, 7, 1), 12)).toEqual([2, 9, 1]);
+    // One long role takes what it can use.
+    expect(shareBullets([{ demand: 9, cap: 11 }], 14)).toEqual([11]);
+  });
+
+  it("never gives a role more than it offers, nor less than one", () => {
+    expect(shareBullets([{ demand: 9, cap: 3 }, { demand: 0, cap: 5 }], 10)).toEqual([3, 5]);
+    expect(shareBullets(roles(6, 0, 0), 6)).toEqual([4, 1, 1]);
+    // A role is part of the history: it keeps its one bullet even past a small total.
+    expect(shareBullets(roles(1, 1, 1), 2)).toEqual([1, 1, 1]);
+  });
+
+  it("falls back to more for the latest roles when nothing is matched", () => {
+    expect(shareBullets(roles(0, 0, 0), 12)).toEqual([5, 4, 3]);
+    expect(shareBullets([], 14)).toEqual([]);
+  });
+});
+
+describe("planWriting", () => {
+  const reqs = withMap([{ verdict: "met", refs: ["fact1"] }, { verdict: "met", refs: ["fact4", "skill1"] }]);
+  const plan = planWriting(record(), job, reqs);
+
+  it("takes the most recent roles, each under the framing that fits, with the wording that fits it", () => {
+    expect(plan.roles.map((r) => [r.alias, r.employer, r.title, r.budget])).toEqual([
+      // Both answer the job alike, so they would share the bullets evenly; neither gets more than it has facts to tell.
+      ["e1", "Acme", "Product Manager", 3],
+      ["e2", "Initech", "Engineer", 1],
+    ]);
+    // The wording that carries a number comes first: the writer starts from it.
+    expect(plan.roles[0].facts[0].texts).toEqual(["Launched self-serve billing for 2,000 merchants", "Built the billing service in TypeScript"]);
+  });
+
+  it("orders facts by the weight of what they answer, then as recorded", () => {
+    expect(plan.roles[0].facts.map((f) => [f.alias, f.factId, f.weight])).toEqual([
+      ["f1", "fact1", 5],
+      ["f2", "fact2", 0],
+      ["f3", "fact3", 0],
+    ]);
+    expect(plan.roles[1].facts[0]).toMatchObject({ alias: "f4", factId: "fact4", weight: 5 });
+  });
+
+  it("includes only projects that touch the job, every skill, and the certifications and education", () => {
+    expect(plan.projects.map((p) => p.name)).toEqual(["Ledger toy"]);
+    expect(plan.skills).toEqual([
+      { category: "Databases", items: ["SQL"] },
+      { category: "Design", items: ["Figma"] },
+    ]);
+    expect(plan.certifications.map((c) => c.alias)).toEqual(["c1"]);
+    expect(plan.education).toHaveLength(1);
+  });
+
+  it("turns what the user has into numbered items, a skill when it is short", () => {
+    const p = planWriting(record(), job, withMap([{ userHas: true, note: "led the launch" }, {}, {}]));
+    expect(p.users).toEqual([{ alias: "u1", requirementId: "r1", text: "Experience launching payments products", note: "led the launch", skills: [], bare: false, weight: 5 }]);
+    const kw = planWriting(record(), job, [{ ...withMap()[0], kind: "keyword", text: "event-driven", use: "skill", userHas: true }]);
+    expect(kw.users[0].skills).toEqual(["event-driven"]);
+    // A field or a way of working the user ticked is worked in, but never listed as a skill; a condition is left out.
+    const field = planWriting(record(), job, [{ ...withMap()[0], kind: "keyword", text: "Books apps", use: "domain", userHas: true }, { ...withMap()[0], id: "r2", text: "Relocate to San Francisco", use: "logistics", userHas: true }]);
+    expect(field.users.map((u) => [u.text, u.skills])).toEqual([["Books apps", []]]);
+    // The company's own values are its words, never something the candidate has, even when ticked.
+    const values = planWriting(record(), job, [{ ...withMap()[0], kind: "company", text: "Our values: C.R.A.F.T.", use: "domain", userHas: true }]);
+    expect(values.users).toEqual([]);
+  });
+
+  it("reads a skill the user has as the technologies it names, not the sentence", () => {
+    expect(skillTerms({ text: "Experience with Kafka", kind: "must" }, ["Kafka", "Kubernetes"])).toEqual(["Kafka"]);
+    expect(skillTerms({ text: "Familiarity with Kubernetes and Helm", kind: "nice" }, ["Kubernetes", "Kube"])).toEqual(["Kubernetes"]);
+    // Every technology it names, in the job's order: "Rails" was lost when only the longest name was kept.
+    expect(skillTerms({ text: "Rails and TypeScript experience (team stack)", kind: "nice" }, ["Rails", "React", "TypeScript"])).toEqual(["Rails", "TypeScript"]);
+    // A name inside a longer one it also names is that one.
+    expect(skillTerms({ text: "Shipped React Native apps", kind: "must" }, ["React", "React Native"])).toEqual(["React Native"]);
+    expect(skillTerms({ text: "Strong SQL", kind: "must", use: "skill" }, [])).toEqual(["Strong SQL"]);
+    expect(skillTerms({ text: "Strong SQL", kind: "must" }, [])).toEqual([]);
+    expect(skillTerms({ text: "Adaptability", kind: "keyword", use: "trait" }, [])).toEqual([]);
+    expect(skillTerms({ text: "Experience launching payments products", kind: "must" }, ["Kafka"])).toEqual([]);
+    const p = planWriting(record(), { ...job, technologies: ["Kafka"] }, [{ ...withMap()[0], text: "Experience with Kafka", userHas: true }]);
+    expect(p.users[0].skills).toEqual(["Kafka"]);
+    // The skills section is written by code, with what the user has in it; the writer is not asked to list skills.
+    expect(p.skills.flatMap((l) => l.items)).toContain("Kafka");
+    const prompt = buildPrompt(p, job, withMap()).user;
+    expect(prompt).not.toMatch(/^SKILLS/m);
+    // No line of the record mentions Kafka, so the writer is told the skills section carries it, not a bullet.
+    expect(p.listedOnly).toEqual(["Kafka"]);
+    expect(prompt).toContain("IN THE SKILLS SECTION ONLY (listed there already; no line of the candidate's mentions them)\nKafka");
+    const two = planWriting(record(), { ...job, technologies: ["Rails", "TypeScript"] }, [{ ...withMap()[0], text: "Rails and TypeScript experience", userHas: true }]);
+    expect(two.skills.flatMap((l) => l.items)).toEqual(expect.arrayContaining(["Rails", "TypeScript"]));
+  });
+
+  it("keeps only the facts that have wording for the chosen framing, and never a skills line", () => {
+    const rec = record();
+    const roleA = rec.employers[0].roles[0];
+    // fact3 was only ever worded for the product framing, and fact2 is a skills line kept as a bullet.
+    roleA.facts[2].wordings[0].framingId = "fPm";
+    roleA.facts[1].wordings[0].text = "Technologies: TypeScript, Docker";
+    const eng = planWriting(rec, { ...job, title: "Software Engineer" }, reqs);
+    expect(eng.roles[0].title).toBe("Software Engineer");
+    expect(eng.roles[0].facts.map((f) => f.factId)).toEqual(["fact1"]);
+    expect(planWriting(rec, job, reqs).roles[0].facts.map((f) => f.factId)).toEqual(["fact1", "fact3"]);
+  });
+
+  it("falls back to all of a role's wording when none of it fits the framing, so the role is not lost", () => {
+    const rec = record();
+    for (const f of rec.employers[1].roles[0].facts) for (const w of f.wordings) w.framingId = "other";
+    rec.employers[1].roles[0].framings = [];
+    expect(planWriting(rec, job, reqs).roles[1].facts.map((f) => f.factId)).toEqual(["fact4"]);
+  });
+
+  it("puts one education, one of each certification and clean skills in the plan", () => {
+    const rec = record();
+    const tracked = { sources: [], provenance: rec.education[0].provenance };
+    rec.education.push({ id: "e2", institution: "North Point School", degree: "ICSE Board", field: "", start: "", end: "2018", details: "", ...tracked }, { id: "e3", institution: "North Point School, India", degree: "ICSE Board", field: "", start: "", end: "2018", details: "", ...tracked });
+    rec.certifications.push({ id: "cert2", name: "AWS Certified Solutions Architect", issuer: "Amazon", date: "", ...tracked }, { id: "cert3", name: "Google Cloud Essentials", issuer: "", date: "", ...tracked });
+    rec.skills.push(
+      { id: "s3", name: "AWS (EC2, S3, Lambda", category: "Cloud", ...tracked },
+      { id: "s4", name: "TypeScript/JavaScript", category: "Languages", ...tracked },
+      { id: "s5", name: "JavaScript/TypeScript", category: "Languages", ...tracked },
+    );
+    const p = planWriting(rec, job, reqs);
+    expect(p.education.map((e) => e.institution)).toEqual(["State University"]);
+    expect(p.certifications.map((c) => c.name)).toEqual(["AWS Solutions Architect", "Google Cloud Essentials"]);
+    // A skill split mid-bracket is left out, and the same skill in another order is listed once.
+    expect(p.skills).toEqual([
+      { category: "Databases", items: ["SQL"] },
+      { category: "Design", items: ["Figma"] },
+      { category: "Languages", items: ["TypeScript/JavaScript"] },
+    ]);
+  });
+
+  it("chooses a long project by the requirements it answers and the job's words it contains", () => {
+    const rec = record();
+    rec.projects[1].wordings = [{ id: "pw", text: `${"Built a document collection platform. ".repeat(30)}Launched payments products for merchants and wrote SQL reports.`, framingId: null, form: "bullet", sources: [], provenance: rec.projects[1].provenance }];
+    const p = planWriting(rec, job, withMap([{ verdict: "met", refs: ["proj2"] }]));
+    expect(p.projects.map((x) => x.name)).toEqual(["Garden app", "Ledger toy"]);
+  });
+
+  it("offers a fact tied to the job's core even when its wording belongs to the role's other telling", () => {
+    const rec = record();
+    const daily = fact("fact5", [["w5", "Works daily in Claude Code with rules files and parallel agents"]]);
+    daily.wordings[0].framingId = "fEng";
+    rec.employers[0].roles[0].facts.push(daily);
+    const offeredIds = (reqs: ReturnType<typeof withMap>) => planWriting(rec, job, reqs).roles[0].facts.map((f) => f.factId);
+    // Written as Product Manager, an engineering line is left out, unless the job's core rests on it.
+    expect(offeredIds(withMap([{ verdict: "met", refs: ["fact5"] }]))).not.toContain("fact5");
+    expect(offeredIds(withMap([{ verdict: "met", refs: ["fact5"], core: true, weight: 8 }]))).toContain("fact5");
+  });
+
+  it("offers a project's wordings that prove the most, not its first ones", () => {
+    const rec = record();
+    rec.projects[0].wordings = ["Led discovery with a customer validation plan", "Wrote the MVP roadmap", "Scoped the pilot", "Covered by 248 automated tests, which caught a bug every other check missed"].map((text, i) => ({
+      id: `pw${i}`,
+      text,
+      framingId: null,
+      form: "bullet" as const,
+      sources: [],
+      provenance: rec.projects[0].provenance,
+    }));
+    const p = planWriting(rec, job, withMap([{ verdict: "met", refs: ["proj1"] }]));
+    expect(p.projects.find((x) => x.name === "Ledger toy")!.texts[0]).toBe("Covered by 248 automated tests, which caught a bug every other check missed");
+  });
+
+  it("follows the experience limits from the generation instructions", () => {
+    const p = planWriting(record(), job, reqs, { styleRules: "", tone: "concise", sectionLimits: [{ section: "Experience", maxBullets: 7, maxChars: 150 }] });
+    expect(p.totalBullets).toBe(7);
+    expect(p.bulletChars).toBe(150);
+    expect(p.roles.reduce((n, r) => n + r.budget, 0)).toBeLessThanOrEqual(7);
+  });
+});
+
+describe("answers", () => {
+  const plan = planWriting(record(), job, withMap([{ userHas: true, note: "AWS certified", refs: ["fact1"] }, {}, {}]));
+  const answer = (over: Partial<WriterAnswer> = {}): WriterAnswer => ({
+    summary: "Product manager who shipped billing to thousands of merchants.",
+    roles: [
+      { role: "e2", bullets: [{ facts: ["f4"], text: "Built reporting tools in SQL for the finance team" }] },
+      {
+        role: "e1",
+        bullets: [
+          { facts: ["f1", "u1"], text: "- Launched self-serve billing — 2,000 merchants, with the AWS stack" },
+          { facts: ["f2"], text: "Cut build times by 40% across the platform team" },
+        ],
+      },
+    ],
+    projects: [{ project: "p1", bullets: [{ text: "Designed a double-entry ledger with SQL" }] }],
+    certifications: ["c1"],
+    ...over,
+  });
+
+  it("never throws a draft away over an id, a length or a count, and reads only what was offered", () => {
+    const schema = answerSchema(plan);
+    expect(schema.safeParse(answer()).success).toBe(true);
+    const loose = answer({
+      roles: [
+        { role: "e9", bullets: [{ facts: ["f1"], text: "A role that was never offered" }] },
+        {
+          role: "e1",
+          bullets: [
+            { facts: ["f99"], text: "Tied to an id that was never offered" },
+            { facts: [], text: "Tied to nothing at all" },
+            { facts: ["f1", "f2", "f3"], text: "x".repeat(700) },
+            { facts: ["f2"], text: "short" },
+          ],
+        },
+      ],
+      certifications: ["c2", "c1"],
+    });
+    expect(schema.safeParse(loose).success).toBe(true);
+    const w = readWriting(loose, plan);
+    // Only the bullet tied to facts that were offered stays, with at most two of them; the long one is for the checks.
+    expect(w.roles[0].bullets.map((b) => [b.factIds, b.text.length])).toEqual([[["fact1", "fact2"], 700]]);
+    expect(w.certifications.map((c) => c.id)).toEqual(["cert1"]);
+    // A bullet sent as bare text has no facts, so it cannot be checked against the record: the role keeps its own.
+    const bare = schema.parse({ summary: "PM.", roles: [{ role: "e1", bullets: ["Launched billing for merchants"] }] });
+    expect(readWriting(bare, plan).roles[0].bullets.map((b) => b.factIds)).toEqual([["fact1"], ["fact2"]]);
+  });
+
+  it("takes a project bullet written as bare text, and still shows the model the object", () => {
+    const schema = answerSchema(plan);
+    const project = plan.projects[0].alias;
+    const parsed = schema.safeParse({ summary: "PM.", roles: [], projects: [{ project, bullets: ["Built the billing prototype in a week", { text: "Shipped it to 40 merchants" }] }], skills: [], certifications: [] });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.projects[0].bullets).toEqual([{ text: "Built the billing prototype in a week" }, { text: "Shipped it to 40 merchants" }]);
+    const shown = JSON.stringify(z.toJSONSchema(schema));
+    // A project bullet may also name the claims it proves.
+    expect(shown).toMatch(/"bullets":\{"default":\[\],"type":"array","items":\{"type":"object","properties":\{"facts":\{"description":"The \\"u\\" ids it proves, if any","type":"array","items":\{"type":"string"\}\},"text"/);
+  });
+
+  it("drops projects and certifications that were not offered, instead of failing the whole draft", () => {
+    const bare = planWriting({ ...record(), projects: [], certifications: [] }, job, withMap());
+    const schema = answerSchema(bare);
+    expect(schema.safeParse({ summary: "", roles: [], projects: [], skills: [], certifications: [] }).success).toBe(true);
+    const stray = { summary: "PM.", roles: [], projects: [{ project: "p1", bullets: [{ text: "Built a thing nobody offered" }] }], skills: [], certifications: ["c9"] };
+    expect(schema.safeParse(stray).success).toBe(true);
+    const w = readWriting(stray, bare);
+    expect(w.projects).toEqual([]);
+    expect(w.certifications).toEqual([]);
+  });
+
+  it("reads the answer into a resume: plan order, ids kept, wording tidied, most relevant first", () => {
+    const w = readWriting(answer(), plan);
+    expect(w.roles.map((r) => r.plan.employer)).toEqual(["Acme", "Initech"]);
+    const [first, second] = w.roles[0].bullets;
+    expect(first.text).toBe("Launched self-serve billing - 2,000 merchants, with the AWS stack");
+    expect(first).toMatchObject({ factIds: ["fact1"], userRequirementIds: ["r1"] });
+    // It answers the job's heaviest requirement twice over (the fact it builds on, and what the user says they have).
+    expect(first).toMatchObject({ relevance: 10 });
+    expect(second).toMatchObject({ factIds: ["fact2"], userRequirementIds: [], relevance: 0 });
+    expect(w.projects[0]).toMatchObject({ bullets: [{ text: "Designed a double-entry ledger with SQL", factIds: ["proj1"] }] });
+    // The skills section is the plan's, written by code.
+    expect(w.skills).toEqual(plan.skills);
+    expect(w.certifications.map((c) => c.name)).toEqual(["AWS Solutions Architect"]);
+    expect(w.education).toBe(plan.education);
+  });
+
+  it("keeps a role the model left out, with its strongest facts as they were worded", () => {
+    const w = readWriting(answer({ roles: [{ role: "e1", bullets: [{ facts: ["f1"], text: "Launched self-serve billing" }] }] }), plan);
+    expect(w.roles[1].bullets.map((b) => b.text)).toEqual(["Wrote internal reporting tools in SQL"]);
+  });
+
+  it("drops a repeated bullet and any beyond the role's budget", () => {
+    const same = { facts: ["f1"], text: "Launched self-serve billing" };
+    const w = readWriting(answer({ roles: [{ role: "e2", bullets: [same, { ...same, text: "launched self-serve billing." }] }] }), plan);
+    expect(w.roles[1].bullets).toHaveLength(1);
+  });
+
+  it("finds wording the style rules rule out", () => {
+    const w = readWriting(answer({ summary: "Passionate product manager who will leverage payments experience." }), plan);
+    expect(checkWriting(w).sort()).toEqual(["leverage", "passionate"]);
+    expect(checkWriting(readWriting(answer(), plan))).toEqual([]);
+  });
+
+  it("tidies list markers, long dashes and spaces", () => {
+    expect(tidy("  •  Led a team – of five  engineers ")).toBe("Led a team - of five engineers");
+  });
+});
+
+describe("ordering what was written", () => {
+  const plan = planWriting(record(), job, withMap([{ verdict: "met", refs: ["fact1"] }, { verdict: "met", refs: ["fact4"] }, {}]));
+  const base = (over: Partial<WriterAnswer> = {}): WriterAnswer => ({
+    summary: "Product manager with payments experience.",
+    roles: [
+      {
+        role: "e1",
+        bullets: [
+          { facts: ["f3"], text: "Mentored four junior engineers into senior roles" },
+          { facts: ["f2"], text: "Cut build times by 40% across the platform team" },
+          { facts: ["f1"], text: "Launched self-serve billing for 2,000 merchants" },
+        ],
+      },
+    ],
+    projects: [],
+    certifications: [],
+    ...over,
+  });
+
+  it("keeps the model's order of bullets", () => {
+    const w = readWriting(base(), plan);
+    expect(w.roles[0].bullets.map((b) => b.text)).toEqual([
+      "Mentored four junior engineers into senior roles",
+      "Cut build times by 40% across the platform team",
+      "Launched self-serve billing for 2,000 merchants",
+    ]);
+  });
+
+  it("rules out the extra phrases that read as machine or student wording", () => {
+    const w = readWriting(base({ summary: "Results-driven manager ready for the next stage of my career." }), plan);
+    expect(checkWriting(w).sort()).toEqual(["next stage of my career", "results-driven"]);
+    expect(RESUME_BANNED_EXTRA).toContain("the combination of");
+  });
+});
+
+describe("buildPrompt", () => {
+  const plan = planWriting(record(), job, withMap([{ userHas: true, note: "AWS certified", verdict: "partial", refs: ["fact1"] }, { verdict: "met", refs: ["fact4"] }, {}]));
+
+  it("sends the job, what it asks for, the record by id, and what the user has", () => {
+    const { system, user } = buildPrompt(plan, job, withMap([{ userHas: true, note: "AWS certified" }]), { styleRules: "No jargon.", tone: "confident", sectionLimits: [] });
+    expect(system).toContain("The candidate is qualified for this job");
+    expect(user).toContain("Product Manager at Stripe, Remote");
+    expect(user).toContain("r1 [Must have, the candidate has this]: Experience launching payments products");
+    expect(user).toContain('e1: Product Manager at Acme, Jan 2021 - Present. Write up to 3 bullets.');
+    expect(user).toContain('f1: "Launched self-serve billing for 2,000 merchants" | "Built the billing service in TypeScript"');
+    expect(user).toContain("THE CANDIDATE SAYS THEY HAVE THIS\nu1: Experience launching payments products (their note: AWS certified)");
+    expect(user).toContain("Tone: confident.");
+    expect(user).toContain("No jargon.");
+    expect(user).toContain("PROJECTS (include every one, chosen for this job; up to 2 bullets each, the ones that prove the most)\np1: Ledger toy.");
+  });
+});
+
+/** A fact whose wordings each belong to a telling of the role. */
+const told = (id: string, wordings: [string, string, string][]) => {
+  const f = fact(id, wordings.map(([wid, text]) => [wid, text]));
+  return { ...f, wordings: f.wordings.map((w, i) => ({ ...w, framingId: wordings[i][2] })) };
+};
+
+describe("choosing what to write from", () => {
+  it("prefers the telling whose wordings prove the most when the title says nothing of the angle", () => {
+    const r = role({
+      framings: [framing("fEng", "Fullstack Software Developer", "Engineering"), framing("fPm", "Product Manager", "Product")],
+      facts: [
+        told("a", [["a1", "Increased user activation by 45% and cut time-to-value from 8 minutes to 1", "fEng"], ["a2", "Led onboarding research and redesign", "fPm"]]),
+        told("b", [["b1", "Reduced manual workflows by 80% across 15+ team members", "fEng"], ["b2", "Worked with sales and operations on tools", "fPm"]]),
+      ],
+    });
+    expect(pickFraming(r, "Builder")!.id).toBe("fEng");
+    // The title's angle still counts: a Product Manager job keeps the product telling.
+    expect(pickFraming(r, "Product Manager")!.id).toBe("fPm");
+    // A "Product Engineer" is an engineer.
+    expect(pickFraming(r, "Product Engineer (AI / Full-Stack)")!.id).toBe("fEng");
+    expect(recommendFraming(r, "Product Engineer (AI / Full-Stack)", [])!.id).toBe("fEng");
+  });
+
+  it("writes from the telling the user chose, when it is one of the role's", () => {
+    const rec = record();
+    const reqs = withMap();
+    expect(planWriting(rec, { ...job, title: "Senior Software Engineer" }, reqs, null, { framings: { roleA: "fPm" }, wordings: {} }).roles[0].title).toBe("Product Manager");
+    expect(planWriting(rec, { ...job, title: "Senior Software Engineer" }, reqs, null, { framings: { roleA: "nope" }, wordings: {} }).roles[0].title).toBe("Software Engineer");
+  });
+
+  it("puts the wording the user picked first", () => {
+    const plan = planWriting(record(), job, withMap(), null, { framings: {}, wordings: { fact1: "w1" } });
+    expect(plan.roles[0].facts.find((f) => f.factId === "fact1")!.texts[0]).toBe("Built the billing service in TypeScript");
+  });
+
+  it("scores lines that prove a result above lines that only describe work", () => {
+    expect(proofStrength("Increased user activation by 45% and cut time-to-value from 8 minutes to 1")).toBeGreaterThan(proofStrength("Owned onboarding and worked with design"));
+    expect(proofStrength("Achieved 3x traffic growth")).toBeGreaterThan(proofStrength("Led the migration to Next.js"));
+  });
+});

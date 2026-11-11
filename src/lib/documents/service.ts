@@ -305,6 +305,41 @@ export async function restoreVersion(documentId: string, versionId: string, db: 
 }
 
 /**
+ * Puts a freshly written resume into an existing document as its next version, and makes it the draft, the way a
+ * restore does. Anything the user has changed since the latest version is saved as a version of its own first, so
+ * writing again never loses work. A locked version stays as it was; the new one sits on top of it.
+ */
+export async function addGeneratedVersion(
+  documentId: string,
+  content: DocJSON,
+  opts: { note?: string | null } = {},
+  db: DbOrTx = defaultDb(),
+): Promise<DocumentVersionRow> {
+  const valid = assertValidDoc(normalizeDoc(content));
+  return db.transaction(async (tx) => {
+    const doc = await lockDocument(tx, documentId);
+    const draft = await getDraft(documentId, tx);
+    const latest = await latestVersion(documentId, tx);
+    if (draft && (!latest || latest.contentSha256 !== draft.contentSha256 || settingsChanged(latest.pageSettings, doc.pageSettings))) {
+      await insertVersion(tx, doc, { content: draft.content, subject: draft.subject, reason: "manual", note: "Saved before writing it again" });
+    }
+    const version = await insertVersion(tx, doc, { content: valid, subject: draft?.subject ?? "", reason: "generated", note: opts.note ?? null });
+    await tx
+      .update(documentDrafts)
+      .set({
+        content: valid,
+        contentSha256: version.contentSha256,
+        revision: sql`${documentDrafts.revision} + 1`,
+        baseVersionId: version.id,
+        updatedAt: now(),
+      })
+      .where(eq(documentDrafts.documentId, documentId));
+    await tx.update(documents).set({ updatedAt: now() }).where(eq(documents.id, documentId));
+    return version;
+  });
+}
+
+/**
  * Replaces an unedited uploaded document with a structured version of it (made by the model from the same text).
  * Does nothing, and returns null, if the document has been edited, restored or versioned since `fromVersionId`: the
  * user's work always wins over the automatic step.

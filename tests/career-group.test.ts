@@ -1,4 +1,7 @@
+// The model name is read from the environment, which needs a database URL to load; no database is used.
+process.env.DATABASE_URL ??= "postgres://unused";
 import { describe, expect, it, vi } from "vitest";
+import { textKey } from "@/lib/career/normalize";
 import { z } from "zod";
 import { applyProposal, resolveDecisions } from "@/lib/career/apply";
 import { extractFromProfile } from "@/lib/career/extract";
@@ -204,7 +207,8 @@ describe("grouping a proposal", () => {
     const grouped = await groupProposal(p, record, grouper);
     const out = grouped.employers[0].roles[0].bullets;
     expect(out[0].suggestion).toMatchObject({ to: "known", factId: "f1" });
-    expect(out[1].suggestion).toEqual({ to: "fact", factId: "f1", why: "model" });
+    // It says nothing the fact does not, so only its source is added.
+    expect(out[1].suggestion).toEqual({ to: "known", factId: "f1", wordingId: null });
     expect(out[2].suggestion).toEqual({ to: "new", withKey: k3 });
     expect(out[3].suggestion).toEqual({ to: "new" });
   });
@@ -238,7 +242,9 @@ describe("bullets that join a new fact", () => {
 
     const joined = applyProposal(emptyRecord(), resolveDecisions(proposal, {}, emptyRecord()), { sourceId: SOURCE_A, label: "A", newId: counter("n") }, null);
     expect(joined.record.employers[0].roles[0].facts).toHaveLength(1);
-    expect(joined.record.employers[0].roles[0].facts[0].wordings.map((w) => w.text)).toEqual(["Shipped billing", "Delivered the billing system"]);
+    // Both are told for the same framing, so one wording is kept and the other is noted as seen.
+    expect(joined.record.employers[0].roles[0].facts[0].wordings.map((w) => w.text)).toEqual(["Delivered the billing system"]);
+    expect(joined.record.employers[0].roles[0].facts[0].seen).toEqual([textKey("Shipped billing"), textKey("Delivered the billing system")]);
     expect(joined.summary).toMatchObject({ factsAdded: 1, wordingsAdded: 2 });
 
     // With the root left out, the dependent becomes a plain new fact.
@@ -258,6 +264,10 @@ describe("bullets that join a new fact", () => {
     const resolved = resolveDecisions(proposal, {}, record);
     expect(resolved.employers[0].roles[0].bullets[1].target).toMatchObject({ to: "fact", factId: "f1" });
     const out = applyProposal(record, resolved, { sourceId: SOURCE_B, label: "B", newId: counter("n") }, null);
-    expect(out.record.employers[0].roles[0].facts[0].wordings.map((w) => w.text)).toEqual(["Built the billing service", "Shipped billing", "Delivered the billing system"]);
+    const fact = out.record.employers[0].roles[0].facts[0];
+    // The recorded wording is tied to no framing, the new ones to this resume's: two slots, one wording each.
+    expect(fact.wordings.map((w) => w.text)).toEqual(["Built the billing service", "Delivered the billing system"]);
+    expect(fact.seen).toEqual(expect.arrayContaining(["Built the billing service", "Shipped billing", "Delivered the billing system"].map(textKey)));
+    expect(fact.sources.map((s) => s.sourceId)).toEqual(expect.arrayContaining([SOURCE_A, SOURCE_B]));
   });
 });

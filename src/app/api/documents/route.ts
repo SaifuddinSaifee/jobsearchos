@@ -21,7 +21,7 @@ const Form = z.object({
 const field = (form: FormData, key: string) => String(form.get(key) ?? "");
 const orNull = (s: string) => s || null;
 
-/** Files a resume or cover letter (PDF or DOCX) in the library. Uploads go through a route, not a server action, to avoid the 1 MB action limit. */
+/** Files a resume or cover letter (PDF, DOCX or Markdown) in the library. Uploads go through a route, not a server action, to avoid the 1 MB action limit. */
 export async function POST(request: Request) {
   const form = await request.formData();
   const file = form.get("file");

@@ -11,6 +11,9 @@ export type JobsActions = {
   changeStatus: (applicationIds: string[], to: ApplicationStatus) => void;
   /** Soft delete with an Undo toast. */
   deleteJobs: (jobIds: string[]) => void;
+  /** Gets the posting again and replaces the job's details. */
+  refetchJob: (jobId: string) => void;
+  refetching: ReadonlySet<string>;
 };
 
 const Ctx = createContext<JobsActions | null>(null);

@@ -13,6 +13,9 @@ type Price = { input: number; cachedInput: number; output: number };
 const PRICES: Record<string, Price> = {
   "zai-org/glm-5.3-flash": { input: 0.15, cachedInput: 0.03, output: 0.5 },
   "minimaxai/minimax-m3": { input: 0.3, cachedInput: 0.06, output: 1.2 },
+  // Writing and reviewing a resume. Checked against Together's model list on 2026-10-15.
+  "zai-org/glm-5.3": { input: 1.4, cachedInput: 0.26, output: 4.4 },
+  "moonshotai/kimi-k3": { input: 3, cachedInput: 0.3, output: 15 },
   "deepseek-ai/deepseek-v4.1-flash": { input: 0.3, cachedInput: 0.006, output: 1.2 },
   "qwen/qwen3.8-flash": { input: 0.15, cachedInput: 0.15, output: 0.47 },
   "openai/gpt-oss-120b": { input: 0.15, cachedInput: 0.15, output: 0.6 },

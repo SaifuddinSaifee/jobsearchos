@@ -3,14 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { documentVersions, resumeChunks, resumeIndexes } from "@/lib/db/schema";
+import { resumeIndexes } from "@/lib/db/schema";
 import type { DocJSON } from "@/lib/documents/build";
 import { profileToDoc } from "@/lib/documents/convert/profile-to-doc";
 import { blankContent } from "@/lib/documents/intake";
 import { textToDoc } from "@/lib/documents/convert/text-to-doc";
 import { createDocument, createVersion, latestVersion, saveDraft, softDelete } from "@/lib/documents/service";
 import { emptyProfile, type Profile } from "@/lib/profile/schema";
-import { EMBEDDING_DIMENSIONS } from "@/lib/resume/embed";
 import {
   backfillResumeIndexes,
   claimNextIndexes,
@@ -20,7 +19,6 @@ import {
   getIndexRowForVersion,
   listIndexInfo,
   processResumeIndex,
-  searchResumeChunks,
   sweepStaleIndexes,
 } from "@/lib/resume/indexing";
 import { processIndex } from "@/lib/queue/worker";
@@ -44,18 +42,6 @@ afterAll(async () => {
   await db.$client.end();
   if (dir) await rm(dir, { recursive: true, force: true });
 });
-
-/** A fake embedding: one axis per keyword, so which section matches a query is predictable. */
-const KEYWORDS = ["payments", "devrel", "latency"];
-function fakeVector(text: string): number[] {
-  const v = new Array(EMBEDDING_DIMENSIONS).fill(0);
-  KEYWORDS.forEach((k, i) => {
-    if (text.toLowerCase().includes(k)) v[i] = 1;
-  });
-  if (v.every((x) => x === 0)) v[EMBEDDING_DIMENSIONS - 1] = 1;
-  return v;
-}
-const fakeEmbed = async (texts: string[]) => texts.map(fakeVector);
 
 function profile(): Profile {
   const p = emptyProfile();
@@ -88,7 +74,7 @@ async function claimOne(versionId: string) {
 async function indexVersion(versionId: string, deps: Parameters<typeof processResumeIndex>[1] = {}) {
   await enqueueVersionIndex(versionId, {}, db);
   const id = await claimOne(versionId);
-  await processResumeIndex(id, { db, embed: fakeEmbed, ...deps });
+  await processResumeIndex(id, { db, ...deps });
   return id;
 }
 
@@ -104,7 +90,7 @@ describe("queueing", () => {
     const { version } = await structuredResume();
     await enqueueVersionIndex(version.id, {}, db);
     const set = (patch: Partial<typeof resumeIndexes.$inferInsert>) => db.update(resumeIndexes).set(patch).where(eq(resumeIndexes.documentVersionId, version.id));
-    await set({ status: "ready", chunkCount: 3 });
+    await set({ status: "ready" });
     expect((await enqueueVersionIndex(version.id, {}, db)).status).toBe("ready");
     expect((await enqueueVersionIndex(version.id, { force: true }, db)).status).toBe("queued");
 
@@ -171,25 +157,24 @@ describe("queueing", () => {
 });
 
 describe("processResumeIndex", () => {
-  it("splits a structured resume into sections and stores an embedding for each", async () => {
+  it("marks a structured resume read at once, with no model call", async () => {
     const { version } = await structuredResume();
-    const id = await indexVersion(version.id);
+    const parse = vi.fn(async () => profile());
+    const id = await indexVersion(version.id, { parse });
 
+    expect(parse).not.toHaveBeenCalled();
     const row = await getIndexRow(id, db);
-    expect(row).toMatchObject({ status: "ready", chunkCount: 2, error: null, note: null });
+    expect(row).toMatchObject({ status: "ready", error: null, note: null });
     expect(row?.parsed?.experience).toHaveLength(2);
-    const chunks = await db.select().from(resumeChunks).where(eq(resumeChunks.documentVersionId, version.id)).orderBy(resumeChunks.ordinal);
-    expect(chunks.map((c) => c.label)).toEqual(["Engineer at Acme", "Developer Advocate at Globex"]);
-    expect(chunks[0].embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
-  it("structures an unedited upload into a new version, and indexes that one", async () => {
+  it("structures an unedited upload into a new version, and reads that one without the model", async () => {
     const { document, version } = await uploadedResume();
     const parse = vi.fn(async () => profile());
     const id = await indexVersion(version.id, { parse });
 
     expect(parse).toHaveBeenCalledOnce();
-    expect(await getIndexRow(id, db)).toMatchObject({ status: "ready", chunkCount: 0, note: "Replaced by a structured version." });
+    expect(await getIndexRow(id, db)).toMatchObject({ status: "ready", note: "Replaced by a structured version." });
     const v2 = await latestVersion(document.id, db);
     expect(v2).toMatchObject({ version: 2, reason: "structured" });
     expect(v2?.plainText).toContain("Developer Advocate");
@@ -198,13 +183,12 @@ describe("processResumeIndex", () => {
 
     const next = await getIndexRowForVersion(v2!.id, db);
     expect(next?.status).toBe("queued");
-    await processResumeIndex(await claimOne(v2!.id), { db, embed: fakeEmbed, parse });
+    await processResumeIndex(await claimOne(v2!.id), { db, parse });
     expect(parse).toHaveBeenCalledOnce();
     expect((await getIndexRowForVersion(v2!.id, db))?.status).toBe("ready");
-    expect((await db.select().from(resumeChunks).where(eq(resumeChunks.documentVersionId, v2!.id))).length).toBeGreaterThan(0);
   });
 
-  it("falls back to paragraphs and says so when the resume cannot be structured", async () => {
+  it("keeps the upload as it is and says so when the resume cannot be structured", async () => {
     const { document, version } = await uploadedResume();
     const id = await indexVersion(version.id, {
       parse: async () => {
@@ -213,8 +197,7 @@ describe("processResumeIndex", () => {
     });
     const row = await getIndexRow(id, db);
     expect(row?.status).toBe("ready");
-    expect(row?.note).toMatch(/no API key.*split by paragraph/);
-    expect((await db.select().from(resumeChunks)).length).toBeGreaterThan(0);
+    expect(row?.note).toMatch(/no API key.*kept as it was uploaded/);
     expect((await latestVersion(document.id, db))?.version).toBe(1);
   });
 
@@ -222,42 +205,20 @@ describe("processResumeIndex", () => {
     const { document, version } = await uploadedResume();
     await saveDraft(document.id, { content: textToDoc(`${RAW_TEXT}\n\nEdited by hand`), revision: 1 }, db);
     const id = await indexVersion(version.id, { parse: async () => profile() });
-    expect(await getIndexRow(id, db)).toMatchObject({ status: "ready", note: "This was edited before it could be structured, so it was indexed as it is." });
+    expect(await getIndexRow(id, db)).toMatchObject({ status: "ready", note: "This was edited before it could be structured, so it was kept as it is." });
     expect((await latestVersion(document.id, db))?.version).toBe(1);
   });
 
-  it("indexes the text of a resume the model found nothing in", async () => {
+  it("says so when the model found nothing in a resume", async () => {
     const { version } = await uploadedResume();
     const id = await indexVersion(version.id, { parse: async () => emptyProfile() });
-    expect((await getIndexRow(id, db))?.note).toMatch(/no sections.*split by paragraph/);
-    expect((await db.select().from(resumeChunks)).length).toBeGreaterThan(0);
+    expect((await getIndexRow(id, db))?.note).toMatch(/no sections.*kept as it was uploaded/);
   });
 
-  it("fails with the reason when embedding fails, and stores no half-finished chunks", async () => {
-    const { version } = await structuredResume();
-    const id = await indexVersion(version.id, {
-      embed: async () => {
-        throw new Error("Could not reach Ollama at http://localhost:11434.");
-      },
-    });
-    expect(await getIndexRow(id, db)).toMatchObject({ status: "failed", error: "Could not reach Ollama at http://localhost:11434." });
-    expect(await db.select().from(resumeChunks)).toHaveLength(0);
-  });
-
-  it("replaces the old sections when a version is indexed again", async () => {
-    const { version } = await structuredResume();
-    await indexVersion(version.id);
-    expect(await db.select().from(resumeChunks)).toHaveLength(2);
-    await enqueueVersionIndex(version.id, { force: true }, db);
-    await processResumeIndex(await claimOne(version.id), { db, embed: fakeEmbed });
-    expect(await db.select().from(resumeChunks)).toHaveLength(2);
-  });
-
-  it("treats a blank resume as nothing to index yet, not as a failure", async () => {
+  it("treats a blank resume as read, not as a failure", async () => {
     const { version } = await createDocument({ kind: "resume", origin: "blank", title: "Blank", content: blankContent("resume") }, db);
     const id = await indexVersion(version.id);
-    expect(await getIndexRow(id, db)).toMatchObject({ status: "ready", chunkCount: 0, error: null, note: "There is no text to index yet." });
-    expect(await db.select().from(resumeChunks)).toHaveLength(0);
+    expect(await getIndexRow(id, db)).toMatchObject({ status: "ready", error: null });
   });
 
   it("fails cleanly when the document was deleted", async () => {
@@ -265,66 +226,20 @@ describe("processResumeIndex", () => {
     await enqueueVersionIndex(version.id, {}, db);
     const id = await claimOne(version.id);
     await softDelete(document.id, db);
-    await processResumeIndex(id, { db, embed: fakeEmbed });
+    await processResumeIndex(id, { db });
     expect(await getIndexRow(id, db)).toMatchObject({ status: "failed", error: "The document was deleted." });
   });
 
   it("ignores an index that is not currently claimed", async () => {
     const { version } = await structuredResume();
     const info = await enqueueVersionIndex(version.id, {}, db);
-    await processResumeIndex(info.id, { db, embed: fakeEmbed });
+    await processResumeIndex(info.id, { db });
     expect((await getIndexRow(info.id, db))?.status).toBe("queued");
   });
 });
 
-describe("searchResumeChunks", () => {
-  it("returns the sections closest in meaning to the query, best first", async () => {
-    const { document, version } = await structuredResume("Jane resume");
-    await indexVersion(version.id);
-
-    const embedQuery = async (q: string) => fakeVector(q);
-    const devrel = await searchResumeChunks("devrel community role", { limit: 2 }, { db, embedQuery });
-    expect(devrel[0].label).toBe("Developer Advocate at Globex");
-    expect(devrel[0].score).toBeGreaterThan(devrel[1].score);
-    expect(devrel[0]).toMatchObject({ title: "Jane resume", documentId: document.id, versionId: version.id });
-
-    const payments = await searchResumeChunks("payments platform", { limit: 1 }, { db, embedQuery });
-    expect(payments[0].label).toBe("Engineer at Acme");
-  });
-
-  it("only searches the latest version of each resume, and not deleted ones", async () => {
-    const { document, version } = await structuredResume("Jane");
-    await indexVersion(version.id);
-    await saveDraft(document.id, { content: textToDoc("JANE DOE\n\nSUMMARY\nPayments specialist."), revision: 1 }, db);
-    const v2 = (await createVersion(document.id, { reason: "manual" }, db)).version;
-    const embedQuery = async (q: string) => fakeVector(q);
-
-    expect(await searchResumeChunks("devrel", {}, { db, embedQuery })).toEqual([]);
-    await indexVersion(v2.id);
-    const found = await searchResumeChunks("payments", {}, { db, embedQuery });
-    expect(found.map((f) => f.versionId)).toEqual([v2.id]);
-
-    await softDelete(document.id, db);
-    expect(await searchResumeChunks("payments", {}, { db, embedQuery })).toEqual([]);
-  });
-
-  it("can be limited to some documents", async () => {
-    const { version } = await structuredResume();
-    await indexVersion(version.id);
-    expect(await searchResumeChunks("payments", { documentIds: [] }, { db, embedQuery: async (q) => fakeVector(q) })).toEqual([]);
-  });
-
-  it("keeps old version rows out of the way: chunks belong to a version, not the document", async () => {
-    const { version } = await structuredResume();
-    await indexVersion(version.id);
-    const [v] = await db.select().from(documentVersions).where(eq(documentVersions.id, version.id));
-    expect(v.id).toBe(version.id);
-    expect((await db.select().from(resumeChunks))[0].fileId).toBeNull();
-  });
-});
-
 describe("worker", () => {
-  it("marks an index failed when indexing runs too long", async () => {
+  it("marks an index failed when reading runs too long", async () => {
     const { version } = await structuredResume();
     await enqueueVersionIndex(version.id, {}, db);
     const id = await claimOne(version.id);

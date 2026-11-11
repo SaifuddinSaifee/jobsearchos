@@ -41,10 +41,36 @@ export const WordingSchema = z.object({
   ...Tracked,
 });
 
-/** One accomplishment or responsibility, with every way it has been worded. */
+export const DETAIL_KINDS = ["metric", "tool", "team", "specific"] as const;
+export type DetailKind = (typeof DETAIL_KINDS)[number];
+
+/** One thing a fact says, as an exact phrase from one of its wordings: "80%", "LangChain", "Sales, CS and Marketing". */
+export const DetailSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(DETAIL_KINDS),
+  text: z.string().min(1),
+  /** What a metric measures ("manual workflows", "API response time"), so two values for one measure can be found. Empty for other kinds. */
+  measures: z.string(),
+  ...Tracked,
+});
+
+/**
+ * One accomplishment or responsibility: one statement of it, the details it states, and at most one wording per slot
+ * (framing and form). Every document that told it is in `sources`, but only the wordings in a slot keep their text.
+ */
 export const FactSchema = z.object({
   id: z.string().min(1),
+  /**
+   * The fact in one line, merged from its wordings. The one text in the record a model writes: checked against the
+   * details (`checkStatement`) and approved by the user. Empty until one is written; readers fall back to the first wording.
+   */
+  statement: z.string(),
+  details: z.array(DetailSchema),
   wordings: z.array(WordingSchema),
+  /** Every document that told this fact, including those whose wording was folded in and not kept. */
+  sources: z.array(SourceRefSchema),
+  /** `textKey` of every wording ever folded into the fact, so the same text coming back is known without a model. */
+  seen: z.array(z.string()),
   provenance: ProvenanceSchema,
 });
 
@@ -66,6 +92,8 @@ export const RoleSchema = z.object({
   location: z.string(),
   /** Date disagreements between sources, e.g. 'Resume "PM Acme" says Feb 2020 - Mar 2022'. Never blocks a merge. */
   dateNotes: z.array(z.string()),
+  /** From the role's "Technologies:" lines, which are not facts. */
+  technologies: z.array(z.string()),
   framings: z.array(FramingSchema),
   facts: z.array(FactSchema),
   ...Tracked,
@@ -96,6 +124,8 @@ export const ProjectSchema = z.object({
   url: z.string(),
   technologies: z.array(z.string()),
   wordings: z.array(WordingSchema),
+  /** `textKey` of every bullet ever folded into the project, so the same text coming back is known. */
+  seen: z.array(z.string()),
   ...Tracked,
 });
 
@@ -140,6 +170,7 @@ export const REMOVED_KINDS = [
   "framing",
   "fact",
   "wording",
+  "detail",
   "skill",
   "project",
   "education",
@@ -171,6 +202,7 @@ export const CareerRecordSchema = z.object({
 export type SourceRef = z.infer<typeof SourceRefSchema>;
 export type Provenance = z.infer<typeof ProvenanceSchema>;
 export type Wording = z.infer<typeof WordingSchema>;
+export type Detail = z.infer<typeof DetailSchema>;
 export type Fact = z.infer<typeof FactSchema>;
 export type Framing = z.infer<typeof FramingSchema>;
 export type Role = z.infer<typeof RoleSchema>;
@@ -184,7 +216,8 @@ export type Motivation = z.infer<typeof MotivationSchema>;
 export type Removed = z.infer<typeof RemovedSchema>;
 export type CareerRecord = z.infer<typeof CareerRecordSchema>;
 
-export const RECORD_SCHEMA_VERSION = 1;
+/** 2: facts carry a statement, details, sources and seen keys; roles carry technologies (see `upgradeRecord`). */
+export const RECORD_SCHEMA_VERSION = 2;
 
 export function emptyRecord(): CareerRecord {
   return {
@@ -203,7 +236,12 @@ export function mergeProvenance(): Provenance {
   return { origin: "merge", user: [] };
 }
 
-export const RECORD_VERSION_REASONS = ["merge", "edit", "restore"] as const;
+/** A fact with no statement or details yet, holding these wordings. */
+export function newFact(id: string, wordings: Wording[], provenance: Provenance = mergeProvenance()): Fact {
+  return { id, statement: "", details: [], wordings, sources: [], seen: [], provenance };
+}
+
+export const RECORD_VERSION_REASONS = ["merge", "edit", "restore", "compact"] as const;
 export type RecordVersionReason = (typeof RECORD_VERSION_REASONS)[number];
 
 export const PROPOSAL_STATUSES = [
@@ -222,6 +260,10 @@ export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 
 export const SOURCE_KINDS = ["resume", "cover_letter", "profile", "linkedin"] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
+
+/** A tidy of the record: queued, being worked out, waiting for review, then applied, dismissed or failed. */
+export const COMPACTION_STATUSES = ["queued", "running", "ready", "applied", "dismissed", "failed"] as const;
+export type CompactionStatus = (typeof COMPACTION_STATUSES)[number];
 
 /** True for statuses that still need work or a decision, so the UI keeps polling. */
 export function isProposalActive(status: ProposalStatus): boolean {

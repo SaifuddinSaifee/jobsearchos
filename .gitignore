@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# eval runs (npm run eval:writer)
+/eval-runs/
+
 # next.js
 /.next/
 /out/

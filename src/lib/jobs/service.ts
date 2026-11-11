@@ -6,16 +6,18 @@ import {
   jobKeywords,
   jobs,
   jobSnapshots,
+  resumeGenerations,
   statusEvents,
   type JobRow,
 } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { applyResearch, removeCompaniesWithoutJobs, resolveCompany } from "@/lib/companies/service";
+import { OPEN_STATUSES } from "@/lib/resume-writer/types";
 import { dedupKey } from "./dedup";
 import { canonicalizeUrl } from "./fetch/url";
-import { safeHref } from "./links";
-import { extractAdditionalDetails } from "./extract";
-import { JobDraftSchema, JobEditSchema, type AdditionalDetail } from "./schema";
+import { applyNoteHref, safeHref } from "./links";
+import { extractAdditionalDetails, extractApplyNotes } from "./extract";
+import { JobDraftSchema, JobEditSchema, type AdditionalDetail, type ApplyNote, type JobExtraction } from "./schema";
 import type { DeletedState } from "./types";
 
 export type SaveResult =
@@ -55,6 +57,13 @@ export function cleanDetails(list: AdditionalDetail[]): AdditionalDetail[] {
   return list
     .map((d) => ({ heading: d.heading.trim() || "Other details", items: d.items.map((i) => i.trim()).filter(Boolean) }))
     .filter((d) => d.items.length > 0);
+}
+
+/** Trims notes and drops empty ones. A link that is neither an email address nor an http(s) URL is dropped. */
+export function cleanApplyNotes(list: ApplyNote[]): ApplyNote[] {
+  return list
+    .map((n) => ({ kind: n.kind, text: n.text.trim(), link: applyNoteHref(n.link) ? n.link.trim().replace(/^mailto:/i, "") : "" }))
+    .filter((n) => n.text);
 }
 
 function cleanKeywords(list: string[]): string[] {
@@ -111,6 +120,7 @@ export async function saveJob(input: unknown, db: Db = defaultDb()): Promise<Sav
           responsibilities: draft.responsibilities,
           requirements: draft.requirements,
           additionalDetails: cleanDetails(draft.additionalDetails),
+          applyNotes: cleanApplyNotes(draft.applyNotes),
           technologies: draft.technologies,
           origin: "manual",
           status: "saved",
@@ -163,8 +173,23 @@ export async function updateJob(
   input: unknown,
   db: Db = defaultDb(),
 ): Promise<{ removedCompanies: DeletedState["companies"] }> {
-  const edit = JobEditSchema.parse(input);
-  const key = dedupKey(edit);
+  return writeJobFields(jobId, JobEditSchema.parse(input), db);
+}
+
+export type NewSnapshot = Omit<typeof jobSnapshots.$inferInsert, "id" | "jobId" | "fetchedAt">;
+
+/**
+ * Replaces a saved job's fields (edited by the user, or extracted again by a refetch), with its keywords. With a
+ * snapshot, the newly fetched posting is added in the same transaction; older snapshots are kept. Status, notes and
+ * documents are not touched.
+ */
+export async function writeJobFields(
+  jobId: string,
+  fields: JobExtraction,
+  db: Db = defaultDb(),
+  snapshot?: NewSnapshot,
+): Promise<{ removedCompanies: DeletedState["companies"] }> {
+  const key = dedupKey(fields);
   try {
     return await db.transaction(async (tx) => {
       const [job] = await tx
@@ -177,29 +202,30 @@ export async function updateJob(
       const dup = await findDuplicate({ dedupKey: key, exceptId: jobId }, tx);
       if (dup) throw new Error(`"${dup.title}" at ${dup.company} is already saved with this title and location`);
 
-      const company = await resolveCompany({ name: edit.company, aboutFromPosting: edit.aboutCompany }, tx);
-      const applicationUrl = safeHref(edit.applicationUrl) ?? job.canonicalUrl;
+      const company = await resolveCompany({ name: fields.company, aboutFromPosting: fields.aboutCompany }, tx);
+      const applicationUrl = safeHref(fields.applicationUrl) ?? job.canonicalUrl;
 
       await tx
         .update(jobs)
         .set({
-          company: edit.company,
+          company: fields.company.trim(),
           companyId: company.id,
-          aboutCompany: edit.aboutCompany.trim(),
-          title: edit.title,
-          location: edit.location.trim(),
-          remoteType: edit.remoteType,
-          employmentType: edit.employmentType.trim() || null,
-          salaryMin: edit.salaryMin === null ? null : Math.round(edit.salaryMin),
-          salaryMax: edit.salaryMax === null ? null : Math.round(edit.salaryMax),
-          salaryCurrency: edit.salaryCurrency.trim() || null,
-          salaryPeriod: edit.salaryPeriod.trim() || null,
-          postedAt: /^\d{4}-\d{2}-\d{2}$/.test(edit.postedAt) ? edit.postedAt : null,
+          aboutCompany: fields.aboutCompany.trim(),
+          title: fields.title.trim(),
+          location: fields.location.trim(),
+          remoteType: fields.remoteType,
+          employmentType: fields.employmentType.trim() || null,
+          salaryMin: fields.salaryMin === null ? null : Math.round(fields.salaryMin),
+          salaryMax: fields.salaryMax === null ? null : Math.round(fields.salaryMax),
+          salaryCurrency: fields.salaryCurrency.trim() || null,
+          salaryPeriod: fields.salaryPeriod.trim() || null,
+          postedAt: /^\d{4}-\d{2}-\d{2}$/.test(fields.postedAt) ? fields.postedAt : null,
           applicationUrl,
-          responsibilities: edit.responsibilities,
-          requirements: edit.requirements,
-          additionalDetails: cleanDetails(edit.additionalDetails),
-          technologies: edit.technologies,
+          responsibilities: fields.responsibilities,
+          requirements: fields.requirements,
+          additionalDetails: cleanDetails(fields.additionalDetails),
+          applyNotes: cleanApplyNotes(fields.applyNotes),
+          technologies: fields.technologies,
           dedupKey: key,
           updatedAt: new Date(),
         })
@@ -208,13 +234,15 @@ export async function updateJob(
 
       // The form shows every keyword, so the edited list replaces all of them.
       await tx.delete(jobKeywords).where(eq(jobKeywords.jobId, jobId));
-      const keywords = cleanKeywords(edit.keywords);
+      const keywords = cleanKeywords(fields.keywords);
       if (keywords.length) {
         await tx
           .insert(jobKeywords)
           .values(keywords.map((keyword) => ({ jobId, keyword, kind: "extracted" as const })))
           .onConflictDoNothing();
       }
+
+      if (snapshot) await tx.insert(jobSnapshots).values({ ...snapshot, jobId });
 
       const removedCompanies =
         job.companyId && job.companyId !== company.id ? await removeCompaniesWithoutJobs([job.companyId], tx) : [];
@@ -226,13 +254,45 @@ export async function updateJob(
   }
 }
 
+/** A saved job's fields in the shape the extraction gives, so they can be written back (Undo of a refetch). */
+export async function currentFields(jobId: string, db: Db = defaultDb()): Promise<JobExtraction> {
+  const [job] = await db.select().from(jobs).where(and(eq(jobs.id, jobId), isNull(jobs.deletedAt)));
+  if (!job) throw new Error("Job not found");
+  const keywords = await db.select({ keyword: jobKeywords.keyword }).from(jobKeywords).where(eq(jobKeywords.jobId, jobId));
+  return {
+    company: job.company,
+    title: job.title,
+    location: job.location,
+    remoteType: job.remoteType,
+    employmentType: job.employmentType ?? "",
+    salaryMin: job.salaryMin,
+    salaryMax: job.salaryMax,
+    salaryCurrency: job.salaryCurrency ?? "",
+    salaryPeriod: job.salaryPeriod ?? "",
+    postedAt: job.postedAt ?? "",
+    applicationUrl: job.applicationUrl ?? "",
+    applyNotes: job.applyNotes ?? [],
+    aboutCompany: job.aboutCompany,
+    responsibilities: job.responsibilities,
+    requirements: job.requirements,
+    additionalDetails: job.additionalDetails,
+    technologies: job.technologies,
+    keywords: keywords.map((k) => k.keyword),
+  };
+}
+
 /**
- * Soft-deletes jobs. A company left without any jobs is deleted with them. Returns what was deleted so
- * Undo can bring it back.
+ * Soft-deletes jobs. A company left without any jobs is deleted with them, and a resume still being written (or
+ * waiting for review) for one of them is stopped, so the worker never picks it up. Returns what was deleted so Undo
+ * can bring it back (Undo does not restart a stopped resume), and the stopped generations so the caller can cancel
+ * any that are running.
  */
-export async function deleteJobs(jobIds: string[], db: Db = defaultDb()): Promise<DeletedState> {
+export async function deleteJobs(
+  jobIds: string[],
+  db: Db = defaultDb(),
+): Promise<{ deleted: DeletedState; stoppedGenerations: string[] }> {
   const ids = [...new Set(jobIds)];
-  if (!ids.length) return { jobIds: [], companies: [] };
+  if (!ids.length) return { deleted: { jobIds: [], companies: [] }, stoppedGenerations: [] };
   return db.transaction(async (tx) => {
     const deleted = await tx
       .update(jobs)
@@ -240,11 +300,16 @@ export async function deleteJobs(jobIds: string[], db: Db = defaultDb()): Promis
       .where(and(inArray(jobs.id, ids), isNull(jobs.deletedAt)))
       .returning({ id: jobs.id, companyId: jobs.companyId });
     if (deleted.length !== ids.length) throw new Error("Job not found");
+    const stopped = await tx
+      .update(resumeGenerations)
+      .set({ status: "stopped", finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(inArray(resumeGenerations.jobId, ids), inArray(resumeGenerations.status, [...OPEN_STATUSES])))
+      .returning({ id: resumeGenerations.id });
     const removed = await removeCompaniesWithoutJobs(
       deleted.map((d) => d.companyId).filter((id): id is string => id !== null),
       tx,
     );
-    return { jobIds: deleted.map((d) => d.id), companies: removed };
+    return { deleted: { jobIds: deleted.map((d) => d.id), companies: removed }, stoppedGenerations: stopped.map((s) => s.id) };
   });
 }
 
@@ -320,4 +385,23 @@ export async function fillAdditionalDetails(
   const details = cleanDetails(await extract(snap.rawText));
   await db.update(jobs).set({ additionalDetails: details, updatedAt: new Date() }).where(eq(jobs.id, jobId));
   return details;
+}
+
+/** Finds a saved job's notes on how to apply in the posting text kept when it was saved. Overwrites what is there. */
+export async function fillApplyNotes(
+  jobId: string,
+  db: Db = defaultDb(),
+  extract: (text: string) => Promise<ApplyNote[]> = extractApplyNotes,
+): Promise<ApplyNote[]> {
+  const [snap] = await db
+    .select({ rawText: jobSnapshots.rawText })
+    .from(jobSnapshots)
+    .innerJoin(jobs, eq(jobs.id, jobSnapshots.jobId))
+    .where(and(eq(jobSnapshots.jobId, jobId), isNull(jobs.deletedAt)))
+    .orderBy(desc(jobSnapshots.fetchedAt))
+    .limit(1);
+  if (!snap) throw new Error("No saved posting text for this job");
+  const notes = cleanApplyNotes(await extract(snap.rawText));
+  await db.update(jobs).set({ applyNotes: notes, updatedAt: new Date() }).where(eq(jobs.id, jobId));
+  return notes;
 }

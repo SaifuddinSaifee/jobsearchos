@@ -1,11 +1,13 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { AlertTriangle, BookOpen, Check, CircleAlert, FileCheck2, ListTree, Loader2, RotateCw, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { saveVersionAction, updatePageSettingsAction } from "@/app/(app)/library/actions";
+import { DOCUMENT_OFFER_KEY } from "@/components/career/use-document-offer";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -64,6 +66,7 @@ const STATUS: Record<SaveStatus, { text: string; icon: typeof Check; spin?: bool
 /** The editor: a sheet of A4 you type on. Loaded only on the document page, and only on screens big enough to write on. */
 export function DocumentEditor({ documentId, kind, initialContent, initialSubject, initialRevision, initialSettings }: DocumentEditorProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const session = useEditorSession();
   const [settings, setSettings] = useState(initialSettings);
   const [subject, setSubject] = useState(initialSubject);
@@ -185,6 +188,7 @@ export function DocumentEditor({ documentId, kind, initialContent, initialSubjec
     setVersionNote("");
     if (res.created) toast.success(`Saved as version ${res.version}`);
     else toast.message(`Nothing has changed since version ${res.version}.`);
+    void queryClient.invalidateQueries({ queryKey: DOCUMENT_OFFER_KEY });
     router.refresh();
   }
 

@@ -16,6 +16,7 @@ Each row carries its Phoenix trace id, so a call on the usage page can be found 
 - [Actions and steps](#actions-and-steps)
 - [The `llm_calls` table](#the-llm_calls-table)
 - [Prices and cost](#prices-and-cost)
+- [Prompt caching](#prompt-caching)
 - [Phoenix tracing](#phoenix-tracing)
 - [The AI usage page](#the-ai-usage-page)
 - [Scripts](#scripts)
@@ -30,15 +31,16 @@ Before this, nothing was recorded: token counts were thrown away, so there was n
 
 ## How a call is recorded
 
-All chat calls go through one function, `chatCompletion` in [src/lib/llm/chat.ts](../src/lib/llm/chat.ts), reached through `chatStructured` ([structured.ts](../src/lib/llm/structured.ts)) or `TogetherProvider` ([generation.ts](../src/lib/llm/generation.ts)).
+All chat calls go through one function, `chatCompletion` in [src/lib/llm/chat.ts](../src/lib/llm/chat.ts), reached through `chatStructured` ([structured.ts](../src/lib/llm/structured.ts)).
 
 1. The call runs inside a named **step** span (`traceStep`).
 2. It goes out through the `openai` SDK pointed at Together ([openai.ts](../src/lib/llm/openai.ts)), which is instrumented by OpenInference. That instrumentation makes the `OpenAI Chat Completions` span with the prompt, reply, settings and token counts. Model listing for the Settings page stays on the Together SDK, because Together returns a bare array there.
 3. The reply is streamed and joined. The stream ends with a usage-only chunk (`stream_options.include_usage`), which gives prompt, completion, cached and reasoning tokens.
-4. Validation happens **inside** the call (the `read` callback of `chatStructured`). A reply that cost tokens but is cut off, not JSON or off schema is therefore recorded as a failed call, with its tokens.
+4. Validation happens **inside** the call (the `read` callback of `chatStructured`). A reply that cost tokens but is cut off, not JSON or off schema is therefore recorded as a failed call, with its tokens. The one exception is a caller that passes `salvage`: a reply cut off at the limit is closed after its last complete value (`closeCutJson`), and if the caller can use that part and it passes the schema, the call is recorded as `ok` with finish reason `length`. Only the resume review does this (its scores and finished edits stand alone).
+5. **Thinking.** The model's thinking, when the provider streams it (Together does for GLM-5.3, under a `reasoning` field), is joined into the reply (`Reply.reasoning`) but never stored in the database. A reply cut off at the output limit saves it to its step's span as `llm.reasoning.text` (the last 300,000 characters), to show what the model was stuck on; no other call saves it. It repeats resume content, like the prompts Phoenix already holds, so access to Phoenix as a whole is what keeps it private. A caller can also tag a call's span (`attributes` on `chatCompletion`, `traceAttributes` on `chatStructured`): the resume draft sets `resume.attempt` and `resume.fallback`.
 5. In a `finally`, `recordLlmCall` ([usage.ts](../src/lib/llm/usage.ts)) writes the row. It is fire and forget: it never throws and the model call never waits for it, so a slow or down database cannot break or stall a call. A lost record is logged as `[llm] usage record failed`.
 
-Outcome is one of `ok`, `error`, or `stopped` (the user skipped a background job and its request was cancelled; this is not counted as a failure).
+Outcome is one of `ok`, `error`, or `stopped` (the user skipped a background job and its request was cancelled; this is not counted as a failure). A stream that ends quietly because of the stop throws `Stopped` before its reply is read, so the trace says the call was stopped rather than that its JSON was broken.
 
 ### Context
 
@@ -57,20 +59,26 @@ An **action** is what the user did; a **step** is one kind of call inside it. Na
 | Action | Where it is opened | Steps it makes |
 | --- | --- | --- |
 | `add-job` | Queue: `processItem` | `extract-job`, `research-company` |
+| `refetch-job` | Server action (Refetch on a job) | `extract-job` |
 | `find-contacts` | Queue: `processSearch` | `extract-posting-people`, `find-people-web`, `rank-contacts` |
 | `index-resume` | Queue: `processIndex` | `parse-resume` (only for an unstructured upload) |
-| `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs` |
+| `read-career-source` | Queue: `processCareer` | `parse-resume`, `group-bullets`, `classify-cover-paragraphs`, `describe-facts` (statements and details for the facts the source changes) |
+| `compact-record` | Queue: `processCompactionJob` (Tidy the record) | `cluster-facts` (one per role and project with two or more items), `describe-facts` (one per 6 facts, asked once more for statements that fail their check) |
+| `generate-resume` | Queue: `processGenerationJob` | `match-requirements` (matching phase, `EXTRACTION_MODEL`: one call per 6 open requirements, all at the same time) and `read-requirements` (alongside them: what each requirement is and which are the job's core), `write-resume` (the draft, `WRITER_MODEL` at high effort with `WRITER_MAX_TOKENS`, retried once if unreadable; one cut off is written again at low effort with `WRITER_FALLBACK_MAX_TOKENS` and marked a fallback), `review-resume` (`REVIEW_MODEL`, 32,000 tokens, retried after rate limits; a cut-off review keeps its finished part), `revise-resume` (`WRITER_MODEL` with `REVISE_MAX_TOKENS`, when the review asks for a material edit or a code check found something; asked once). A stopped job is never retried |
 | `upload-resume` | `POST /api/resume/parse` | `parse-resume` |
-| `fill-job-details` | Server action | `extract-additional-details` |
+| `fill-job-details` | Server action | `extract-additional-details`, `extract-apply-notes` |
 | `research-company` | Server action | `research-company` |
 | `regroup-role` | Server action | `group-bullets` |
+
+The career record's steps (`group-bullets`, `classify-cover-paragraphs`, `cluster-facts`, `describe-facts`) all use `RECORD_MODEL` (DeepSeek V4.1 Flash by default), because a prompt cache is per model. `cluster-facts` and `describe-facts` send the record first as `prefix` (see Prompt caching).
 | `eval-resume`, `eval-jobs`, `snapshot-job` | Scripts | the step under test |
+| `eval-resume-writer` | Script `eval:writer` | `match-requirements`, `write-resume`, `review-resume`, `revise-resume`, with the case and config as trace metadata |
 
 A call made outside any context still works but is filed under action `unknown`: find them with `select * from llm_calls where action = 'unknown'`.
 
 ## The `llm_calls` table
 
-Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_calls.sql`.
+Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_calls.sql` (retries added in `0023_llm_retries_work_ms.sql`).
 
 | Column | Notes |
 | --- | --- |
@@ -83,9 +91,10 @@ Defined in [schema.ts](../src/lib/db/schema.ts), migration `drizzle/0020_llm_cal
 | `finish_reason` | `stop`, `length`, ... |
 | `prompt_tokens`, `cached_tokens`, `completion_tokens`, `reasoning_tokens` | Null when the provider reported no usage (rejected, stopped or broken request). Reasoning tokens are part of the completion count |
 | `cost_usd` | Null when the model has no known price or no usage was reported |
-| `duration_ms` | Includes the SDK's own retries |
+| `duration_ms` | The call's latency, including the SDK's own retries and the waits between them |
+| `retry_count`, `retry_wait_ms` | How often the SDK retried the request (rate limits, failures on the way) and the time between tries. Counted by the client's `fetch` ([attempts.ts](../src/lib/llm/attempts.ts)). Null on calls recorded before 0023. A retry the caller makes itself (the writer's second draft, the review after a rate-limit wait) is a separate row |
 | `trace_id` | The Phoenix trace, null when tracing is off |
-| `job_id`, `company_id`, `document_id`, `document_version_id`, `proposal_id`, `search_id`, `queue_item_id` | What it was for. **Not foreign keys**: history outlives what it points at |
+| `job_id`, `company_id`, `document_id`, `document_version_id`, `proposal_id`, `search_id`, `queue_item_id`, `compaction_id` | What it was for. **Not foreign keys**: history outlives what it points at |
 
 Indexes: `created_at`, and `(job_id, created_at)` where the job is set.
 
@@ -95,7 +104,17 @@ Indexes: `created_at`, and `(job_id, created_at)` where the job is set.
 
 A model with no entry is **unpriced**: its calls are recorded with a null cost and the page counts them and says they are left out of spend. Prices come from [ai-models-for-jso.md](ai-models-for-jso.md); check them against Together's pricing page before relying on the dollar figures.
 
-Checked with a live call: completion tokens are at least reasoning tokens (1933 vs 1177), so thinking is already billed inside completion and is not added again.
+Checked with live calls: completion tokens are reasoning tokens plus the visible answer (1933 vs 1177; on 2026-10-15, GLM-5.3 Flash 783 = 728 + about 55 and DeepSeek V4.1 Flash 744 = 674 + about 70), so thinking is already billed inside completion and is not added again.
+
+## Prompt caching
+
+`chatStructured` takes a `prefix`: text sent as the first system message, ahead of the step's instructions and its JSON schema. Providers cache the opening of a prompt, so calls after the first that start with the same bytes pay the cached input price for it (DeepSeek V4.1 Flash: $0.006 per million tokens instead of $0.30). The career steps pass `recordForPrompt(record)` ([prompt.ts](../src/lib/career/prompt.ts)): the record with one line per fact and its details, no ids, no export date, in the record's own order, so the same record gives the same bytes. Anything that changes per call goes in `user`, never in the prefix.
+
+Check that it works after a tidy: later calls of the run should show `cached_tokens` close to the prefix size.
+
+```sql
+select step, prompt_tokens, cached_tokens, cost_usd from llm_calls where action = 'compact-record' order by created_at;
+```
 
 ## Phoenix tracing
 
@@ -132,7 +151,7 @@ Queries are in [src/lib/usage/metrics.ts](../src/lib/usage/metrics.ts); componen
 
 ## Scripts
 
-`eval:resume`, `eval:jobs` and `snapshot:job` run through `runLlmScript` ([script.ts](../src/lib/llm/script.ts)), which turns tracing on, runs the script, and flushes the usage records and traces and closes the database before exiting (otherwise the last records are lost and the process hangs). Their calls are recorded under `eval-resume`, `eval-jobs` and `snapshot-job`, with the effort and run number as trace metadata. These are real spend, so they appear on the page.
+`eval:resume`, `eval:jobs`, `eval:writer` and `snapshot:job` run through `runLlmScript` ([script.ts](../src/lib/llm/script.ts)), which turns tracing on, runs the script, and flushes the usage records and traces and closes the database before exiting (otherwise the last records are lost and the process hangs). Their calls are recorded under `eval-resume`, `eval-jobs` and `snapshot-job`, with the effort and run number as trace metadata. These are real spend, so they appear on the page. `eval:writer` is the exception: it records in the test database (`TEST_DATABASE_URL`) unless given `--dev-db`, so its many runs stay off the dev usage page; its report has the numbers, read back from those rows by run id. See [generate-resume.md](generate-resume.md), "Evaluating the writer".
 
 ## Privacy
 
@@ -144,7 +163,7 @@ Queries are in [src/lib/usage/metrics.ts](../src/lib/usage/metrics.ts); componen
 ## Adding a model call
 
 1. Add the step to `LLM_STEPS` in `names.ts` and its label to `STEP_LABELS` (the compiler asks for it).
-2. Pass `step` in the options to `chatStructured` (it is required).
+2. Pass `step` in the options to `chatStructured` (it is required). If several calls share a long fixed text (the career record), pass it as `prefix` so it is cached.
 3. Make sure the code path runs inside `withLlmContext`. A new user action also needs an entry in `LLM_ACTIONS` and `ACTION_LABELS`.
 4. A new model needs an entry in `prices.ts`, or its calls show as unpriced.
 
@@ -166,4 +185,4 @@ Not checked live: stopping a background job mid-call (covered by a test with a m
 - The queue's timeout does not cancel the model call, so a late row can show a duration longer than the timeout.
 - An insert in flight can be lost if the dev server is killed.
 - Prices are from our own notes, not yet checked on Together's site.
-- Embeddings (local Ollama) are not recorded: they are not model calls on Together.
+- Embeddings (local Ollama) are not recorded: they are not model calls on Together. Nothing calls them at the moment.

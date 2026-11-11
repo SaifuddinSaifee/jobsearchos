@@ -10,6 +10,7 @@ import {
   removalKey,
 } from "./dedupe";
 import { formatDates, toSpan } from "./dates";
+import { technologiesIn } from "./facts";
 import type { ExtractedRole, SourceExtract } from "./extract";
 import { hash8, normalizeEmployer } from "./normalize";
 import type { BulletItem, EmployerItem, Proposal, RoleItem, SimpleSuggestion } from "./proposal-schema";
@@ -113,7 +114,7 @@ export function buildProposal(
       start: e.start,
       end: e.end,
       details: e.details,
-      suggestion: simple(matchEducation(record, e.institution, e.degree)),
+      suggestion: simple(matchEducation(record, e.institution, e.degree, e.end)),
       removedBefore: isRemoved(record, "education", removalKey.education(e.institution, e.degree)),
     })),
     certifications: extract.certifications.map((c) => ({
@@ -122,7 +123,7 @@ export function buildProposal(
       name: c.name,
       issuer: c.issuer,
       date: c.date,
-      suggestion: simple(matchCertification(record, c.name)),
+      suggestion: simple(matchCertification(record, c.name, c.issuer)),
       removedBefore: isRemoved(record, "certification", removalKey.certification(c.name)),
     })),
     // Until a paragraph has been classified it is left out (boilerplate), so nothing unread ever reaches the record.
@@ -142,6 +143,7 @@ export function buildProposal(
       suggestion: simple(matchAchievement(record, a.text)),
       removedBefore: isRemoved(record, "achievement", removalKey.achievement(a.text)),
     })),
+    facts: [],
   };
 
   assertTextFromSource(proposal, extract);
@@ -182,7 +184,9 @@ function roleItem(
     dateNote = `Your record has ${formatDates(role)}; this source says ${r.datesText}.`;
   }
 
-  const bullets: BulletItem[] = r.bullets.map((b) => ({
+  // A "Technologies:" line lists what the role used: it goes to the role, not into a fact.
+  const technologies = r.bullets.flatMap((b) => technologiesIn(b.text) ?? []);
+  const bullets: BulletItem[] = r.bullets.filter((b) => technologiesIn(b.text) === null).map((b) => ({
     key: key("b", b.blockId, b.text),
     blockId: b.blockId,
     text: b.text,
@@ -206,6 +210,7 @@ function roleItem(
     dateNote,
     removedBefore: isRemoved(record, "role", removalKey.role(r.company, r.title)),
     bullets,
+    technologies,
   };
 }
 

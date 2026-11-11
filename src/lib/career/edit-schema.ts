@@ -16,6 +16,8 @@ export const EditOpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("moveWording"), wordingId: id, toFactId: id.nullable() }),
   z.object({ op: z.literal("deleteWording"), wordingId: id }),
   z.object({ op: z.literal("addFact"), roleId: id, text, framingId: id.nullable() }),
+  z.object({ op: z.literal("editStatement"), factId: id, text }),
+  z.object({ op: z.literal("deleteDetail"), detailId: id }),
   z.object({ op: z.literal("mergeFacts"), factId: id, intoFactId: id }),
   z.object({ op: z.literal("deleteFact"), factId: id }),
   z.object({

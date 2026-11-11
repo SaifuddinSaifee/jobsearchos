@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db as defaultDb, type Db } from "@/lib/db";
 import { resumeIndexes, type QueueSteps } from "@/lib/db/schema";
 import { env } from "@/lib/env";
@@ -18,13 +18,28 @@ import {
 import type { SearchSteps } from "@/lib/outreach/types";
 import {
   claimNextProposal,
-  offerDocumentToRecord,
   processProposal,
   recoverInterruptedProposals,
   sweepStaleProposals,
   touchProposal,
 } from "@/lib/career/queue";
-import { careerProposals, documentVersions } from "@/lib/db/schema";
+import { applyIfAutomatic } from "@/lib/career/review";
+import {
+  claimNextCompaction,
+  failCompaction,
+  processCompaction,
+  sweepStaleCompactions,
+  touchCompaction,
+} from "@/lib/career/compaction";
+import {
+  claimNextGeneration,
+  getGenerationRow,
+  recoverInterruptedGenerations,
+  sweepStaleGenerations,
+  touchGeneration,
+} from "@/lib/resume-writer/service";
+import { processGeneration, type ProcessDeps } from "@/lib/resume-writer/process";
+import { careerProposals, resumeGenerations } from "@/lib/db/schema";
 import { backfillDocuments } from "@/lib/documents/backfill";
 import { withAbortSignal } from "@/lib/llm/abort";
 import { withLlmContext } from "@/lib/llm/context";
@@ -50,12 +65,25 @@ const ITEM_TIMEOUT_MS = 4 * 60_000;
 const SEARCH_TIMEOUT_MS = 3 * 60_000;
 /** Contact searches that may run at once, separate from job extractions so neither waits for the other. */
 const SEARCH_CONCURRENCY = 2;
-/** Resume files indexed at once. One, because embeddings run on the local Ollama model and a second would only slow both. */
+/** Resumes read into sections at once. Most need no model; an upload that does waits its turn. */
 const INDEX_CONCURRENCY = 1;
-/** Reading, structuring and embedding one resume. */
+/** Reading and structuring one resume. */
 const INDEX_TIMEOUT_MS = 5 * 60_000;
 /** Preparing one source for the career record: reading it, and (with a model) grouping its bullets. */
 const CAREER_TIMEOUT_MS = 5 * 60_000;
+/**
+ * Tidying the whole career record: one call per role and project to find repeats, and one per few facts to write their
+ * statements, so a long record makes a few dozen calls.
+ */
+const COMPACTION_TIMEOUT_MS = 20 * 60_000;
+/**
+ * One phase of writing a resume: matching the job against the record, or writing it. Writing is three calls: the draft
+ * at high effort (about 1 to 2 minutes), the review (about 20 seconds) and the revision (under a minute), measured at
+ * about 2 minutes. The limit leaves room for a draft that runs out of room and is asked again, and for rate-limit waits.
+ */
+const GENERATION_TIMEOUT_MS = 15 * 60_000;
+/** Resumes being matched or written at once, for different jobs. */
+const GENERATION_CONCURRENCY = 2;
 
 export type WorkerDeps = { pipeline: PipelineDeps; db: Db; save: typeof saveJob; run: typeof runPipeline };
 
@@ -148,21 +176,7 @@ export async function processSearch(
   }
 }
 
-/** Offers the document an index was for to the career record, which waited for the index to finish. Never raises. */
-async function offerAfterIndex(indexId: string, db: Db): Promise<void> {
-  try {
-    const [row] = await db
-      .select({ documentId: documentVersions.documentId })
-      .from(resumeIndexes)
-      .innerJoin(documentVersions, eq(documentVersions.id, resumeIndexes.documentVersionId))
-      .where(eq(resumeIndexes.id, indexId));
-    if (row) await offerDocumentToRecord(row.documentId, db);
-  } catch (err) {
-    console.error("[queue] could not offer a resume to the career record:", err instanceof Error ? err.message : err);
-  }
-}
-
-/** Indexes one claimed resume version; failures are recorded on its row by `processResumeIndex`. */
+/** Reads one claimed resume version into sections; failures are recorded on its row by `processResumeIndex`. */
 export async function processIndex(indexId: string, deps: { db?: Db; run?: typeof processResumeIndex; timeoutMs?: number } = {}): Promise<void> {
   const db = deps.db ?? defaultDb();
   try {
@@ -174,10 +188,9 @@ export async function processIndex(indexId: string, deps: { db?: Db; run?: typeo
   } catch (err) {
     await db
       .update(resumeIndexes)
-      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not index this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not read this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(resumeIndexes.id, indexId), eq(resumeIndexes.status, "running")));
   }
-  await offerAfterIndex(indexId, db);
 }
 
 /**
@@ -194,12 +207,54 @@ export async function processCareer(
   try {
     const work = withAbortSignal(signal, () => withLlmContext("read-career-source", { proposalId: id }, () => (deps.run ?? processProposal)(id, { db })));
     await withTimeout(untilAborted(work, signal), deps.timeoutMs ?? CAREER_TIMEOUT_MS, "Timed out after 5 minutes");
+    // Added with one click: apply it as suggested now, so the next one can start without a review in between.
+    if (!signal.aborted) await applyIfAutomatic(id, { db });
   } catch (err) {
     if (signal.aborted) return;
     await db
       .update(careerProposals)
       .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not prepare this source").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(careerProposals.id, id), eq(careerProposals.status, "running")));
+  }
+}
+
+/** Works out one claimed tidy of the career record; failures are recorded on its row. */
+export async function processCompactionJob(
+  id: string,
+  deps: { run?: typeof processCompaction; timeoutMs?: number } = {},
+): Promise<void> {
+  try {
+    const work = withLlmContext("compact-record", { compactionId: id }, () => (deps.run ?? processCompaction)(id));
+    await withTimeout(work, deps.timeoutMs ?? COMPACTION_TIMEOUT_MS, "Timed out after 20 minutes");
+  } catch (err) {
+    await failCompaction(id, err);
+  }
+}
+
+/**
+ * Runs one claimed phase of a resume generation (matching, or writing); failures are recorded on its row by
+ * `processGeneration`. `signal` stops it (when the user stops it): its model calls are cancelled and it returns at
+ * once, so the slot is free. The stop has already moved the row on, so nothing is recorded here.
+ */
+export async function processGenerationJob(
+  id: string,
+  deps: { db?: Db; run?: typeof processGeneration; timeoutMs?: number; signal?: AbortSignal; process?: ProcessDeps } = {},
+): Promise<void> {
+  const db = deps.db ?? defaultDb();
+  const signal = deps.signal ?? new AbortController().signal;
+  const row = await getGenerationRow(id, db);
+  if (!row) return;
+  try {
+    const work = withAbortSignal(signal, () =>
+      withLlmContext("generate-resume", { jobId: row.jobId }, () => (deps.run ?? processGeneration)(id, { ...deps.process, db })),
+    );
+    await withTimeout(untilAborted(work, signal), deps.timeoutMs ?? GENERATION_TIMEOUT_MS, "Timed out after 15 minutes");
+  } catch (err) {
+    if (signal.aborted) return;
+    await db
+      .update(resumeGenerations)
+      .set({ status: "failed", error: (err instanceof Error ? err.message : "Could not write this resume").slice(0, 500), finishedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(resumeGenerations.id, id), inArray(resumeGenerations.status, ["matching", "writing"])));
   }
 }
 
@@ -232,6 +287,10 @@ type WorkerState = {
   indexing: Set<string>;
   /** Career proposals being prepared, each with the controller that stops it. */
   career: Map<string, AbortController>;
+  /** Resumes being written, each with the controller that stops it. */
+  generating: Map<string, AbortController>;
+  /** The tidy of the career record being worked out, if any. */
+  compacting: Set<string>;
   /** Set once proposals cut off by the last shutdown have been put back. */
   recovered?: boolean;
   ticking: boolean;
@@ -242,11 +301,13 @@ const g = globalThis as unknown as { __queueWorker?: WorkerState };
 
 /** One shared state per server process, even if this module is bundled more than once. */
 function state(): WorkerState {
-  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), ticking: false, again: false, timer: null });
+  const s: WorkerState = (g.__queueWorker ??= { running: new Set(), searching: new Set(), indexing: new Set(), career: new Map(), generating: new Map(), compacting: new Set(), ticking: false, again: false, timer: null });
   // A dev server that hot-reloaded from older code may hold a state without the search slots.
   s.searching ??= new Set();
   s.indexing ??= new Set();
+  s.compacting ??= new Set();
   if (!(s.career instanceof Map)) s.career = new Map();
+  if (!(s.generating instanceof Map)) s.generating = new Map();
   // A worker already running before a hot reload has nothing to recover; only a fresh process does.
   s.recovered ??= s.timer !== null;
   return s;
@@ -315,7 +376,47 @@ async function tick(): Promise<void> {
           const n = await recoverInterruptedProposals();
           if (n > 0) console.log(`[queue] put back ${n} career source(s) interrupted by the last shutdown`);
         }
+        if (s.generating.size === 0) {
+          const n = await recoverInterruptedGenerations();
+          if (n > 0) console.log(`[queue] put back ${n} resume(s) interrupted by the last shutdown`);
+        }
+        if (s.compacting.size === 0) {
+          const n = await sweepStaleCompactions(undefined, { all: true });
+          if (n > 0) console.log("[queue] put back the record tidy interrupted by the last shutdown");
+        }
       }
+
+      await sweepStaleGenerations();
+      while (s.generating.size < GENERATION_CONCURRENCY) {
+        const claimed = await claimNextGeneration();
+        if (!claimed) break;
+        const controller = new AbortController();
+        s.generating.set(claimed.id, controller);
+        const beat = setInterval(() => void touchGeneration(claimed.id).catch(() => {}), HEARTBEAT_MS);
+        void processGenerationJob(claimed.id, { signal: controller.signal })
+          .catch((err) => console.error("[queue] unexpected resume failure", claimed.id, err))
+          .finally(() => {
+            clearInterval(beat);
+            s.generating.delete(claimed.id);
+            void tick();
+          });
+      }
+      await sweepStaleCompactions();
+      if (s.compacting.size === 0) {
+        const compactionId = await claimNextCompaction();
+        if (compactionId) {
+          s.compacting.add(compactionId);
+          const beat = setInterval(() => void touchCompaction(compactionId).catch(() => {}), HEARTBEAT_MS);
+          void processCompactionJob(compactionId)
+            .catch((err) => console.error("[queue] unexpected tidy failure", compactionId, err))
+            .finally(() => {
+              clearInterval(beat);
+              s.compacting.delete(compactionId);
+              void tick();
+            });
+        }
+      }
+
       await sweepStaleProposals();
       // One at a time: a proposal is only prepared once the one before it has been reviewed.
       if (s.career.size === 0) {
@@ -349,6 +450,14 @@ export function stopCareerProposal(id: string): void {
   state().career.get(id)?.abort();
 }
 
+/**
+ * Stops writing a resume in this process, freeing its slot. Call it after the row has been moved on (stopped), so the
+ * stopped work records nothing.
+ */
+export function stopGenerationJob(id: string): void {
+  state().generating.get(id)?.abort();
+}
+
 /** Starts the background worker once per server process (called from instrumentation.ts). */
 export function startQueueWorker(): void {
   const s = state();
@@ -356,7 +465,7 @@ export function startQueueWorker(): void {
   s.timer = setInterval(() => void tick(), TICK_MS);
   s.timer.unref?.();
 
-  // Library resumes that have no index yet (added while the worker was off) get indexed now.
+  // Library resumes that were never read (added while the worker was off) are read now.
   void backfillDocuments()
     .then(() => backfillResumeIndexes())
     .catch((err) => console.error("[queue] library backfill failed", err instanceof Error ? err.message : err));

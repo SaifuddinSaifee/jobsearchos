@@ -7,12 +7,16 @@ export const ACTION_LABELS: Record<RecordedAction, string> = {
   "research-company": "Research a company",
   "regroup-role": "Regroup a role",
   "add-job": "Add a job",
+  "refetch-job": "Refetch a job",
   "find-contacts": "Find contacts",
   "index-resume": "Read a resume",
   "read-career-source": "Read a career source",
   "eval-resume": "Resume eval (script)",
   "eval-jobs": "Job eval (script)",
+  "eval-resume-writer": "Resume writer eval (script)",
   "snapshot-job": "Job snapshot (script)",
+  "generate-resume": "Write a resume for a job",
+  "compact-record": "Tidy the career record",
   unknown: "Unattributed",
 };
 
@@ -20,13 +24,20 @@ export const STEP_LABELS: Record<LlmStep, string> = {
   "parse-resume": "Parse resume",
   "extract-job": "Extract job",
   "extract-additional-details": "Extract extra details",
+  "extract-apply-notes": "Extract how to apply",
   "research-company": "Summarize company",
   "extract-posting-people": "People named in the posting",
   "find-people-web": "People found on the web",
   "rank-contacts": "Rank contacts",
   "group-bullets": "Group bullets",
   "classify-cover-paragraphs": "Classify cover letter",
-  "generate-document": "Write a document",
+  "match-requirements": "Match job requirements",
+  "read-requirements": "Read what the job asks for",
+  "write-resume": "Write the resume",
+  "review-resume": "Review the resume",
+  "revise-resume": "Revise the resume after review",
+  "cluster-facts": "Find facts that repeat",
+  "describe-facts": "Write fact statements and details",
 };
 
 /** Rows keep working after a name is retired from the code, so unknown keys show as they are stored. */

@@ -64,6 +64,7 @@ const rowSelection = {
   appApplyUrl: applications.applicationUrl,
   technologies: jobs.technologies,
   hasNotes: sql<boolean>`coalesce(length(trim(${applications.notes})) > 0, false)`,
+  hasApplyNotes: sql<boolean>`coalesce(jsonb_array_length(${jobs.applyNotes}) > 0, false)`,
 };
 
 function toRow(r: Awaited<ReturnType<typeof selectRows>>[number]): JobRow {
@@ -89,6 +90,7 @@ function toRow(r: Awaited<ReturnType<typeof selectRows>>[number]): JobRow {
     applyUrl: safeHref(r.appApplyUrl) ?? safeHref(r.jobApplyUrl),
     technologies: r.technologies,
     hasNotes: r.hasNotes,
+    hasApplyNotes: r.hasApplyNotes,
   };
 }
 
@@ -116,6 +118,7 @@ export async function getJobDetail(jobId: string, db: Db = defaultDb()): Promise
       responsibilities: jobs.responsibilities,
       requirements: jobs.requirements,
       additionalDetails: jobs.additionalDetails,
+      applyNotes: jobs.applyNotes,
       aboutCompany: jobs.aboutCompany,
       companyId: jobs.companyId,
     })
@@ -149,6 +152,7 @@ export async function getJobDetail(jobId: string, db: Db = defaultDb()): Promise
     responsibilities: extra.responsibilities,
     requirements: extra.requirements,
     additionalDetails: extra.additionalDetails,
+    applyNotes: extra.applyNotes,
     keywords: keywords.map((k) => k.keyword),
     timeline: events.map((e) => ({
       id: e.id,

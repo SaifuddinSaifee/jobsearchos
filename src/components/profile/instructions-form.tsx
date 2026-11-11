@@ -7,11 +7,13 @@ import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { saveInstructionsAction } from "@/app/(app)/profile/actions";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   GenerationInstructionsSchema,
+  reviewsRequirements,
   TONES,
   type GenerationInstructions,
 } from "@/lib/profile/schema";
@@ -22,7 +24,7 @@ export function InstructionsForm({ initial }: { initial: GenerationInstructions 
   const [pending, startTransition] = useTransition();
   const { control, register, handleSubmit } = useForm<GenerationInstructions>({
     resolver: zodResolver(GenerationInstructionsSchema),
-    defaultValues: initial,
+    defaultValues: { ...initial, reviewRequirements: reviewsRequirements(initial) },
   });
   const limits = useFieldArray({ control, name: "sectionLimits" });
 
@@ -65,6 +67,25 @@ export function InstructionsForm({ initial }: { initial: GenerationInstructions 
                 </Button>
               ))}
             </div>
+          )}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Writing a resume</Label>
+        <Controller
+          control={control}
+          name="reviewRequirements"
+          render={({ field }) => (
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <Checkbox className="mt-0.5" checked={field.value !== false} onCheckedChange={(c) => field.onChange(c === true)} />
+              <span>
+                Show what the job asks for before writing a resume
+                <span className="block text-xs text-muted-foreground">
+                  You see how your career record matches each requirement, and can say what you have that it does not show. Turn it off to go straight to the resume.
+                </span>
+              </span>
+            </label>
           )}
         />
       </div>

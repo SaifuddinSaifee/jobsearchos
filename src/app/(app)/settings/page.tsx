@@ -29,7 +29,7 @@ async function checks(): Promise<Check[]> {
   try {
     const e = env();
     const available = new Set((await together().models.list()).map((m) => m.id));
-    const missing = [e.WRITER_MODEL, e.EXTRACTION_MODEL, e.FAST_MODEL].filter(
+    const missing = [e.WRITER_MODEL, e.REVIEW_MODEL, e.EXTRACTION_MODEL, e.FAST_MODEL].filter(
       (id) => !available.has(id),
     );
     out.push({
@@ -107,6 +107,7 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-1 text-sm">
           <div>Writing (resume, cover letter, cold email): {e.WRITER_MODEL}</div>
+          <div>Reviewing what was written: {e.REVIEW_MODEL}</div>
           <div>Extraction, scoring, classification: {e.EXTRACTION_MODEL}</div>
           <div>Bulk triage: {e.FAST_MODEL}</div>
           <div>Embeddings (Stage 5, local via Ollama): {e.EMBEDDING_MODEL}</div>

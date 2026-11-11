@@ -4,6 +4,62 @@ How the Model Context Protocol (MCP) can solve problems named in [PLAN.md](PLAN.
 
 ---
 
+## Shipped first: "Saved to JSOS" from the Daily Job Shortlist
+
+The first piece built is a narrow slice of features 1 and 18: a remote MCP endpoint with one tool, used by the Daily Job Shortlist.
+
+- **The shortlist** is a claude.ai artifact page over the artifact's own database. A scheduled cloud task fills it each morning at 8:26 IST.
+- **The click.** The page's **Saved to JSOS** button calls the `save_job` tool through the page's `mcp` capability. claude.ai's servers call the connector, not the browser.
+- **The endpoint** is `src/app/api/mcp/[token]/route.ts`: Streamable HTTP, stateless, with JSON responses. It is on only when `MCP_SECRET` is set; the secret is the last path segment, and every other path is a 404.
+- **The tunnel** (Cloudflare named tunnel or Tailscale Funnel) exposes only `/api/mcp/`. Setup is in the README, under "Setup: Daily Job Shortlist connector".
+- **The tool** (`src/lib/mcp/server.ts`, logic in `src/lib/shortlist/save.ts`) only adds queue items. It never reads the profile, deletes anything or changes a status.
+- **Discover** lists every job sent this way, from the `discovered_jobs` table (`src/lib/discover/`), with source "Claude.ai" and where the job is now.
+- **Private addresses.** Every fetch the app makes is checked to be on the public internet, redirects and Playwright requests included (`src/lib/jobs/fetch/guard.ts`). A planted link cannot make the worker fetch the app or the local network.
+- **No model calls of its own.** The extraction that follows runs in the queue worker under the `add-job` action, so it is logged as before.
+
+### Contract for the page
+
+**Connector:** `Job Search OS`, the display name in claude.ai, which must match exactly. **Tool:** `save_job`.
+
+**Input:** only `url` is required. Strings are trimmed and length-capped, and an invalid input fails the call.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `url` | string | The posting URL, http or https |
+| `title`, `company`, `location`, `mode`, `pay`, `posted`, `track` | string | Copied from the shortlist row |
+| `fit` | integer 0 to 100 | |
+| `why`, `leadWith`, `applyHow` | string | Become the application's notes |
+| `shortlistId` | string | The shortlist row id |
+
+**Result** (`result.payload`, the same as `structuredContent`):
+
+```ts
+{ state: "queued", queueId: string, appUrl: string }    // added now, or already waiting in the queue
+{ state: "in_jobs", jobId: string, appUrl: string }     // already saved in Jobs
+{ state: "not_added", reason: string, appUrl: string }  // blocked site, private address, queue full
+```
+
+- `appUrl` uses `APP_URL` (`http://localhost:3000` by default), so it opens only on the laptop.
+- The tool is idempotent. The same URL (tracking parameters ignored) returns the same `queueId` or `jobId` and never adds a second item.
+
+**Errors on the page:** retry only from a button, never automatically. `server_unavailable` and `upstream_error` do not prove the save failed.
+
+| Code | What the page says |
+| --- | --- |
+| `server_not_connected`, `server_not_found` | Add the Job Search OS connector in claude.ai Settings, Connectors |
+| `needs_reauth` | Reconnect Job Search OS in Settings, Connectors |
+| `selection_required` | Two connectors are called Job Search OS; pick one |
+| `server_unavailable`, `upstream_error` | JSOS didn't answer, so it may or may not have saved. Check that the app and the tunnel are running, then send again |
+| `not_in_manifest`, `approval_required` | Allow Job Search OS for this page, then send again |
+| `tool_error` | The tool's message |
+| `cancelled`, `blocked_by_policy`, anything else | Default branch |
+
+**Backstop (optional):** a scheduled task keeps the connectors it was created with, so the morning task has to be recreated with Job Search OS attached. It can then call `save_job` for rows that are `saved` with no `jsos` field, or with a failed one. That only helps when the laptop is on at 8:26.
+
+**Later:** host the endpoint somewhere that is always on, so saving works with the laptop off and `appUrl` opens on a phone. Hosting the app means it needs real sign-in first; today it has none.
+
+---
+
 ## Background
 
 **MCP** is an open standard for connecting AI applications to tools and data. A **host** (Claude Code, Claude Desktop, Claude mobile, Cursor) runs one **client** per **server**. A server exposes three kinds of things:

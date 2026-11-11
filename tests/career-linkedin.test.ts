@@ -6,13 +6,14 @@ vi.mock("@/lib/llm/openai", () => ({ chatClient: () => ({}) }));
 
 import { applyReviewedProposal, dismissProposal, getOpenReview } from "@/lib/career/review";
 import { addLinkedInSource, cleanLinkedInText, LinkedInError } from "@/lib/career/linkedin";
-import { claimNextProposal, enqueueProfileSource, offerProfileToRecord, processProposal, startBuild } from "@/lib/career/queue";
+import { claimNextProposal, enqueueProfileSource, offerProfileToRecord, processProposal } from "@/lib/career/queue";
 import { currentRecord, saveRecordVersion } from "@/lib/career/service";
 import { emptyRecord } from "@/lib/career/schema";
 import { careerProposals, careerSources } from "@/lib/db/schema";
 import { saveVersion as saveProfile } from "@/lib/profile/service";
 import { emptyProfile } from "@/lib/profile/schema";
 import { counter, profileWith } from "./career-helpers";
+import { queueEverything } from "./career-queue-helpers";
 import { resetDb, testDb } from "./helpers";
 
 const db = testDb();
@@ -178,7 +179,7 @@ describe("adding a LinkedIn print", () => {
   it("is queued after the Profile", async () => {
     await saveProfile({ profile: { ...emptyProfile(), achievements: ["Won an award"] } }, db);
     await addLinkedInSource(PRINT, db);
-    await startBuild(db);
+    await queueEverything(db);
     const order: string[] = [];
     for (;;) {
       const id = await claimNextProposal(db);

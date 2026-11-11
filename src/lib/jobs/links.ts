@@ -9,6 +9,16 @@ export function safeHref(url: string | null | undefined): string | null {
   }
 }
 
+const EMAIL = /^[^\s@<>()"]+@[^\s@<>()"]+\.[a-z]{2,}$/i;
+
+/** Where an apply note's link goes: a mailto for an email address, an http(s) URL, or nowhere. */
+export function applyNoteHref(link: string): { href: string; email: boolean } | null {
+  const t = link.trim().replace(/^mailto:/i, "");
+  if (EMAIL.test(t)) return { href: `mailto:${t}`, email: true };
+  const href = safeHref(t);
+  return href ? { href, email: false } : null;
+}
+
 const SOURCES: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",

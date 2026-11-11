@@ -283,6 +283,16 @@ describe("fetchJob orchestration", () => {
     expect(posting.method).toBe("html");
   });
 
+  it("stops at the ATS API's not found when asked to, instead of reading a page of other jobs", async () => {
+    const html = `<html><body><main><p>${LONG.repeat(3)}</p></main></body></html>`;
+    await expect(
+      fetchJob("https://boards.greenhouse.io/acme/jobs/1", {
+        goneIsFinal: true,
+        fetcher: async (u) => (u.includes("boards-api") ? new Response("", { status: 404 }) : new Response(html)),
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
   it("renders with the browser when the page is an empty SPA shell", async () => {
     const posting = await fetchJob("https://acme.com/careers/1", {
       fetcher: async () => new Response("<html><body><div id=root></div></body></html>"),

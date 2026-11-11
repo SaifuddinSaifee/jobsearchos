@@ -8,25 +8,36 @@ export const LLM_ACTIONS = [
   "research-company",
   "regroup-role",
   "add-job",
+  "refetch-job",
   "find-contacts",
   "index-resume",
   "read-career-source",
   "eval-resume",
   "eval-jobs",
+  "eval-resume-writer",
   "snapshot-job",
+  "generate-resume",
+  "compact-record",
 ] as const;
 
 export const LLM_STEPS = [
   "parse-resume",
   "extract-job",
   "extract-additional-details",
+  "extract-apply-notes",
   "research-company",
   "extract-posting-people",
   "find-people-web",
   "rank-contacts",
   "group-bullets",
   "classify-cover-paragraphs",
-  "generate-document",
+  "match-requirements",
+  "read-requirements",
+  "write-resume",
+  "review-resume",
+  "revise-resume",
+  "cluster-facts",
+  "describe-facts",
 ] as const;
 
 export type LlmAction = (typeof LLM_ACTIONS)[number];
@@ -47,4 +58,5 @@ export type LlmIds = {
   proposalId?: string;
   searchId?: string;
   queueItemId?: string;
+  compactionId?: string;
 };

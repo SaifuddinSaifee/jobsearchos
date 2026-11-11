@@ -11,6 +11,7 @@ import {
 import { newId } from "@/lib/documents/build";
 import { applyEdit } from "./edit";
 import type { EditOp } from "./edit-schema";
+import { upgradeRecord } from "./upgrade";
 import {
   CareerRecordSchema,
   emptyRecord,
@@ -47,8 +48,11 @@ export async function getLatestRecord(db: DbOrTx = defaultDb()): Promise<CareerR
     .from(careerRecordVersions)
     .orderBy(desc(careerRecordVersions.version))
     .limit(1);
-  return row ?? null;
+  return row ? inCurrentShape(row) : null;
 }
+
+/** A version row with its record read in the current schema, whatever schema it was saved with. */
+const inCurrentShape = (row: CareerRecordVersionRow): CareerRecordVersionRow => ({ ...row, record: upgradeRecord(row.record, row.recordSchema) });
 
 /** The latest record, or an empty one when nothing has been merged yet. */
 export async function currentRecord(db: DbOrTx = defaultDb()): Promise<{ version: number; record: CareerRecord }> {
@@ -71,7 +75,7 @@ export async function listRecordVersions(db: DbOrTx = defaultDb()) {
 
 export async function getRecordVersion(id: string, db: DbOrTx = defaultDb()) {
   const [row] = await db.select().from(careerRecordVersions).where(eq(careerRecordVersions.id, id));
-  return row ?? null;
+  return row ? inCurrentShape(row) : null;
 }
 
 /**

@@ -35,6 +35,7 @@ export function isNothingNew(proposal: Proposal, record: CareerRecord): boolean 
       const merged = mergeDates({ start: role.start, end: role.end, current: role.current }, { start: r.start, end: r.end, current: r.current });
       if (merged.dates.start !== role.start || merged.dates.end !== role.end || merged.dates.current !== role.current || merged.conflict) return false;
       if (!role.location && r.location) return false;
+      if (r.technologies.some((t) => !role.technologies.some((x) => normalizeText(x) === normalizeText(t)))) return false;
 
       const framingId = r.suggestion.framingId;
       const framing = role.framings.find((f) => f.id === framingId);
