@@ -23,7 +23,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const out = await exportDocument(id, { format: body.data.format, versionId: body.data.versionId });
     if (out.versionCreated) await enqueueAfterCreate(id);
-    const name = out.filename.replace(/["\\\r\n]/g, "_");
+    // Header values must be Latin-1, and a title can hold an em dash or other characters outside it. The plain
+    // `filename` is an ASCII fallback; the real name goes in `filename*` (percent-encoded UTF-8), which the app reads first.
+    const name = out.filename.replace(/[^\x20-\x7e]|["\\]/g, "_");
     return new Response(new Uint8Array(out.bytes), {
       headers: {
         "Content-Type": out.mime,

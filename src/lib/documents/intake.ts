@@ -84,7 +84,7 @@ export async function createFromUpload(
     if (dup) return { ok: false, duplicateOf: dup };
   }
 
-  const extracted = await extractForDocument(input.bytes, input.name, input.mime);
+  const extracted = await extractForDocument(input.bytes, input.name, input.mime, { markdown: true });
   const { content } = contentFromText(input.kind, extracted.text, extracted.headings);
 
   const { document } = await createDocument(

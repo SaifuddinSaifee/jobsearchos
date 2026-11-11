@@ -23,16 +23,16 @@ type Mode = "upload" | "paste" | "blank";
 
 const MODE_LABELS: Record<Mode, string> = { upload: "Upload a file", paste: "Paste text", blank: "Start blank" };
 
-const ACCEPT = ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const ACCEPT = ".pdf,.docx,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown";
 
 /** The file name without its extension, used as the title of an upload. */
 const baseName = (name: string) => name.replace(/\.[^.]+$/, "");
 
 const fileSize = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`);
 
-const fileType = (name: string) => (/\.docx$/i.test(name) ? "DOCX" : /\.pdf$/i.test(name) ? "PDF" : "File");
+const fileType = (name: string) => (/\.docx$/i.test(name) ? "DOCX" : /\.pdf$/i.test(name) ? "PDF" : /\.(md|markdown)$/i.test(name) ? "Markdown" : "File");
 
-/** Adds a document: from a PDF or DOCX, from pasted text, or empty (a resume can also start as a copy of the base). */
+/** Adds a document: from a PDF, DOCX or Markdown file, from pasted text, or empty (a resume can also start as a copy of the base). */
 export function AddDocument({ kind, jobs, hasBase, onDone }: { kind: DocumentKind; jobs: JobChoice[]; hasBase: boolean; onDone: () => void }) {
   const router = useRouter();
   const queryClient = useQueryClient();

@@ -158,8 +158,9 @@ The sidebar has: **Dashboard, Jobs, New Application, Quick links, Companies, Lib
   posting was taken down), the app says so and offers **Use saved text** instead; a job-board posting that is gone is
   never replaced by whatever page the link now shows. **Undo** puts the previous details back.
 - **Copy or download a job as Markdown**, including the company profile, for use in any AI tool.
-- **Ask Claude:** opens a claude.ai chat with the job already loaded and a prompt to tailor your resume and cover letter
-  and point out gaps.
+- **Ask Claude:** copies the full prompt (the job, its company profile and the verbatim posting) to the clipboard, then
+  opens a claude.ai chat with the job already loaded and a prompt to tailor your resume and cover letter and point out
+  gaps. The link can only carry a shortened prompt, so paste over it for the full one.
 - Keyboard shortcuts: `/` search, `j`/`k` move, `Enter` open, `x` select, `Shift+A` mark Applied, `Esc` close.
 - A **Documents** section in the side panel lists every resume and cover letter linked to the job, each opening in the
   editor. The row menu has **Resume for this job**.
@@ -338,7 +339,7 @@ Resumes, cover letters and emails, kept as text you can read and search, not as 
 
 - Four tabs: **Resumes, Cover letters, Emails, Career record** (see Career record, below). Each document shows what it is for (job and company), its date, where it
   came from, how many versions it has, and (for an uploaded resume) whether it is still being read into sections.
-- **Add** a document three ways: upload a PDF or DOCX, paste text, or start blank (a resume can start as a copy of your base
+- **Add** a document three ways: upload a PDF, DOCX or Markdown file, paste text, or start blank (a resume can start as a copy of your base
   resume). Link it to a job, and add the role, date and the job description it was written for. A chosen file shows as a
   card (name, type, size, "Ready to add") with Replace and Remove. The title fills in with the file name, and you can
   change it. The job stays at "No job" unless you pick one.

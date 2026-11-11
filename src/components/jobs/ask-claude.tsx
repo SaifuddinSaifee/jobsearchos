@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+import { copyText } from "@/lib/clipboard";
 import { jobToMarkdown, type MarkdownJob } from "@/lib/jobs/markdown";
 
 const INTRO = `I'm applying for the job below. Read the job description carefully. If it lists a job posting link, open it to read the full original posting.
@@ -30,7 +32,21 @@ export function claudePrompt(job: MarkdownJob): string {
   return `${p}\n\n(Job description truncated.)`;
 }
 
-/** Opens a new claude.ai chat with this job description as the prompt; the user adds their resume there. */
-export function openInClaude(job: MarkdownJob) {
+/** The whole prompt, uncut: the job with its company profile and the verbatim posting. Only the clipboard has room for it. */
+export function fullClaudePrompt(job: MarkdownJob): string {
+  return INTRO + jobToMarkdown(job);
+}
+
+/**
+ * Copies the full prompt to the clipboard, then opens a new claude.ai chat with the shorter URL prompt; the user can
+ * paste the full one over it and adds their resume there. Copies first, while the page still has focus.
+ */
+export async function openInClaude(job: MarkdownJob) {
+  try {
+    await copyText(fullClaudePrompt(job));
+    toast.success("Copied the full prompt to the clipboard");
+  } catch {
+    toast.error("Could not copy the prompt; opening Claude anyway");
+  }
   window.open(`https://claude.ai/new?q=${encodeURIComponent(claudePrompt(job))}`, "_blank", "noopener,noreferrer");
 }
